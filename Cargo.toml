@@ -1,0 +1,28 @@
+[package]
+name = "yaks"
+version = "0.0.1"
+edition = "2024"
+description = "Filesystem-native task tracker (Rust port — Phase 0 spike)"
+license = "Apache-2.0"
+repository = "https://github.com/joelgwebber/yaks-rs"
+default-run = "yaks"
+
+[[bin]]
+name = "yaks"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+# Planned, not yet wired — see README roadmap and the yak-2219 research arc:
+#   ratatui + crossterm   TUI                                  (yak-ef0f)
+#   edtui                 embedded modal editor                (yak-6819)
+#   rkyv                  zero-copy derived index              (yak-1622)
+#   avt                   virtual-terminal oracle for tests    (yak-199b)
+#   notify, arboard, tempfile, fs4, insta, assert_cmd         (yak-90b8)
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
