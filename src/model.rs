@@ -1,9 +1,9 @@
-//! Core task model for the yaks-rs Phase 0 spike.
+//! Core task model for yaks-rs.
 //!
 //! Deliberately mirrors the Python `yaklib.model` shapes closely enough to
-//! read the *same* `.yaks/` files (interop is the whole point of Phase 0).
-//! Status is implicit from the directory a task file lives in; parentage is a
-//! frontmatter field (flat, stable ids).
+//! read and write the *same* `.yaks/` files. Status is implicit from the
+//! directory the file lives in; parentage is a frontmatter field (flat,
+//! stable ids).
 
 /// Lifecycle state, encoded by which directory a task file lives in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,13 +42,19 @@ impl Status {
 }
 
 /// A single task, parsed from a `.md` file with YAML frontmatter.
-#[derive(Debug, Clone)]
+///
+/// Field set matches the Python task format exactly. `created`/`updated` are
+/// kept as opaque ISO-8601 strings so a read/write round-trip preserves them
+/// byte-for-byte (we never reformat timestamps we did not author).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
     pub id: String,
     pub title: String,
     pub kind: String,
     pub priority: u8,
     pub status: Status,
+    pub created: Option<String>,
+    pub updated: Option<String>,
     pub parent: Option<String>,
     pub labels: Vec<String>,
     pub depends_on: Vec<String>,

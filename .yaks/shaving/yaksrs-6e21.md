@@ -4,7 +4,7 @@ title: 'Phase 1: full CLI write path + parity'
 type: task
 priority: 2
 created: '2026-08-20T03:25:50Z'
-updated: '2026-08-20T03:25:50Z'
+updated: '2026-08-20T03:30:58Z'
 labels:
 - rust
 - phase1

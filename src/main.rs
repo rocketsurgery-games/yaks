@@ -1,9 +1,8 @@
-//! yaks-rs — Phase 0 spike (yak-94e7).
+//! yaks-rs — a filesystem-native task tracker (Rust port).
 //!
-//! A single static binary that reads the SAME `.yaks/` files as the Python
-//! `yaks` tool. Only read-only commands exist so far: `list`, `show`, `next`.
-//! The point of this spike is to prove fs interop + parsing and to measure
-//! cold-start latency against the Python baseline (~45 ms per invocation).
+//! Reads and writes the SAME `.yaks/` files as the Python `yaks` tool.
+//! Read-only commands so far: `list`, `show`, `next`. The write path
+//! (create/update/status-moves) is being ported under Phase 1 (yaksrs-6e21).
 
 mod model;
 mod store;
@@ -16,7 +15,7 @@ use std::env;
 use model::{Status, Task};
 
 #[derive(Parser)]
-#[command(name = "yaks", version, about = "Filesystem-native task tracker (Rust spike)")]
+#[command(name = "yaks", version, about = "Filesystem-native task tracker (Rust)")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -91,6 +90,12 @@ fn print_task(t: &Task) {
     println!("status:   {:?}", t.status);
     println!("type:     {}", t.kind);
     println!("priority: {}", t.priority);
+    if let Some(c) = &t.created {
+        println!("created:  {c}");
+    }
+    if let Some(u) = &t.updated {
+        println!("updated:  {u}");
+    }
     if let Some(p) = &t.parent {
         println!("parent:   {p}");
     }
