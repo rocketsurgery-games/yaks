@@ -1,0 +1,22 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"tangled\", \"--json\"])"
+---
+[
+  {
+    "status": "hairy",
+    "id": "fix-0004",
+    "title": "Delta child",
+    "type": "feature",
+    "priority": 2,
+    "created": "2026-01-04T00:00:00Z",
+    "updated": "2026-01-04T00:00:00Z",
+    "parent": "fix-0003",
+    "depends_on": [
+      "fix-0002"
+    ],
+    "unresolved_deps": [
+      "fix-0002"
+    ]
+  }
+]

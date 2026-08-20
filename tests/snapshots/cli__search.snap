@@ -1,0 +1,5 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"search\", \"child\"])"
+---
+  [H] fix-0004  p2 feature  Delta child (deps: fix-0002)

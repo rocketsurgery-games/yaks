@@ -1,0 +1,13 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"stats\"])"
+---
+Total: 5  Hairy: 3  Shaving: 1  Shorn: 1
+By type:
+  bug: 1
+  feature: 2
+  task: 2
+By priority:
+  p1: 1
+  p2: 2
+  p3: 2

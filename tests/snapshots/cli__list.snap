@@ -1,0 +1,9 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"list\"])"
+---
+  [H] fix-0001  p2 task     Alpha task [core]
+  [H] fix-0004  p2 feature  Delta child (deps: fix-0002)
+  [H] fix-0005  p3 task     Epsilon ready (deps: fix-0003)
+  [S] fix-0002  p1 feature  Beta: colon in title [core,ui] (deps: fix-0001)
+  [N] fix-0003  p3 bug      Gamma done

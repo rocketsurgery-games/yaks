@@ -1,0 +1,9 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"rollup\"])"
+---
+acme/widgets#9  (github)  https://github.com/acme/widgets/issues/9
+  [N] fix-0003  p3 bug      Gamma done
+  [H] fix-0004  p2 feature  Delta child (deps: fix-0002)  (via fix-0003)
+
+3 yaks in scope with no external source (omitted).

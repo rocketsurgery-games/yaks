@@ -1,0 +1,7 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"next\"])"
+---
+Ready to shave (all dependencies met):
+  fix-0001  p2 task     Alpha task
+  fix-0005  p3 task     Epsilon ready

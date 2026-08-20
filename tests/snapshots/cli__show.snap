@@ -1,0 +1,21 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"show\", \"fix-0003\"])"
+---
+id:       fix-0003
+title:    Gamma done
+status:   Shorn
+type:     bug
+priority: 3
+created:  2026-01-03T00:00:00Z
+updated:  2026-01-03T00:00:00Z
+source:   https://github.com/acme/widgets/issues/9
+
+Wrapped up the gamma work.
+
+---
+▸ 2026-01-03T12:00:00Z
+Verified in staging.
+
+Children:
+  [H] fix-0004  Delta child

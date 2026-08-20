@@ -1,0 +1,27 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"rollup\", \"--json\"])"
+---
+[
+  {
+    "source": "https://github.com/acme/widgets/issues/9",
+    "tracker": "github",
+    "key": "acme/widgets#9",
+    "yaks": [
+      {
+        "id": "fix-0003",
+        "status": "shorn",
+        "title": "Gamma done",
+        "inherited": false,
+        "inherited_from": null
+      },
+      {
+        "id": "fix-0004",
+        "status": "hairy",
+        "title": "Delta child",
+        "inherited": true,
+        "inherited_from": "fix-0003"
+      }
+    ]
+  }
+]

@@ -1,0 +1,70 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"list\", \"--json\"])"
+---
+[
+  {
+    "status": "hairy",
+    "id": "fix-0001",
+    "title": "Alpha task",
+    "type": "task",
+    "priority": 2,
+    "created": "2026-01-01T00:00:00Z",
+    "updated": "2026-01-01T00:00:00Z",
+    "labels": [
+      "core"
+    ]
+  },
+  {
+    "status": "hairy",
+    "id": "fix-0004",
+    "title": "Delta child",
+    "type": "feature",
+    "priority": 2,
+    "created": "2026-01-04T00:00:00Z",
+    "updated": "2026-01-04T00:00:00Z",
+    "parent": "fix-0003",
+    "depends_on": [
+      "fix-0002"
+    ]
+  },
+  {
+    "status": "hairy",
+    "id": "fix-0005",
+    "title": "Epsilon ready",
+    "type": "task",
+    "priority": 3,
+    "created": "2026-01-05T00:00:00Z",
+    "updated": "2026-01-05T00:00:00Z",
+    "depends_on": [
+      "fix-0003"
+    ]
+  },
+  {
+    "status": "shaving",
+    "id": "fix-0002",
+    "title": "Beta: colon in title",
+    "type": "feature",
+    "priority": 1,
+    "created": "2026-01-02T00:00:00Z",
+    "updated": "2026-01-02T00:00:00Z",
+    "depends_on": [
+      "fix-0001"
+    ],
+    "labels": [
+      "core",
+      "ui"
+    ]
+  },
+  {
+    "status": "shorn",
+    "id": "fix-0003",
+    "title": "Gamma done",
+    "type": "bug",
+    "priority": 3,
+    "created": "2026-01-03T00:00:00Z",
+    "updated": "2026-01-03T00:00:00Z",
+    "source": "https://github.com/acme/widgets/issues/9",
+    "description": "Wrapped up the gamma work.\n\n---\n▸ 2026-01-03T12:00:00Z\nVerified in staging."
+  }
+]

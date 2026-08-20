@@ -1,0 +1,20 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"stats\", \"--json\"])"
+---
+{
+  "total": 5,
+  "hairy": 3,
+  "shaving": 1,
+  "shorn": 1,
+  "by_type": {
+    "bug": 1,
+    "feature": 2,
+    "task": 2
+  },
+  "by_priority": {
+    "1": 1,
+    "2": 2,
+    "3": 2
+  }
+}

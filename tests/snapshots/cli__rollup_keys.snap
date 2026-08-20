@@ -1,0 +1,5 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"rollup\", \"--keys\"])"
+---
+acme/widgets#9

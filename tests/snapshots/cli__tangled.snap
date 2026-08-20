@@ -1,0 +1,6 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"tangled\"])"
+---
+Tangled yaks:
+  fix-0004  Delta child  (waiting on: fix-0002)

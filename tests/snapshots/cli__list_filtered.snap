@@ -1,0 +1,6 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"list\", \"--type\", \"feature\", \"--priority\", \"1\", \"--priority\", \"2\"])"
+---
+  [H] fix-0004  p2 feature  Delta child (deps: fix-0002)
+  [S] fix-0002  p1 feature  Beta: colon in title [core,ui] (deps: fix-0001)

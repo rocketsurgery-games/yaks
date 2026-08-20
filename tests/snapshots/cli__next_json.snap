@@ -1,0 +1,30 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"next\", \"--json\"])"
+---
+[
+  {
+    "status": "hairy",
+    "id": "fix-0001",
+    "title": "Alpha task",
+    "type": "task",
+    "priority": 2,
+    "created": "2026-01-01T00:00:00Z",
+    "updated": "2026-01-01T00:00:00Z",
+    "labels": [
+      "core"
+    ]
+  },
+  {
+    "status": "hairy",
+    "id": "fix-0005",
+    "title": "Epsilon ready",
+    "type": "task",
+    "priority": 3,
+    "created": "2026-01-05T00:00:00Z",
+    "updated": "2026-01-05T00:00:00Z",
+    "depends_on": [
+      "fix-0003"
+    ]
+  }
+]

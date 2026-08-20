@@ -1,0 +1,22 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"show\", \"fix-0003\", \"--json\"])"
+---
+{
+  "status": "shorn",
+  "id": "fix-0003",
+  "title": "Gamma done",
+  "type": "bug",
+  "priority": 3,
+  "created": "2026-01-03T00:00:00Z",
+  "updated": "2026-01-03T00:00:00Z",
+  "source": "https://github.com/acme/widgets/issues/9",
+  "description": "Wrapped up the gamma work.\n\n---\n▸ 2026-01-03T12:00:00Z\nVerified in staging.",
+  "children": [
+    {
+      "id": "fix-0004",
+      "status": "hairy",
+      "title": "Delta child"
+    }
+  ]
+}

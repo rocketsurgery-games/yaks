@@ -1,10 +1,11 @@
 //! yaks-rs — a filesystem-native task tracker (Rust port).
 //!
 //! Reads and writes the SAME `.yaks/` files as the Python `yaks` tool.
-//! Commands: list, show, next, tangled, search, stats, create, update, and
-//! the status moves (shave/shorn/regrow/slaughter/revive).
+//! All read commands support `--json` (shapes are yaks-rs's own, pinned by
+//! golden snapshot tests).
 
 mod filter;
+mod json;
 mod model;
 mod rollup;
 mod store;
@@ -46,6 +47,17 @@ struct FilterFlags {
     parent_of: Option<String>,
 }
 
+#[derive(Args, Default)]
+struct RollupArgs {
+    #[command(flatten)]
+    filter: FilterFlags,
+    /// Print just the external keys (one per line) for pasting into a PR body.
+    #[arg(long)]
+    keys: bool,
+    #[arg(long)]
+    json: bool,
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// List tasks (non-dead by default; --all also includes dead).
@@ -54,29 +66,44 @@ enum Command {
         filter: FilterFlags,
         #[arg(long)]
         all: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Show one task by id.
-    Show { id: String },
+    Show {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// List hairy tasks whose dependencies are all resolved.
     #[command(visible_alias = "ready")]
     Next {
         #[command(flatten)]
         filter: FilterFlags,
+        #[arg(long)]
+        json: bool,
     },
     /// List hairy tasks with at least one unresolved dependency.
     #[command(visible_alias = "blocked")]
     Tangled {
         #[command(flatten)]
         filter: FilterFlags,
+        #[arg(long)]
+        json: bool,
     },
     /// Substring search over id/title/description.
     Search {
         query: String,
         #[command(flatten)]
         filter: FilterFlags,
+        #[arg(long)]
+        json: bool,
     },
     /// Show task statistics.
-    Stats,
+    Stats {
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a new task (in hairy).
     Create {
         #[arg(long)]
@@ -154,15 +181,6 @@ enum DepAction {
     Remove { id: String, dep_id: String },
 }
 
-#[derive(Args, Default)]
-struct RollupArgs {
-    #[command(flatten)]
-    filter: FilterFlags,
-    /// Print just the external keys (one per line) for pasting into a PR body.
-    #[arg(long)]
-    keys: bool,
-}
-
 const NON_DEAD: [Status; 3] = [Status::Hairy, Status::Shaving, Status::Shorn];
 const EVERY: [Status; 4] = [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead];
 
@@ -171,11 +189,13 @@ fn main() -> Result<()> {
     let root = store::discover_root(&env::current_dir()?)?;
 
     match cli.command {
-        Command::List { filter, all } => {
+        Command::List { filter, all, json } => {
             let tasks = store::load(&root, &EVERY)?;
             let mut rows = filter::apply(&tasks, &build_spec(filter), all);
             rows.sort_by(|a, b| status_rank(a.status).cmp(&status_rank(b.status)).then_with(|| a.id.cmp(&b.id)));
-            if rows.is_empty() {
+            if json {
+                json::print(&json::tasks_array(&rows))?;
+            } else if rows.is_empty() {
                 println!("No tasks found.");
             } else {
                 for t in rows {
@@ -183,23 +203,35 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Command::Show { id } => {
+        Command::Show { id, json } => {
             let all = store::load(&root, &EVERY)?;
-            match all.iter().find(|t| t.id == id) {
-                Some(t) => print_task(t),
-                None => {
-                    eprintln!("no such task: {id}");
-                    std::process::exit(1);
+            let Some(t) = all.iter().find(|t| t.id == id) else {
+                eprintln!("no such task: {id}");
+                std::process::exit(1);
+            };
+            let mut children: Vec<&Task> = all.iter().filter(|c| c.parent.as_deref() == Some(id.as_str())).collect();
+            children.sort_by(|a, b| a.id.cmp(&b.id));
+            if json {
+                json::print(&json::show_value(t, &children))?;
+            } else {
+                print_task(t);
+                if !children.is_empty() {
+                    println!("\nChildren:");
+                    for c in &children {
+                        println!("  [{}] {}  {}", c.status.glyph(), c.id, c.title);
+                    }
                 }
             }
         }
-        Command::Next { filter } => {
+        Command::Next { filter, json } => {
             let mut spec = build_spec(filter);
             spec.statuses = vec![Status::Hairy];
             spec.ready_only = true;
             let tasks = store::load(&root, &EVERY)?;
             let rows = filter::apply(&tasks, &spec, false);
-            if rows.is_empty() {
+            if json {
+                json::print(&json::tasks_array(&rows))?;
+            } else if rows.is_empty() {
                 println!("No yaks ready to shave.");
             } else {
                 println!("Ready to shave (all dependencies met):");
@@ -208,14 +240,18 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Command::Tangled { filter } => {
+        Command::Tangled { filter, json } => {
             let mut spec = build_spec(filter);
             spec.statuses = vec![Status::Hairy];
             spec.tangled_only = true;
             let tasks = store::load(&root, &EVERY)?;
             let resolved = filter::resolved_ids(&tasks);
             let rows = filter::apply(&tasks, &spec, false);
-            if rows.is_empty() {
+            if json {
+                let items: Vec<(&Task, Vec<&str>)> =
+                    rows.iter().map(|t| (*t, filter::unresolved_deps(t, &resolved))).collect();
+                json::print(&json::tangled_array(&items))?;
+            } else if rows.is_empty() {
                 println!("No tangled yaks.");
             } else {
                 println!("Tangled yaks:");
@@ -225,13 +261,15 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Command::Search { query, filter } => {
+        Command::Search { query, filter, json } => {
             let mut spec = build_spec(filter);
             spec.search = Some(query);
             let tasks = store::load(&root, &EVERY)?;
             let mut rows = filter::apply(&tasks, &spec, false);
             rows.sort_by(|a, b| status_rank(a.status).cmp(&status_rank(b.status)).then_with(|| a.id.cmp(&b.id)));
-            if rows.is_empty() {
+            if json {
+                json::print(&json::tasks_array(&rows))?;
+            } else if rows.is_empty() {
                 println!("No tasks found.");
             } else {
                 for t in rows {
@@ -239,42 +277,34 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Command::Stats => {
+        Command::Stats { json } => {
             let tasks = store::load(&root, &NON_DEAD)?;
             let count = |s: Status| tasks.iter().filter(|t| t.status == s).count();
-            println!(
-                "Total: {}  Hairy: {}  Shaving: {}  Shorn: {}",
-                tasks.len(),
-                count(Status::Hairy),
-                count(Status::Shaving),
-                count(Status::Shorn),
-            );
+            let (hairy, shaving, shorn) = (count(Status::Hairy), count(Status::Shaving), count(Status::Shorn));
             let mut by_type: Vec<(String, usize)> = fold_counts(tasks.iter().map(|t| t.kind.clone()));
-            if !by_type.is_empty() {
-                by_type.sort();
-                println!("By type:");
-                for (k, v) in by_type {
-                    println!("  {k}: {v}");
-                }
-            }
+            by_type.sort();
             let mut by_pri: Vec<(u8, usize)> = fold_counts(tasks.iter().map(|t| t.priority));
-            if !by_pri.is_empty() {
-                by_pri.sort();
-                println!("By priority:");
-                for (k, v) in by_pri {
-                    println!("  p{k}: {v}");
+            by_pri.sort();
+            if json {
+                json::print(&json::stats_value(tasks.len(), hairy, shaving, shorn, &by_type, &by_pri))?;
+            } else {
+                println!("Total: {}  Hairy: {hairy}  Shaving: {shaving}  Shorn: {shorn}", tasks.len());
+                if !by_type.is_empty() {
+                    println!("By type:");
+                    for (k, v) in &by_type {
+                        println!("  {k}: {v}");
+                    }
+                }
+                if !by_pri.is_empty() {
+                    println!("By priority:");
+                    for (k, v) in &by_pri {
+                        println!("  p{k}: {v}");
+                    }
                 }
             }
         }
         Command::Create {
-            title,
-            kind,
-            priority,
-            parent,
-            labels,
-            depends_on,
-            source,
-            description,
+            title, kind, priority, parent, labels, depends_on, source, description,
         } => {
             let cfg = store::read_config(&root);
             if let Some(p) = &parent {
@@ -303,15 +333,7 @@ fn main() -> Result<()> {
             println!("Created {id}: {title}");
         }
         Command::Update {
-            id,
-            title,
-            kind,
-            priority,
-            description,
-            add_label,
-            remove_label,
-            source,
-            note,
+            id, title, kind, priority, description, add_label, remove_label, source, note,
         } => {
             let Some(mut task) = store::load_task_by_id(&root, &id)? else {
                 eprintln!("error: task {id} not found");
@@ -417,15 +439,21 @@ fn main() -> Result<()> {
             let (groups, unsourced) = rollup::build(&tasks, &build_spec(args.filter));
             if args.keys {
                 let mut seen = std::collections::HashSet::new();
-                for g in &groups {
-                    let k = g.head();
-                    if seen.insert(k.clone()) {
+                let keys: Vec<String> = groups
+                    .iter()
+                    .map(|g| g.head())
+                    .filter(|k| seen.insert(k.clone()))
+                    .collect();
+                if args.json {
+                    json::print(&serde_json::json!(keys))?;
+                } else {
+                    for k in keys {
                         println!("{k}");
                     }
                 }
-                return Ok(());
-            }
-            if groups.is_empty() {
+            } else if args.json {
+                json::print(&json::rollup_value(&groups))?;
+            } else if groups.is_empty() {
                 println!("No yaks with an external source.");
             } else {
                 for g in &groups {
@@ -462,15 +490,6 @@ fn build_spec(f: FilterFlags) -> FilterSpec {
     }
 }
 
-fn status_rank(s: Status) -> u8 {
-    match s {
-        Status::Hairy => 0,
-        Status::Shaving => 1,
-        Status::Shorn => 2,
-        Status::Dead => 3,
-    }
-}
-
 fn parse_status(s: &str) -> Option<Status> {
     match s.to_lowercase().as_str() {
         "hairy" => Some(Status::Hairy),
@@ -478,6 +497,15 @@ fn parse_status(s: &str) -> Option<Status> {
         "shorn" => Some(Status::Shorn),
         "dead" => Some(Status::Dead),
         _ => None,
+    }
+}
+
+fn status_rank(s: Status) -> u8 {
+    match s {
+        Status::Hairy => 0,
+        Status::Shaving => 1,
+        Status::Shorn => 2,
+        Status::Dead => 3,
     }
 }
 
@@ -489,7 +517,7 @@ fn fold_counts<K: std::hash::Hash + Eq, I: Iterator<Item = K>>(it: I) -> Vec<(K,
     m.into_iter().collect()
 }
 
-/// `  [X] id  pN type     title [labels] (deps: ...)` — matches Python _fmt_task_row.
+/// `  [X] id  pN type     title [labels] (deps: ...)`
 fn fmt_row(t: &Task) -> String {
     let labels = if t.labels.is_empty() {
         String::new()
@@ -501,19 +529,10 @@ fn fmt_row(t: &Task) -> String {
     } else {
         format!(" (deps: {})", t.depends_on.join(","))
     };
-    format!(
-        "  [{}] {}  p{} {:8} {}{}{}",
-        t.status.glyph(),
-        t.id,
-        t.priority,
-        t.kind,
-        t.title,
-        labels,
-        deps
-    )
+    format!("  [{}] {}  p{} {:8} {}{}{}", t.status.glyph(), t.id, t.priority, t.kind, t.title, labels, deps)
 }
 
-/// `  id  pN type     title` — matches Python cmd_next row (no status glyph).
+/// `  id  pN type     title` (no status glyph) — matches Python cmd_next.
 fn fmt_plain_row(t: &Task) -> String {
     format!("  {}  p{} {:8} {}", t.id, t.priority, t.kind, t.title)
 }
