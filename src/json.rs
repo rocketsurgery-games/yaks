@@ -1,9 +1,12 @@
 //! JSON rendering for `--json`. Shapes are yaks-rs's own (semantic, not
 //! byte-identical to the Python tool); stability is pinned by golden snapshot
 //! tests. serde_json's `preserve_order` keeps key order deterministic.
+//!
+//! Pure rendering: takes typed results from `herd` and returns `Value`s.
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
+use crate::herd::Stats;
 use crate::model::{Status, Task};
 use crate::rollup::Group;
 
@@ -49,11 +52,11 @@ pub fn task_value(t: &Task) -> Value {
     Value::Object(m)
 }
 
-pub fn tasks_array(tasks: &[&Task]) -> Value {
-    Value::Array(tasks.iter().map(|t| task_value(t)).collect())
+pub fn tasks_array(tasks: &[Task]) -> Value {
+    Value::Array(tasks.iter().map(task_value).collect())
 }
 
-pub fn tangled_array(items: &[(&Task, Vec<&str>)]) -> Value {
+pub fn tangled_array(items: &[(Task, Vec<String>)]) -> Value {
     Value::Array(
         items
             .iter()
@@ -68,7 +71,7 @@ pub fn tangled_array(items: &[(&Task, Vec<&str>)]) -> Value {
     )
 }
 
-pub fn show_value(t: &Task, children: &[&Task]) -> Value {
+pub fn show_value(t: &Task, children: &[Task]) -> Value {
     let mut v = task_value(t);
     if let Value::Object(m) = &mut v {
         if !children.is_empty() {
@@ -82,27 +85,20 @@ pub fn show_value(t: &Task, children: &[&Task]) -> Value {
     v
 }
 
-pub fn stats_value(
-    total: usize,
-    hairy: usize,
-    shaving: usize,
-    shorn: usize,
-    by_type: &[(String, usize)],
-    by_priority: &[(u8, usize)],
-) -> Value {
+pub fn stats_value(s: &Stats) -> Value {
     let mut bt = Map::new();
-    for (k, v) in by_type {
+    for (k, v) in &s.by_type {
         bt.insert(k.clone(), json!(v));
     }
     let mut bp = Map::new();
-    for (k, v) in by_priority {
+    for (k, v) in &s.by_priority {
         bp.insert(k.to_string(), json!(v));
     }
     json!({
-        "total": total,
-        "hairy": hairy,
-        "shaving": shaving,
-        "shorn": shorn,
+        "total": s.total,
+        "hairy": s.hairy,
+        "shaving": s.shaving,
+        "shorn": s.shorn,
         "by_type": Value::Object(bt),
         "by_priority": Value::Object(bp),
     })

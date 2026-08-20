@@ -130,7 +130,11 @@ fn effective_source<'a>(
             break;
         }
         if let Some(src) = source_by_id.get(c) {
-            let from = if c == start { None } else { Some(c.to_string()) };
+            let from = if c == start {
+                None
+            } else {
+                Some(c.to_string())
+            };
             return (Some(src), from);
         }
         cur = parent_by_id.get(c).copied();
@@ -138,19 +142,20 @@ fn effective_source<'a>(
     (None, None)
 }
 
-pub struct RollupYak<'a> {
-    pub task: &'a Task,
+/// One yak within a rollup group (owned, so groups outlive the load).
+pub struct RollupItem {
+    pub task: Task,
     pub inherited_from: Option<String>,
 }
 
-pub struct Group<'a> {
+pub struct Group {
     pub source: String,
     pub tracker: &'static str,
     pub key: Option<String>,
-    pub yaks: Vec<RollupYak<'a>>,
+    pub yaks: Vec<RollupItem>,
 }
 
-impl Group<'_> {
+impl Group {
     /// Display head: the human key, or the raw source URL when unclassified.
     pub fn head(&self) -> String {
         self.key.clone().unwrap_or_else(|| self.source.clone())
@@ -160,7 +165,7 @@ impl Group<'_> {
 /// Group the filtered yaks by effective source. `tasks` must be the visible
 /// (non-dead) set — inheritance maps are built from all of them, not just the
 /// filtered subset. Returns (groups sorted by key/source, unsourced count).
-pub fn build<'a>(tasks: &'a [Task], spec: &FilterSpec) -> (Vec<Group<'a>>, usize) {
+pub fn build(tasks: &[Task], spec: &FilterSpec) -> (Vec<Group>, usize) {
     let mut source_by_id: HashMap<&str, &str> = HashMap::new();
     let mut parent_by_id: HashMap<&str, &str> = HashMap::new();
     for t in tasks {
@@ -172,16 +177,16 @@ pub fn build<'a>(tasks: &'a [Task], spec: &FilterSpec) -> (Vec<Group<'a>>, usize
         }
     }
 
-    let mut groups: HashMap<String, Vec<RollupYak>> = HashMap::new();
+    let mut groups: HashMap<String, Vec<RollupItem>> = HashMap::new();
     let mut unsourced = 0usize;
     for t in filter::apply(tasks, spec, false) {
         let (src, from) = effective_source(&t.id, &source_by_id, &parent_by_id);
         match src {
             None => unsourced += 1,
-            Some(src) => groups
-                .entry(src.to_string())
-                .or_default()
-                .push(RollupYak { task: t, inherited_from: from }),
+            Some(src) => groups.entry(src.to_string()).or_default().push(RollupItem {
+                task: t.clone(),
+                inherited_from: from,
+            }),
         }
     }
 
@@ -190,7 +195,12 @@ pub fn build<'a>(tasks: &'a [Task], spec: &FilterSpec) -> (Vec<Group<'a>>, usize
         .map(|(source, mut yaks)| {
             yaks.sort_by(|a, b| a.task.id.cmp(&b.task.id));
             let (tracker, key) = tracker_and_key(&source);
-            Group { source, tracker, key, yaks }
+            Group {
+                source,
+                tracker,
+                key,
+                yaks,
+            }
         })
         .collect();
     out.sort_by(|a, b| a.head().cmp(&b.head()));
@@ -204,10 +214,22 @@ mod tests {
 
     #[test]
     fn classify_trackers() {
-        assert_eq!(tracker_and_key("https://x.atlassian.net/browse/SUBTEXT-369"), ("jira", Some("SUBTEXT-369".into())));
-        assert_eq!(tracker_and_key("https://linear.app/team/issue/roc-5/title"), ("linear", Some("ROC-5".into())));
-        assert_eq!(tracker_and_key("https://github.com/o/r/issues/123"), ("github", Some("o/r#123".into())));
-        assert_eq!(tracker_and_key("https://example.com/x"), ("other", Some("https://example.com/x".into())));
+        assert_eq!(
+            tracker_and_key("https://x.atlassian.net/browse/SUBTEXT-369"),
+            ("jira", Some("SUBTEXT-369".into()))
+        );
+        assert_eq!(
+            tracker_and_key("https://linear.app/team/issue/roc-5/title"),
+            ("linear", Some("ROC-5".into()))
+        );
+        assert_eq!(
+            tracker_and_key("https://github.com/o/r/issues/123"),
+            ("github", Some("o/r#123".into()))
+        );
+        assert_eq!(
+            tracker_and_key("https://example.com/x"),
+            ("other", Some("https://example.com/x".into()))
+        );
         assert_eq!(tracker_and_key(""), ("none", None));
     }
 
@@ -232,19 +254,17 @@ mod tests {
     fn groups_with_ancestor_inheritance_and_unsourced() {
         let tasks = vec![
             t("umbrella", None, Some("https://github.com/o/r/issues/7")),
-            t("child", Some("umbrella"), None), // inherits umbrella's source
+            t("child", Some("umbrella"), None),
             t("solo", None, Some("https://acme.atlassian.net/browse/AB-1")),
-            t("orphan", None, None), // unsourced
+            t("orphan", None, None),
         ];
         let (groups, unsourced) = build(&tasks, &FilterSpec::default());
         assert_eq!(unsourced, 1);
-        // sorted by key: "AB-1" < "o/r#7"
         assert_eq!(groups[0].key.as_deref(), Some("AB-1"));
         assert_eq!(groups[0].tracker, "jira");
         assert_eq!(groups[1].key.as_deref(), Some("o/r#7"));
         let gh = &groups[1];
         assert_eq!(gh.yaks.len(), 2);
-        // yaks sorted by id: child, umbrella
         assert_eq!(gh.yaks[0].task.id, "child");
         assert_eq!(gh.yaks[0].inherited_from.as_deref(), Some("umbrella"));
         assert_eq!(gh.yaks[1].task.id, "umbrella");

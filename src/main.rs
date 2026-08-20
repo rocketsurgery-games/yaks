@@ -1,10 +1,11 @@
 //! yaks-rs — a filesystem-native task tracker (Rust port).
 //!
-//! Reads and writes the SAME `.yaks/` files as the Python `yaks` tool.
-//! All read commands support `--json` (shapes are yaks-rs's own, pinned by
-//! golden snapshot tests).
+//! Reads and writes the SAME `.yaks/` files as the Python `yaks` tool. This
+//! binary is a thin CLI over `herd::Herd` (the print-free core ops facade):
+//! every command is parse args -> call one Herd op -> render (text or --json).
 
 mod filter;
+mod herd;
 mod json;
 mod model;
 mod rollup;
@@ -13,14 +14,20 @@ mod store;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use std::env;
-use std::path::Path;
 
 use filter::FilterSpec;
+use herd::{
+    CreateOutcome, DepOutcome, Herd, MoveOutcome, NewTask, OpenError, Reparent, Show, Stats,
+    TaskEdit, UpdateOutcome,
+};
 use model::{Status, Task};
-use store::{DepOutcome, MoveOutcome, Reparent};
 
 #[derive(Parser)]
-#[command(name = "yaks", version, about = "Filesystem-native task tracker (Rust)")]
+#[command(
+    name = "yaks",
+    version,
+    about = "Filesystem-native task tracker (Rust)"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -181,233 +188,169 @@ enum DepAction {
     Remove { id: String, dep_id: String },
 }
 
-const NON_DEAD: [Status; 3] = [Status::Hairy, Status::Shaving, Status::Shorn];
-const EVERY: [Status; 4] = [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead];
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let root = store::discover_root(&env::current_dir()?)?;
-    match store::schema_status(&root) {
-        store::SchemaStatus::Newer(v) => {
+    let herd = match Herd::open(&env::current_dir()?) {
+        Ok(h) => h,
+        Err(OpenError::SchemaTooNew { found, supported }) => {
             eprintln!(
-                "error: this herd uses schema v{v}, newer than this yaks supports (v{}). Upgrade yaks.",
-                store::SCHEMA
+                "error: this herd uses schema v{found}, newer than this yaks supports (v{supported}). Upgrade yaks."
             );
             std::process::exit(1);
         }
-        store::SchemaStatus::Older(v) => eprintln!(
-            "warning: herd schema v{v} predates this yaks (v{}); reading best-effort. Run the Python yaks once to migrate.",
-            store::SCHEMA
-        ),
-        store::SchemaStatus::Compatible => {}
+        Err(OpenError::NoHerd(m)) => {
+            eprintln!("error: {m}");
+            std::process::exit(1);
+        }
+    };
+    if let Some(w) = &herd.schema_warning {
+        eprintln!("warning: {w}");
     }
 
     match cli.command {
         Command::List { filter, all, json } => {
-            let tasks = store::load(&root, &EVERY)?;
-            let mut rows = filter::apply(&tasks, &build_spec(filter), all);
-            rows.sort_by(|a, b| status_rank(a.status).cmp(&status_rank(b.status)).then_with(|| a.id.cmp(&b.id)));
-            if json {
-                json::print(&json::tasks_array(&rows))?;
-            } else if rows.is_empty() {
-                println!("No tasks found.");
-            } else {
-                for t in rows {
-                    println!("{}", fmt_row(t));
-                }
-            }
+            let rows = herd.list(build_spec(filter), all)?;
+            render_rows(&rows, json, "No tasks found.")?;
         }
-        Command::Show { id, json } => {
-            let all = store::load(&root, &EVERY)?;
-            let Some(t) = all.iter().find(|t| t.id == id) else {
+        Command::Search {
+            query,
+            filter,
+            json,
+        } => {
+            let mut spec = build_spec(filter);
+            spec.search = Some(query);
+            let rows = herd.list(spec, false)?;
+            render_rows(&rows, json, "No tasks found.")?;
+        }
+        Command::Show { id, json } => match herd.show(&id)? {
+            None => {
                 eprintln!("no such task: {id}");
                 std::process::exit(1);
-            };
-            let mut children: Vec<&Task> = all.iter().filter(|c| c.parent.as_deref() == Some(id.as_str())).collect();
-            children.sort_by(|a, b| a.id.cmp(&b.id));
-            if json {
-                json::print(&json::show_value(t, &children))?;
-            } else {
-                print_task(t);
-                if !children.is_empty() {
-                    println!("\nChildren:");
-                    for c in &children {
-                        println!("  [{}] {}  {}", c.status.glyph(), c.id, c.title);
-                    }
+            }
+            Some(s) => {
+                if json {
+                    json::print(&json::show_value(&s.task, &s.children))?;
+                } else {
+                    render_show(&s);
                 }
             }
-        }
+        },
         Command::Next { filter, json } => {
-            let mut spec = build_spec(filter);
-            spec.statuses = vec![Status::Hairy];
-            spec.ready_only = true;
-            let tasks = store::load(&root, &EVERY)?;
-            let rows = filter::apply(&tasks, &spec, false);
+            let rows = herd.next(build_spec(filter))?;
             if json {
                 json::print(&json::tasks_array(&rows))?;
             } else if rows.is_empty() {
                 println!("No yaks ready to shave.");
             } else {
                 println!("Ready to shave (all dependencies met):");
-                for t in rows {
+                for t in &rows {
                     println!("{}", fmt_plain_row(t));
                 }
             }
         }
         Command::Tangled { filter, json } => {
-            let mut spec = build_spec(filter);
-            spec.statuses = vec![Status::Hairy];
-            spec.tangled_only = true;
-            let tasks = store::load(&root, &EVERY)?;
-            let resolved = filter::resolved_ids(&tasks);
-            let rows = filter::apply(&tasks, &spec, false);
+            let rows = herd.tangled(build_spec(filter))?;
             if json {
-                let items: Vec<(&Task, Vec<&str>)> =
-                    rows.iter().map(|t| (*t, filter::unresolved_deps(t, &resolved))).collect();
-                json::print(&json::tangled_array(&items))?;
+                json::print(&json::tangled_array(&rows))?;
             } else if rows.is_empty() {
                 println!("No tangled yaks.");
             } else {
                 println!("Tangled yaks:");
-                for t in rows {
-                    let waiting = filter::unresolved_deps(t, &resolved).join(", ");
-                    println!("  {}  {}  (waiting on: {})", t.id, t.title, waiting);
-                }
-            }
-        }
-        Command::Search { query, filter, json } => {
-            let mut spec = build_spec(filter);
-            spec.search = Some(query);
-            let tasks = store::load(&root, &EVERY)?;
-            let mut rows = filter::apply(&tasks, &spec, false);
-            rows.sort_by(|a, b| status_rank(a.status).cmp(&status_rank(b.status)).then_with(|| a.id.cmp(&b.id)));
-            if json {
-                json::print(&json::tasks_array(&rows))?;
-            } else if rows.is_empty() {
-                println!("No tasks found.");
-            } else {
-                for t in rows {
-                    println!("{}", fmt_row(t));
+                for (t, waiting) in &rows {
+                    println!(
+                        "  {}  {}  (waiting on: {})",
+                        t.id,
+                        t.title,
+                        waiting.join(", ")
+                    );
                 }
             }
         }
         Command::Stats { json } => {
-            let tasks = store::load(&root, &NON_DEAD)?;
-            let count = |s: Status| tasks.iter().filter(|t| t.status == s).count();
-            let (hairy, shaving, shorn) = (count(Status::Hairy), count(Status::Shaving), count(Status::Shorn));
-            let mut by_type: Vec<(String, usize)> = fold_counts(tasks.iter().map(|t| t.kind.clone()));
-            by_type.sort();
-            let mut by_pri: Vec<(u8, usize)> = fold_counts(tasks.iter().map(|t| t.priority));
-            by_pri.sort();
+            let s = herd.stats()?;
             if json {
-                json::print(&json::stats_value(tasks.len(), hairy, shaving, shorn, &by_type, &by_pri))?;
+                json::print(&json::stats_value(&s))?;
             } else {
-                println!("Total: {}  Hairy: {hairy}  Shaving: {shaving}  Shorn: {shorn}", tasks.len());
-                if !by_type.is_empty() {
-                    println!("By type:");
-                    for (k, v) in &by_type {
-                        println!("  {k}: {v}");
-                    }
-                }
-                if !by_pri.is_empty() {
-                    println!("By priority:");
-                    for (k, v) in &by_pri {
-                        println!("  p{k}: {v}");
-                    }
-                }
+                render_stats(&s);
             }
         }
         Command::Create {
-            title, kind, priority, parent, labels, depends_on, source, description,
+            title,
+            kind,
+            priority,
+            parent,
+            labels,
+            depends_on,
+            source,
+            description,
         } => {
-            let cfg = store::read_config(&root);
-            if let Some(p) = &parent {
-                if !store::all_ids(&root).contains(p) {
-                    eprintln!("error: parent task {p} not found");
-                    std::process::exit(1);
-                }
-            }
-            let id = store::generate_id(&root, &cfg.prefix)?;
-            let now = store::now_iso();
-            let task = Task {
-                id: id.clone(),
-                title: title.clone(),
-                kind: kind.unwrap_or(cfg.default_type),
-                priority: priority.unwrap_or(cfg.default_priority),
-                status: Status::Hairy,
-                created: Some(now.clone()),
-                updated: Some(now),
+            let new = NewTask {
+                title,
+                kind,
+                priority,
                 parent,
                 labels,
                 depends_on,
                 source,
-                body: description.unwrap_or_default(),
+                description,
             };
-            store::write::save(&root, &task)?;
-            println!("Created {id}: {title}");
+            match herd.create(new)? {
+                CreateOutcome::ParentNotFound(p) => {
+                    eprintln!("error: parent task {p} not found");
+                    std::process::exit(1);
+                }
+                CreateOutcome::Created(t) => println!("Created {}: {}", t.id, t.title),
+            }
         }
         Command::Update {
-            id, title, kind, priority, description, add_label, remove_label, source, note,
+            id,
+            title,
+            kind,
+            priority,
+            description,
+            add_label,
+            remove_label,
+            source,
+            note,
         } => {
-            let Some(mut task) = store::load_task_by_id(&root, &id)? else {
-                eprintln!("error: task {id} not found");
-                std::process::exit(1);
+            let edit = TaskEdit {
+                title,
+                kind,
+                priority,
+                description,
+                add_labels: add_label,
+                remove_labels: remove_label,
+                source,
+                note,
             };
-            let mut changed = false;
-            if let Some(t) = title {
-                task.title = t;
-                changed = true;
-            }
-            if let Some(k) = kind {
-                task.kind = k;
-                changed = true;
-            }
-            if let Some(p) = priority {
-                task.priority = p;
-                changed = true;
-            }
-            if let Some(d) = description {
-                task.body = d;
-                changed = true;
-            }
-            if !add_label.is_empty() {
-                for l in add_label {
-                    if !task.labels.contains(&l) {
-                        task.labels.push(l);
-                    }
+            match herd.update(&id, edit)? {
+                UpdateOutcome::NotFound => {
+                    eprintln!("error: task {id} not found");
+                    std::process::exit(1);
                 }
-                changed = true;
-            }
-            if !remove_label.is_empty() {
-                task.labels.retain(|l| !remove_label.contains(l));
-                changed = true;
-            }
-            if let Some(s) = source {
-                if !s.is_empty() {
-                    task.source = Some(s);
-                    changed = true;
-                }
-            }
-            if let Some(n) = note {
-                let ts = store::now_iso();
-                task.body = store::append_note(&task.body, &ts, &n);
-                changed = true;
-            }
-            if changed {
-                task.updated = Some(store::now_iso());
-                store::write::save(&root, &task)?;
-                println!("Updated {id}");
-            } else {
-                println!("No changes specified.");
+                UpdateOutcome::Updated => println!("Updated {id}"),
+                UpdateOutcome::NoChanges => println!("No changes specified."),
             }
         }
-        Command::Shave { id } => move_cmd(&root, &id, Status::Shaving, "already being shaved", "Shaving")?,
-        Command::Shorn { id } => move_cmd(&root, &id, Status::Shorn, "already shorn", "Shorn!")?,
-        Command::Regrow { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Regrown:")?,
-        Command::Slaughter { id } => move_cmd(&root, &id, Status::Dead, "already dead", "Slaughtered:")?,
-        Command::Revive { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Revived:")?,
+        Command::Shave { id } => transition(
+            &herd,
+            &id,
+            Status::Shaving,
+            "already being shaved",
+            "Shaving",
+        )?,
+        Command::Shorn { id } => transition(&herd, &id, Status::Shorn, "already shorn", "Shorn!")?,
+        Command::Regrow { id } => {
+            transition(&herd, &id, Status::Hairy, "already hairy", "Regrown:")?
+        }
+        Command::Slaughter { id } => {
+            transition(&herd, &id, Status::Dead, "already dead", "Slaughtered:")?
+        }
+        Command::Revive { id } => {
+            transition(&herd, &id, Status::Hairy, "already hairy", "Revived:")?
+        }
         Command::Dep { action } => match action {
-            DepAction::Add { id, dep_id } => match store::add_dep(&root, &id, &dep_id)? {
+            DepAction::Add { id, dep_id } => match herd.dep_add(&id, &dep_id)? {
                 DepOutcome::TaskNotFound => {
                     eprintln!("error: task {id} not found");
                     std::process::exit(1);
@@ -420,7 +363,7 @@ fn main() -> Result<()> {
                 DepOutcome::Added => println!("Added dependency: {id} -> {dep_id}"),
                 _ => {}
             },
-            DepAction::Remove { id, dep_id } => match store::remove_dep(&root, &id, &dep_id)? {
+            DepAction::Remove { id, dep_id } => match herd.dep_remove(&id, &dep_id)? {
                 DepOutcome::TaskNotFound => {
                     eprintln!("error: task {id} not found");
                     std::process::exit(1);
@@ -430,7 +373,11 @@ fn main() -> Result<()> {
                 _ => {}
             },
         },
-        Command::Reparent { id, parent, unparent } => {
+        Command::Reparent {
+            id,
+            parent,
+            unparent,
+        } => {
             let new_parent = if unparent {
                 None
             } else if parent.is_some() {
@@ -439,18 +386,19 @@ fn main() -> Result<()> {
                 eprintln!("error: specify --parent TASK_ID or --unparent");
                 std::process::exit(1);
             };
-            match store::reparent(&root, &id, new_parent)? {
+            match herd.reparent(&id, new_parent)? {
                 Reparent::Error(msg) => {
                     eprintln!("error: {msg}");
                     std::process::exit(1);
                 }
                 Reparent::Done { new_parent: None } => println!("Promoted {id} to top-level"),
-                Reparent::Done { new_parent: Some(p) } => println!("Reparented {id} under {p}"),
+                Reparent::Done {
+                    new_parent: Some(p),
+                } => println!("Reparented {id} under {p}"),
             }
         }
         Command::Rollup(args) => {
-            let tasks = store::load(&root, &NON_DEAD)?;
-            let (groups, unsourced) = rollup::build(&tasks, &build_spec(args.filter));
+            let (groups, unsourced) = herd.rollup(&build_spec(args.filter))?;
             if args.keys {
                 let mut seen = std::collections::HashSet::new();
                 let keys: Vec<String> = groups
@@ -473,7 +421,7 @@ fn main() -> Result<()> {
                 for g in &groups {
                     println!("{}  ({})  {}", g.head(), g.tracker, g.source);
                     for y in &g.yaks {
-                        let mut row = fmt_row(y.task);
+                        let mut row = fmt_row(&y.task);
                         if let Some(from) = &y.inherited_from {
                             row.push_str(&format!("  (via {from})"));
                         }
@@ -490,6 +438,8 @@ fn main() -> Result<()> {
     }
     Ok(())
 }
+
+// -- CLI arg mapping ------------------------------------------------------
 
 fn build_spec(f: FilterFlags) -> FilterSpec {
     FilterSpec {
@@ -514,45 +464,10 @@ fn parse_status(s: &str) -> Option<Status> {
     }
 }
 
-fn status_rank(s: Status) -> u8 {
-    match s {
-        Status::Hairy => 0,
-        Status::Shaving => 1,
-        Status::Shorn => 2,
-        Status::Dead => 3,
-    }
-}
+// -- rendering ------------------------------------------------------------
 
-fn fold_counts<K: std::hash::Hash + Eq, I: Iterator<Item = K>>(it: I) -> Vec<(K, usize)> {
-    let mut m: std::collections::HashMap<K, usize> = std::collections::HashMap::new();
-    for k in it {
-        *m.entry(k).or_insert(0) += 1;
-    }
-    m.into_iter().collect()
-}
-
-/// `  [X] id  pN type     title [labels] (deps: ...)`
-fn fmt_row(t: &Task) -> String {
-    let labels = if t.labels.is_empty() {
-        String::new()
-    } else {
-        format!(" [{}]", t.labels.join(","))
-    };
-    let deps = if t.depends_on.is_empty() {
-        String::new()
-    } else {
-        format!(" (deps: {})", t.depends_on.join(","))
-    };
-    format!("  [{}] {}  p{} {:8} {}{}{}", t.status.glyph(), t.id, t.priority, t.kind, t.title, labels, deps)
-}
-
-/// `  id  pN type     title` (no status glyph) — matches Python cmd_next.
-fn fmt_plain_row(t: &Task) -> String {
-    format!("  {}  p{} {:8} {}", t.id, t.priority, t.kind, t.title)
-}
-
-fn move_cmd(root: &Path, id: &str, dest: Status, already: &str, done: &str) -> Result<()> {
-    match store::move_task(root, id, dest)? {
+fn transition(herd: &Herd, id: &str, dest: Status, already: &str, done: &str) -> Result<()> {
+    match herd.transition(id, dest)? {
         MoveOutcome::NotFound => {
             eprintln!("error: task {id} not found");
             std::process::exit(1);
@@ -563,7 +478,40 @@ fn move_cmd(root: &Path, id: &str, dest: Status, already: &str, done: &str) -> R
     Ok(())
 }
 
-fn print_task(t: &Task) {
+fn render_rows(rows: &[Task], json: bool, empty_msg: &str) -> Result<()> {
+    if json {
+        json::print(&json::tasks_array(rows))?;
+    } else if rows.is_empty() {
+        println!("{empty_msg}");
+    } else {
+        for t in rows {
+            println!("{}", fmt_row(t));
+        }
+    }
+    Ok(())
+}
+
+fn render_stats(s: &Stats) {
+    println!(
+        "Total: {}  Hairy: {}  Shaving: {}  Shorn: {}",
+        s.total, s.hairy, s.shaving, s.shorn
+    );
+    if !s.by_type.is_empty() {
+        println!("By type:");
+        for (k, v) in &s.by_type {
+            println!("  {k}: {v}");
+        }
+    }
+    if !s.by_priority.is_empty() {
+        println!("By priority:");
+        for (k, v) in &s.by_priority {
+            println!("  p{k}: {v}");
+        }
+    }
+}
+
+fn render_show(s: &Show) {
+    let t = &s.task;
     println!("id:       {}", t.id);
     println!("title:    {}", t.title);
     println!("status:   {:?}", t.status);
@@ -584,10 +532,45 @@ fn print_task(t: &Task) {
     if !t.depends_on.is_empty() {
         println!("depends:  {}", t.depends_on.join(", "));
     }
-    if let Some(s) = &t.source {
-        println!("source:   {s}");
+    if let Some(src) = &t.source {
+        println!("source:   {src}");
     }
     if !t.body.is_empty() {
         println!("\n{}", t.body);
     }
+    if !s.children.is_empty() {
+        println!("\nChildren:");
+        for c in &s.children {
+            println!("  [{}] {}  {}", c.status.glyph(), c.id, c.title);
+        }
+    }
+}
+
+/// `  [X] id  pN type     title [labels] (deps: ...)`
+fn fmt_row(t: &Task) -> String {
+    let labels = if t.labels.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", t.labels.join(","))
+    };
+    let deps = if t.depends_on.is_empty() {
+        String::new()
+    } else {
+        format!(" (deps: {})", t.depends_on.join(","))
+    };
+    format!(
+        "  [{}] {}  p{} {:8} {}{}{}",
+        t.status.glyph(),
+        t.id,
+        t.priority,
+        t.kind,
+        t.title,
+        labels,
+        deps
+    )
+}
+
+/// `  id  pN type     title` (no status glyph) — matches Python cmd_next.
+fn fmt_plain_row(t: &Task) -> String {
+    format!("  {}  p{} {:8} {}", t.id, t.priority, t.kind, t.title)
 }
