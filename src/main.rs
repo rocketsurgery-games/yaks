@@ -10,6 +10,7 @@ mod json;
 mod model;
 mod rollup;
 mod store;
+mod tui;
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
@@ -178,6 +179,8 @@ enum Command {
     },
     /// Group yaks by the external issue they roll up to.
     Rollup(RollupArgs),
+    /// Open the interactive terminal UI.
+    Tui,
 }
 
 #[derive(Subcommand)]
@@ -434,6 +437,10 @@ fn main() -> Result<()> {
                     println!("{unsourced} {noun} in scope with no external source (omitted).");
                 }
             }
+        }
+        Command::Tui => {
+            let tasks = herd.list(FilterSpec::default(), false)?;
+            tui::run(tui::App::new(tasks))?;
         }
     }
     Ok(())

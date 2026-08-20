@@ -16,6 +16,7 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+ratatui = "0.30"
 
 # Planned, not yet wired — see README roadmap and the yak-2219 research arc:
 #   ratatui + crossterm   TUI                                  (yak-ef0f)

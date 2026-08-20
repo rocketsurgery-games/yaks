@@ -4,7 +4,7 @@ title: 'Phase 0: read-only spike + foundations'
 type: task
 priority: 2
 created: '2026-08-20T03:25:50Z'
-updated: '2026-08-20T03:26:32Z'
+updated: '2026-08-20T22:39:23Z'
 labels:
 - rust
 - phase0

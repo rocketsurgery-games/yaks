@@ -4,7 +4,7 @@ title: 'Phase 2: TUI (ratatui + crossterm + edtui)'
 type: task
 priority: 3
 created: '2026-08-20T03:25:50Z'
-updated: '2026-08-20T03:25:50Z'
+updated: '2026-08-20T22:58:15Z'
 labels:
 - rust
 - phase2
