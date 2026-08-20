@@ -11,6 +11,7 @@
 
 use crate::model::{Status, Task};
 use anyhow::{Context, Result};
+use chrono::Utc;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -408,6 +409,55 @@ fn xorshift(s: &mut u64) -> u64 {
     x
 }
 
+/// Current UTC time as `YYYY-MM-DDTHH:MM:SSZ` (matches Python `now_iso`).
+pub fn now_iso() -> String {
+    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// Result of a status move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveOutcome {
+    Moved,
+    AlreadyThere,
+    NotFound,
+}
+
+/// Locate a task's current file by id via exact-path probes (O(1) per status
+/// dir), mirroring the Python `find_task_file`.
+pub fn find_task_file(root: &Path, id: &str) -> Option<(Status, PathBuf)> {
+    for st in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
+        let p = root.join(st.dir()).join(format!("{id}.md"));
+        if p.is_file() {
+            return Some((st, p));
+        }
+    }
+    None
+}
+
+/// Move a task into `dest`: rename its file into the destination dir, then
+/// rewrite it with a bumped `updated` (mirrors Python `move_task`). A no-op
+/// when the task is already at `dest`.
+pub fn move_task(root: &Path, id: &str, dest: Status) -> Result<MoveOutcome> {
+    let Some((status, path)) = find_task_file(root, id) else {
+        return Ok(MoveOutcome::NotFound);
+    };
+    if status == dest {
+        return Ok(MoveOutcome::AlreadyThere);
+    }
+    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let mut task = parse_task(&text, status)
+        .with_context(|| format!("parsing {} before move", path.display()))?;
+    let dest_dir = root.join(dest.dir());
+    fs::create_dir_all(&dest_dir).with_context(|| format!("creating {}", dest_dir.display()))?;
+    let dest_path = dest_dir.join(format!("{id}.md"));
+    fs::rename(&path, &dest_path)
+        .with_context(|| format!("moving {} -> {}", path.display(), dest_path.display()))?;
+    task.status = dest;
+    task.updated = Some(now_iso());
+    write::save(root, &task)?;
+    Ok(MoveOutcome::Moved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,5 +520,67 @@ mod tests {
         assert!(text.contains("title: don't \"stop\" now\n"), "{text}");
         let parsed = parse_task(&text, Status::Shaving).unwrap();
         assert_eq!(parsed.title, "don't \"stop\" now");
+    }
+}
+
+#[cfg(test)]
+mod move_tests {
+    use super::*;
+    use crate::model::Status;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_root() -> PathBuf {
+        let mut p = std::env::temp_dir();
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        p.push(format!("yaksrs-test-{}-{}", std::process::id(), n));
+        for st in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
+            fs::create_dir_all(p.join(st.dir())).unwrap();
+        }
+        p
+    }
+
+    fn task(id: &str, status: Status) -> Task {
+        Task {
+            id: id.into(),
+            title: "move me".into(),
+            kind: "task".into(),
+            priority: 3,
+            status,
+            created: Some("2026-01-01T00:00:00Z".into()),
+            updated: Some("2026-01-01T00:00:00Z".into()),
+            parent: None,
+            labels: vec![],
+            depends_on: vec![],
+            source: None,
+            body: String::new(),
+        }
+    }
+
+    #[test]
+    fn move_relocates_file_and_bumps_updated() {
+        let root = temp_root();
+        write::save(&root, &task("yaksrs-mv01", Status::Hairy)).unwrap();
+        assert!(root.join("hairy/yaksrs-mv01.md").is_file());
+
+        assert_eq!(move_task(&root, "yaksrs-mv01", Status::Shaving).unwrap(), MoveOutcome::Moved);
+        assert!(!root.join("hairy/yaksrs-mv01.md").exists());
+        assert!(root.join("shaving/yaksrs-mv01.md").is_file());
+
+        let text = fs::read_to_string(root.join("shaving/yaksrs-mv01.md")).unwrap();
+        let moved = parse_task(&text, Status::Shaving).unwrap();
+        assert_ne!(moved.updated.as_deref(), Some("2026-01-01T00:00:00Z"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn move_is_noop_when_already_there_and_reports_missing() {
+        let root = temp_root();
+        write::save(&root, &task("yaksrs-mv02", Status::Shorn)).unwrap();
+        assert_eq!(move_task(&root, "yaksrs-mv02", Status::Shorn).unwrap(), MoveOutcome::AlreadyThere);
+        assert_eq!(move_task(&root, "does-not-exist", Status::Hairy).unwrap(), MoveOutcome::NotFound);
+        let _ = fs::remove_dir_all(&root);
     }
 }

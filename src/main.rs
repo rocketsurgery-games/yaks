@@ -1,19 +1,21 @@
 //! yaks-rs — a filesystem-native task tracker (Rust port).
 //!
 //! Reads and writes the SAME `.yaks/` files as the Python `yaks` tool.
-//! Commands so far: `list`, `show`, `next`, `create`. More of the write path
-//! (update, status moves, deps) is being ported under Phase 1 (yaksrs-6e21).
+//! Commands: list, show, next, create, and the status moves
+//! (shave/shorn/regrow/slaughter/revive). More of Phase 1 (update, deps,
+//! filtering) is in progress under yaksrs-6e21.
 
 mod model;
 mod store;
 
 use anyhow::Result;
-use chrono::Utc;
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 use std::env;
+use std::path::Path;
 
 use model::{Status, Task};
+use store::MoveOutcome;
 
 #[derive(Parser)]
 #[command(name = "yaks", version, about = "Filesystem-native task tracker (Rust)")]
@@ -32,6 +34,7 @@ enum Command {
     /// Show one task by id.
     Show { id: String },
     /// List hairy tasks whose dependencies are all resolved.
+    #[command(visible_alias = "ready")]
     Next,
     /// Create a new task (in hairy).
     Create {
@@ -52,15 +55,24 @@ enum Command {
         #[arg(long)]
         description: Option<String>,
     },
+    /// Start shaving a yak (move to shaving).
+    #[command(visible_alias = "work")]
+    Shave { id: String },
+    /// Mark a yak shorn (move to shorn).
+    #[command(visible_alias = "close")]
+    Shorn { id: String },
+    /// Regrow a shorn yak (move back to hairy).
+    #[command(visible_alias = "reopen")]
+    Regrow { id: String },
+    /// Slaughter a yak (move to dead).
+    Slaughter { id: String },
+    /// Revive a dead yak (move back to hairy).
+    Revive { id: String },
 }
 
 // Every non-dead status, matching the Python tool's default `list` view.
 const NON_DEAD: [Status; 3] = [Status::Hairy, Status::Shaving, Status::Shorn];
 const EVERY: [Status; 4] = [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead];
-
-fn now_iso() -> String {
-    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
-}
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -122,7 +134,7 @@ fn main() -> Result<()> {
                 }
             }
             let id = store::generate_id(&root, &cfg.prefix)?;
-            let now = now_iso();
+            let now = store::now_iso();
             let task = Task {
                 id: id.clone(),
                 title: title.clone(),
@@ -140,6 +152,24 @@ fn main() -> Result<()> {
             store::write::save(&root, &task)?;
             println!("Created {id}: {title}");
         }
+        Command::Shave { id } => move_cmd(&root, &id, Status::Shaving, "already being shaved", "Shaving")?,
+        Command::Shorn { id } => move_cmd(&root, &id, Status::Shorn, "already shorn", "Shorn!")?,
+        Command::Regrow { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Regrown:")?,
+        Command::Slaughter { id } => move_cmd(&root, &id, Status::Dead, "already dead", "Slaughtered:")?,
+        Command::Revive { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Revived:")?,
+    }
+    Ok(())
+}
+
+/// Perform a status move and render Python-compatible messages.
+fn move_cmd(root: &Path, id: &str, dest: Status, already: &str, done: &str) -> Result<()> {
+    match store::move_task(root, id, dest)? {
+        MoveOutcome::NotFound => {
+            eprintln!("error: task {id} not found");
+            std::process::exit(1);
+        }
+        MoveOutcome::AlreadyThere => println!("{id} is {already}"),
+        MoveOutcome::Moved => println!("{done} {id}"),
     }
     Ok(())
 }
