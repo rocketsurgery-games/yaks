@@ -1,0 +1,9 @@
+{
+  "name": "yakherder-__TARGET__",
+  "version": "0.0.0",
+  "description": "yaks prebuilt binary for __TARGET__",
+  "os": ["__OS__"],
+  "cpu": ["__CPU__"],
+  "files": ["bin/"],
+  "license": "Apache-2.0"
+}
