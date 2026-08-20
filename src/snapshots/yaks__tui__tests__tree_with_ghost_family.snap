@@ -1,0 +1,18 @@
+---
+source: src/tui.rs
+expression: "draw(&sample(), 72, 14)"
+---
+ Hairy 2 · Shaving 1 · Shorn 1
+▾ [H] p2 Root A                 │ id       a0
+    [H] p3 Child A1             │ title    Root A
+    [N] p3 Child A2 done        │ type     task
+                                │ priority 2
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+j/k move · Space fold · Tab tab · l detail · q quit

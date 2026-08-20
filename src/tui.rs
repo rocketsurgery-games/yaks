@@ -5,6 +5,9 @@
 //! buffer (snapshot tests + the future demo-cast pipeline). Key handling only
 //! mutates `App`; later slices route mutating keys through `herd::Herd`.
 
+mod tree;
+
+use std::collections::HashSet;
 use std::io::{self, Stdout};
 
 use anyhow::Result;
@@ -21,7 +24,7 @@ use ratatui::crossterm::terminal::{
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Tabs, Wrap};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Tabs, Wrap};
 use ratatui::{Frame, Terminal};
 
 use crate::model::{Status, Task};
@@ -32,8 +35,8 @@ enum Focus {
     Detail,
 }
 
-/// TUI state. Holds the loaded task set; per-tab views are derived on demand.
-/// (Read-only in slice 1; later slices add a `Herd` handle for re-query.)
+/// TUI state. Holds the loaded task set; per-tab tree views are derived on
+/// demand. (Read-only in slices 1-2; later slices add a `Herd` handle.)
 pub struct App {
     all: Vec<Task>,
     tabs: Vec<Status>,
@@ -41,6 +44,9 @@ pub struct App {
     cursor: usize,
     focus: Focus,
     detail_scroll: u16,
+    collapsed: HashSet<String>,
+    /// Approx. list viewport height, refreshed each loop for paging math.
+    page: u16,
     quit: bool,
 }
 
@@ -53,6 +59,8 @@ impl App {
             cursor: 0,
             focus: Focus::List,
             detail_scroll: 0,
+            collapsed: HashSet::new(),
+            page: 10,
             quit: false,
         }
     }
@@ -61,19 +69,18 @@ impl App {
         self.tabs[self.tab]
     }
 
-    fn current(&self) -> Vec<&Task> {
-        let s = self.tab_status();
-        let mut v: Vec<&Task> = self.all.iter().filter(|t| t.status == s).collect();
-        v.sort_by(|a, b| a.id.cmp(&b.id));
-        v
-    }
-
     fn count(&self, s: Status) -> usize {
         self.all.iter().filter(|t| t.status == s).count()
     }
 
+    /// Visible rows for the current tab (tree built + collapse applied).
+    fn rows(&self) -> Vec<tree::Row<'_>> {
+        let flat = tree::build(&self.all, self.tab_status());
+        tree::apply_collapse(flat, &self.collapsed)
+    }
+
     fn selected(&self) -> Option<&Task> {
-        self.current().into_iter().nth(self.cursor)
+        self.rows().into_iter().nth(self.cursor).map(|r| r.task)
     }
 
     fn switch_tab(&mut self, delta: i32) {
@@ -85,12 +92,24 @@ impl App {
     }
 
     fn move_cursor(&mut self, delta: i32) {
-        let len = self.current().len() as i32;
+        let len = self.rows().len() as i32;
         if len == 0 {
             self.cursor = 0;
             return;
         }
         self.cursor = (self.cursor as i32 + delta).clamp(0, len - 1) as usize;
+    }
+
+    fn toggle_collapse(&mut self) {
+        let rows = self.rows();
+        if let Some(row) = rows.get(self.cursor) {
+            if row.has_children {
+                let id = row.task.id.clone();
+                if !self.collapsed.remove(&id) {
+                    self.collapsed.insert(id);
+                }
+            }
+        }
     }
 }
 
@@ -104,6 +123,8 @@ pub fn run(mut app: App) -> Result<()> {
 fn event_loop(term: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
     loop {
         term.draw(|f| render(app, f))?;
+        // Record the main-area height (minus tab + help lines) for paging.
+        app.page = term.size()?.height.saturating_sub(2).max(1);
         if let Event::Key(k) = event::read()? {
             if k.kind == KeyEventKind::Press {
                 handle_key(app, k);
@@ -117,22 +138,27 @@ fn event_loop(term: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> R
 }
 
 fn handle_key(app: &mut App, k: KeyEvent) {
-    if k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL) {
+    let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+    if ctrl && k.code == KeyCode::Char('c') {
         app.quit = true;
         return;
     }
+    let half = (app.page / 2).max(1) as i32;
+    let full = app.page.max(1) as i32;
     match app.focus {
         Focus::List => match k.code {
             KeyCode::Char('q') => app.quit = true,
             KeyCode::Char('j') | KeyCode::Down => app.move_cursor(1),
             KeyCode::Char('k') | KeyCode::Up => app.move_cursor(-1),
             KeyCode::Char('g') => app.cursor = 0,
-            KeyCode::Char('G') => {
-                let n = app.current().len();
-                app.cursor = n.saturating_sub(1);
-            }
+            KeyCode::Char('G') => app.move_cursor(i32::MAX / 4),
+            KeyCode::Char('d') => app.move_cursor(half),
+            KeyCode::Char('u') => app.move_cursor(-half),
+            KeyCode::PageDown => app.move_cursor(full),
+            KeyCode::PageUp => app.move_cursor(-full),
             KeyCode::Tab | KeyCode::Char(']') => app.switch_tab(1),
             KeyCode::BackTab | KeyCode::Char('[') => app.switch_tab(-1),
+            KeyCode::Char(' ') => app.toggle_collapse(),
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
                 if app.selected().is_some() {
                     app.focus = Focus::Detail;
@@ -150,6 +176,8 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('k') | KeyCode::Up => {
                 app.detail_scroll = app.detail_scroll.saturating_sub(1)
             }
+            KeyCode::Char('d') => app.detail_scroll = app.detail_scroll.saturating_add(half as u16),
+            KeyCode::Char('u') => app.detail_scroll = app.detail_scroll.saturating_sub(half as u16),
             KeyCode::Char('g') => app.detail_scroll = 0,
             _ => {}
         },
@@ -165,7 +193,7 @@ fn render(app: &App, frame: &mut Frame) {
     .areas(frame.area());
     render_tabs(app, frame, top);
     let [left, right] =
-        Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)]).areas(mid);
+        Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)]).areas(mid);
     render_list(app, frame, left);
     render_detail(app, frame, right);
     render_help(app, frame, bot);
@@ -188,34 +216,15 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
         .collect();
     let tabs = Tabs::new(titles)
         .select(app.tab)
-        .highlight_style(
-            Style::new()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
-        .divider("  ");
+        .highlight_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .divider(Span::styled("·", Style::new().fg(Color::DarkGray)));
     frame.render_widget(tabs, area);
 }
 
 fn render_list(app: &App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::List;
-    let block = Block::bordered()
-        .title(" yaks ")
-        .border_style(border_style(focused));
-    let rows = app.current();
-    let items: Vec<ListItem> = rows
-        .iter()
-        .map(|t| {
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("p{} ", t.priority),
-                    Style::new().fg(Color::DarkGray),
-                ),
-                Span::raw(t.title.clone()),
-            ]))
-        })
-        .collect();
+    let rows = app.rows();
+    let items: Vec<ListItem> = rows.iter().map(|r| list_item(r)).collect();
     let mut state = ListState::default();
     if !rows.is_empty() {
         state.select(Some(app.cursor.min(rows.len() - 1)));
@@ -225,18 +234,62 @@ fn render_list(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         Style::new().add_modifier(Modifier::REVERSED)
     };
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(hl)
-        .highlight_symbol("› ");
+    let list = List::new(items).highlight_style(hl);
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn list_item<'a>(r: &tree::Row<'a>) -> ListItem<'a> {
+    let indent = "  ".repeat(r.depth as usize);
+    let chevron = if r.has_children {
+        if r.collapsed { "▸ " } else { "▾ " }
+    } else {
+        "  "
+    };
+    let base = if r.ghost {
+        Style::new().fg(Color::DarkGray)
+    } else {
+        Style::new()
+    };
+    let glyph = format!("[{}] ", r.task.status.glyph());
+    let mut spans = vec![
+        Span::styled(
+            format!("{indent}{chevron}"),
+            Style::new().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            glyph,
+            if r.ghost {
+                base
+            } else {
+                Style::new().fg(Color::DarkGray)
+            },
+        ),
+        Span::styled(
+            format!("p{} ", r.task.priority),
+            Style::new().fg(Color::DarkGray),
+        ),
+        Span::styled(r.task.title.clone(), base),
+    ];
+    if r.collapsed && r.hidden > 0 {
+        spans.push(Span::styled(
+            format!("  (+{})", r.hidden),
+            Style::new().fg(Color::DarkGray),
+        ));
+    }
+    ListItem::new(Line::from(spans))
 }
 
 fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::Detail;
-    let block = Block::bordered()
-        .title(" detail ")
-        .border_style(border_style(focused));
+    // Sparse chrome: a single left divider rule, no surrounding box.
+    let block = Block::new()
+        .borders(Borders::LEFT)
+        .border_style(if focused {
+            Style::new().fg(Color::Cyan)
+        } else {
+            Style::new().fg(Color::DarkGray)
+        })
+        .padding(Padding::horizontal(1));
     let text = match app.selected() {
         None => vec![Line::from(Span::styled(
             "(no task)",
@@ -289,21 +342,13 @@ fn field(k: &str, v: &str) -> Line<'static> {
 
 fn render_help(app: &App, frame: &mut Frame, area: Rect) {
     let hint = match app.focus {
-        Focus::List => "j/k move · Tab tab · l detail · q quit",
+        Focus::List => "j/k move · Space fold · Tab tab · l detail · q quit",
         Focus::Detail => "j/k scroll · h back · q quit",
     };
     frame.render_widget(
         Paragraph::new(Span::styled(hint, Style::new().fg(Color::DarkGray))),
         area,
     );
-}
-
-fn border_style(focused: bool) -> Style {
-    if focused {
-        Style::new().fg(Color::Cyan)
-    } else {
-        Style::new().fg(Color::DarkGray)
-    }
 }
 
 // -- terminal lifecycle ---------------------------------------------------
@@ -343,7 +388,7 @@ mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
 
-    fn task(id: &str, title: &str, status: Status, priority: u8) -> Task {
+    fn task(id: &str, title: &str, status: Status, priority: u8, parent: Option<&str>) -> Task {
         Task {
             id: id.into(),
             title: title.into(),
@@ -352,7 +397,7 @@ mod tests {
             status,
             created: None,
             updated: None,
-            parent: None,
+            parent: parent.map(String::from),
             labels: vec![],
             depends_on: vec![],
             source: None,
@@ -381,24 +426,38 @@ mod tests {
     }
 
     fn sample() -> App {
+        // root-a (hairy) with children a1 (hairy) + a2 (shorn, ghost in Hairy tab);
+        // root-b (shaving, not in Hairy universe).
         App::new(vec![
-            task("fix-0001", "Alpha task", Status::Hairy, 2),
-            task("fix-0002", "Beta task", Status::Hairy, 1),
-            task("fix-0003", "Gamma in progress", Status::Shaving, 3),
-            task("fix-0004", "Delta done", Status::Shorn, 3),
+            task("a0", "Root A", Status::Hairy, 2, None),
+            task("a1", "Child A1", Status::Hairy, 3, Some("a0")),
+            task("a2", "Child A2 done", Status::Shorn, 3, Some("a0")),
+            task("b0", "Root B shaving", Status::Shaving, 1, None),
         ])
     }
 
     #[test]
-    fn board_list_focus() {
+    fn tree_with_ghost_family() {
+        // Hairy tab: Root A + A1 (focus), A2 (ghost, shorn) pulled in as family.
         insta::assert_snapshot!(draw(&sample(), 72, 14));
     }
 
     #[test]
-    fn detail_focus_second_tab() {
+    fn collapsed_root_hides_children() {
         let mut app = sample();
-        app.switch_tab(1); // Shaving
-        app.focus = Focus::Detail;
+        app.collapsed.insert("a0".into());
         insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn build_universe_pulls_ghost_descendants() {
+        let app = sample();
+        let rows = app.rows();
+        let ids: Vec<&str> = rows.iter().map(|r| r.task.id.as_str()).collect();
+        assert_eq!(ids, vec!["a0", "a1", "a2"]); // b0 (shaving) excluded from Hairy tab
+        let a2 = rows.iter().find(|r| r.task.id == "a2").unwrap();
+        assert!(a2.ghost, "shorn child should be a ghost in the Hairy tab");
+        let a0 = rows.iter().find(|r| r.task.id == "a0").unwrap();
+        assert!(a0.has_children && !a0.ghost);
     }
 }

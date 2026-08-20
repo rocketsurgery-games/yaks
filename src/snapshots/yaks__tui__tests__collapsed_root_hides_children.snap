@@ -1,0 +1,18 @@
+---
+source: src/tui.rs
+expression: "draw(&app, 72, 14)"
+---
+ Hairy 2 · Shaving 1 · Shorn 1
+▸ [H] p2 Root A  (+2)           │ id       a0
+                                │ title    Root A
+                                │ type     task
+                                │ priority 2
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+                                │
+j/k move · Space fold · Tab tab · l detail · q quit
