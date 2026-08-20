@@ -4,7 +4,7 @@ title: 'CI cross-tool interop test: Rust writes, Python reads'
 type: task
 priority: 3
 created: '2026-08-20T03:37:25Z'
-updated: '2026-08-20T03:37:25Z'
+updated: '2026-08-20T20:41:40Z'
 parent: yaksrs-5ef5
 labels:
 - rust
