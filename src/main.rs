@@ -68,6 +68,26 @@ enum Command {
     Slaughter { id: String },
     /// Revive a dead yak (move back to hairy).
     Revive { id: String },
+    /// Update fields, labels, or append a timestamped note.
+    Update {
+        id: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long = "type")]
+        kind: Option<String>,
+        #[arg(long)]
+        priority: Option<u8>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long = "add-label", num_args = 1..)]
+        add_label: Vec<String>,
+        #[arg(long = "remove-label", num_args = 1..)]
+        remove_label: Vec<String>,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+    },
 }
 
 // Every non-dead status, matching the Python tool's default `list` view.
@@ -157,6 +177,69 @@ fn main() -> Result<()> {
         Command::Regrow { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Regrown:")?,
         Command::Slaughter { id } => move_cmd(&root, &id, Status::Dead, "already dead", "Slaughtered:")?,
         Command::Revive { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Revived:")?,
+        Command::Update {
+            id,
+            title,
+            kind,
+            priority,
+            description,
+            add_label,
+            remove_label,
+            source,
+            note,
+        } => {
+            let Some(mut task) = store::load_task_by_id(&root, &id)? else {
+                eprintln!("error: task {id} not found");
+                std::process::exit(1);
+            };
+            let mut changed = false;
+            if let Some(t) = title {
+                task.title = t;
+                changed = true;
+            }
+            if let Some(k) = kind {
+                task.kind = k;
+                changed = true;
+            }
+            if let Some(p) = priority {
+                task.priority = p;
+                changed = true;
+            }
+            if let Some(d) = description {
+                task.body = d;
+                changed = true;
+            }
+            if !add_label.is_empty() {
+                for l in add_label {
+                    if !task.labels.contains(&l) {
+                        task.labels.push(l);
+                    }
+                }
+                changed = true;
+            }
+            if !remove_label.is_empty() {
+                task.labels.retain(|l| !remove_label.contains(l));
+                changed = true;
+            }
+            if let Some(s) = source {
+                if !s.is_empty() {
+                    task.source = Some(s);
+                    changed = true;
+                }
+            }
+            if let Some(n) = note {
+                let ts = store::now_iso();
+                task.body = store::append_note(&task.body, &ts, &n);
+                changed = true;
+            }
+            if changed {
+                task.updated = Some(store::now_iso());
+                store::write::save(&root, &task)?;
+                println!("Updated {id}");
+            } else {
+                println!("No changes specified.");
+            }
+        }
     }
     Ok(())
 }

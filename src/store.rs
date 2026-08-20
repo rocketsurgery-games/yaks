@@ -458,6 +458,23 @@ pub fn move_task(root: &Path, id: &str, dest: Status) -> Result<MoveOutcome> {
     Ok(MoveOutcome::Moved)
 }
 
+/// Load a single task by id (whatever status dir it is in).
+pub fn load_task_by_id(root: &Path, id: &str) -> Result<Option<Task>> {
+    let Some((status, path)) = find_task_file(root, id) else {
+        return Ok(None);
+    };
+    let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(parse_task(&text, status))
+}
+
+/// Append a timestamped note block to a body, matching the Python format
+/// (`<body>\n\n---\n\u{25b8} <ts>\n<note>`; no leading blank line when empty).
+pub fn append_note(body: &str, ts: &str, note: &str) -> String {
+    let desc = body.trim_end();
+    let sep = if desc.is_empty() { "" } else { "\n\n" };
+    format!("{desc}{sep}---\n\u{25b8} {ts}\n{note}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,5 +599,21 @@ mod move_tests {
         assert_eq!(move_task(&root, "yaksrs-mv02", Status::Shorn).unwrap(), MoveOutcome::AlreadyThere);
         assert_eq!(move_task(&root, "does-not-exist", Status::Hairy).unwrap(), MoveOutcome::NotFound);
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::append_note;
+
+    #[test]
+    fn append_note_on_empty_body_has_no_leading_blank() {
+        assert_eq!(append_note("", "2026-01-01T00:00:00Z", "hi"), "---\n\u{25b8} 2026-01-01T00:00:00Z\nhi");
+    }
+
+    #[test]
+    fn append_note_separates_from_existing_body() {
+        let out = append_note("Existing.\n", "2026-01-01T00:00:00Z", "second");
+        assert_eq!(out, "Existing.\n\n---\n\u{25b8} 2026-01-01T00:00:00Z\nsecond");
     }
 }
