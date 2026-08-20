@@ -187,6 +187,20 @@ const EVERY: [Status; 4] = [Status::Hairy, Status::Shaving, Status::Shorn, Statu
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let root = store::discover_root(&env::current_dir()?)?;
+    match store::schema_status(&root) {
+        store::SchemaStatus::Newer(v) => {
+            eprintln!(
+                "error: this herd uses schema v{v}, newer than this yaks supports (v{}). Upgrade yaks.",
+                store::SCHEMA
+            );
+            std::process::exit(1);
+        }
+        store::SchemaStatus::Older(v) => eprintln!(
+            "warning: herd schema v{v} predates this yaks (v{}); reading best-effort. Run the Python yaks once to migrate.",
+            store::SCHEMA
+        ),
+        store::SchemaStatus::Compatible => {}
+    }
 
     match cli.command {
         Command::List { filter, all, json } => {

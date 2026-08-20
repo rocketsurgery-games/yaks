@@ -558,6 +558,34 @@ pub fn reparent(root: &Path, id: &str, new_parent: Option<String>) -> Result<Rep
     Ok(Reparent::Done { new_parent })
 }
 
+/// On-disk schema version this build understands.
+pub const SCHEMA: u32 = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaStatus {
+    Compatible,
+    Older(u32),
+    Newer(u32),
+}
+
+/// Compare the herd's `.yaks/schema` marker against `SCHEMA`. A missing or
+/// unparseable marker is treated as compatible (don't block hand-made herds).
+pub fn schema_status(root: &Path) -> SchemaStatus {
+    let Ok(raw) = fs::read_to_string(root.join("schema")) else {
+        return SchemaStatus::Compatible;
+    };
+    let Ok(v) = raw.trim().parse::<u32>() else {
+        return SchemaStatus::Compatible;
+    };
+    if v > SCHEMA {
+        SchemaStatus::Newer(v)
+    } else if v < SCHEMA {
+        SchemaStatus::Older(v)
+    } else {
+        SchemaStatus::Compatible
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -767,5 +795,31 @@ mod graph_tests {
         assert_eq!(reparent(&root, "yaksrs-c", None).unwrap(), Reparent::Done { new_parent: None });
         assert!(matches!(reparent(&root, "yaksrs-c", None).unwrap(), Reparent::Error(_)));
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_root(schema: Option<&str>) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!("yaksrs-schema-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        fs::create_dir_all(&p).unwrap();
+        if let Some(v) = schema {
+            fs::write(p.join("schema"), v).unwrap();
+        }
+        p
+    }
+
+    #[test]
+    fn schema_gate() {
+        assert_eq!(schema_status(&temp_root(Some("3"))), SchemaStatus::Compatible);
+        assert_eq!(schema_status(&temp_root(Some("4\n"))), SchemaStatus::Newer(4));
+        assert_eq!(schema_status(&temp_root(Some("2"))), SchemaStatus::Older(2));
+        assert_eq!(schema_status(&temp_root(None)), SchemaStatus::Compatible);
+        assert_eq!(schema_status(&temp_root(Some("garbage"))), SchemaStatus::Compatible);
     }
 }
