@@ -475,6 +475,89 @@ pub fn append_note(body: &str, ts: &str, note: &str) -> String {
     format!("{desc}{sep}---\n\u{25b8} {ts}\n{note}")
 }
 
+/// Outcome of a dependency edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DepOutcome {
+    Added,
+    AlreadyDep,
+    Removed,
+    NotDep,
+    TaskNotFound,
+    DepNotFound,
+}
+
+/// Add `dep` to `id`'s depends_on (dep must exist; no-op if already present).
+pub fn add_dep(root: &Path, id: &str, dep: &str) -> Result<DepOutcome> {
+    let Some(mut task) = load_task_by_id(root, id)? else {
+        return Ok(DepOutcome::TaskNotFound);
+    };
+    if find_task_file(root, dep).is_none() {
+        return Ok(DepOutcome::DepNotFound);
+    }
+    if task.depends_on.iter().any(|d| d == dep) {
+        return Ok(DepOutcome::AlreadyDep);
+    }
+    task.depends_on.push(dep.to_string());
+    task.updated = Some(now_iso());
+    write::save(root, &task)?;
+    Ok(DepOutcome::Added)
+}
+
+/// Remove `dep` from `id`'s depends_on (no existence check on dep, per Python).
+pub fn remove_dep(root: &Path, id: &str, dep: &str) -> Result<DepOutcome> {
+    let Some(mut task) = load_task_by_id(root, id)? else {
+        return Ok(DepOutcome::TaskNotFound);
+    };
+    if !task.depends_on.iter().any(|d| d == dep) {
+        return Ok(DepOutcome::NotDep);
+    }
+    task.depends_on.retain(|d| d != dep);
+    task.updated = Some(now_iso());
+    write::save(root, &task)?;
+    Ok(DepOutcome::Removed)
+}
+
+/// Outcome of a reparent attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reparent {
+    Done { new_parent: Option<String> },
+    Error(String),
+}
+
+/// Repoint `id` under `new_parent` (None promotes to top-level). Mirrors
+/// yaklib.reparent: guards self/missing/descendant/no-op cases.
+pub fn reparent(root: &Path, id: &str, new_parent: Option<String>) -> Result<Reparent> {
+    let all = load(
+        root,
+        &[Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead],
+    )?;
+    let Some(task) = all.iter().find(|t| t.id == id) else {
+        return Ok(Reparent::Error(format!("task {id} not found")));
+    };
+    let old_parent = task.parent.clone();
+    if let Some(np) = &new_parent {
+        if np == id {
+            return Ok(Reparent::Error("cannot reparent a task under itself".into()));
+        }
+        if !all.iter().any(|t| &t.id == np) {
+            return Ok(Reparent::Error(format!("parent task {np} not found")));
+        }
+        if crate::filter::descendant_ids(&all, id, true).contains(np.as_str()) {
+            return Ok(Reparent::Error("cannot reparent under own descendant".into()));
+        }
+        if old_parent.as_deref() == Some(np.as_str()) {
+            return Ok(Reparent::Error(format!("{id} is already a child of {np}")));
+        }
+    } else if old_parent.is_none() {
+        return Ok(Reparent::Error(format!("{id} is already a top-level task")));
+    }
+    let mut t = task.clone();
+    t.parent = new_parent.clone();
+    t.updated = Some(now_iso());
+    write::save(root, &t)?;
+    Ok(Reparent::Done { new_parent })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,5 +698,74 @@ mod note_tests {
     fn append_note_separates_from_existing_body() {
         let out = append_note("Existing.\n", "2026-01-01T00:00:00Z", "second");
         assert_eq!(out, "Existing.\n\n---\n\u{25b8} 2026-01-01T00:00:00Z\nsecond");
+    }
+}
+
+#[cfg(test)]
+mod graph_tests {
+    use super::*;
+    use crate::model::Status;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_root() -> PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!("yaksrs-graph-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        for st in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
+            fs::create_dir_all(p.join(st.dir())).unwrap();
+        }
+        p
+    }
+
+    fn mk(root: &Path, id: &str, parent: Option<&str>) {
+        let t = Task {
+            id: id.into(),
+            title: id.into(),
+            kind: "task".into(),
+            priority: 3,
+            status: Status::Hairy,
+            created: None,
+            updated: None,
+            parent: parent.map(String::from),
+            labels: vec![],
+            depends_on: vec![],
+            source: None,
+            body: String::new(),
+        };
+        write::save(root, &t).unwrap();
+    }
+
+    #[test]
+    fn dep_add_remove_lifecycle() {
+        let root = temp_root();
+        mk(&root, "yaksrs-a", None);
+        mk(&root, "yaksrs-b", None);
+        assert_eq!(add_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(), DepOutcome::Added);
+        assert_eq!(add_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(), DepOutcome::AlreadyDep);
+        assert_eq!(add_dep(&root, "yaksrs-a", "ghost").unwrap(), DepOutcome::DepNotFound);
+        assert_eq!(add_dep(&root, "ghost", "yaksrs-b").unwrap(), DepOutcome::TaskNotFound);
+        assert_eq!(load_task_by_id(&root, "yaksrs-a").unwrap().unwrap().depends_on, vec!["yaksrs-b".to_string()]);
+        assert_eq!(remove_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(), DepOutcome::Removed);
+        assert_eq!(remove_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(), DepOutcome::NotDep);
+        assert!(load_task_by_id(&root, "yaksrs-a").unwrap().unwrap().depends_on.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reparent_rules() {
+        let root = temp_root();
+        mk(&root, "yaksrs-p", None);
+        mk(&root, "yaksrs-c", None);
+        mk(&root, "yaksrs-g", Some("yaksrs-c")); // g is a child of c
+        assert!(matches!(reparent(&root, "yaksrs-c", Some("yaksrs-c".into())).unwrap(), Reparent::Error(_)));
+        assert!(matches!(reparent(&root, "yaksrs-c", Some("ghost".into())).unwrap(), Reparent::Error(_)));
+        assert!(matches!(reparent(&root, "yaksrs-c", Some("yaksrs-g".into())).unwrap(), Reparent::Error(_)));
+        assert_eq!(reparent(&root, "yaksrs-c", Some("yaksrs-p".into())).unwrap(), Reparent::Done { new_parent: Some("yaksrs-p".into()) });
+        assert_eq!(load_task_by_id(&root, "yaksrs-c").unwrap().unwrap().parent.as_deref(), Some("yaksrs-p"));
+        assert!(matches!(reparent(&root, "yaksrs-c", Some("yaksrs-p".into())).unwrap(), Reparent::Error(_)));
+        assert_eq!(reparent(&root, "yaksrs-c", None).unwrap(), Reparent::Done { new_parent: None });
+        assert!(matches!(reparent(&root, "yaksrs-c", None).unwrap(), Reparent::Error(_)));
+        let _ = fs::remove_dir_all(&root);
     }
 }

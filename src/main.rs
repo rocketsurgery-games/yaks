@@ -15,7 +15,7 @@ use std::path::Path;
 
 use filter::FilterSpec;
 use model::{Status, Task};
-use store::MoveOutcome;
+use store::{DepOutcome, MoveOutcome, Reparent};
 
 #[derive(Parser)]
 #[command(name = "yaks", version, about = "Filesystem-native task tracker (Rust)")]
@@ -128,6 +128,27 @@ enum Command {
     Slaughter { id: String },
     /// Revive a dead yak (move back to hairy).
     Revive { id: String },
+    /// Add or remove a dependency.
+    Dep {
+        #[command(subcommand)]
+        action: DepAction,
+    },
+    /// Move a task under a new parent (--parent) or to top-level (--unparent).
+    Reparent {
+        id: String,
+        #[arg(long)]
+        parent: Option<String>,
+        #[arg(long)]
+        unparent: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DepAction {
+    /// Add DEP_ID as a dependency of ID.
+    Add { id: String, dep_id: String },
+    /// Remove DEP_ID as a dependency of ID.
+    Remove { id: String, dep_id: String },
 }
 
 const NON_DEAD: [Status; 3] = [Status::Hairy, Status::Shaving, Status::Shorn];
@@ -337,6 +358,48 @@ fn main() -> Result<()> {
         Command::Regrow { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Regrown:")?,
         Command::Slaughter { id } => move_cmd(&root, &id, Status::Dead, "already dead", "Slaughtered:")?,
         Command::Revive { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Revived:")?,
+        Command::Dep { action } => match action {
+            DepAction::Add { id, dep_id } => match store::add_dep(&root, &id, &dep_id)? {
+                DepOutcome::TaskNotFound => {
+                    eprintln!("error: task {id} not found");
+                    std::process::exit(1);
+                }
+                DepOutcome::DepNotFound => {
+                    eprintln!("error: dependency task {dep_id} not found");
+                    std::process::exit(1);
+                }
+                DepOutcome::AlreadyDep => println!("{dep_id} is already a dependency of {id}"),
+                DepOutcome::Added => println!("Added dependency: {id} -> {dep_id}"),
+                _ => {}
+            },
+            DepAction::Remove { id, dep_id } => match store::remove_dep(&root, &id, &dep_id)? {
+                DepOutcome::TaskNotFound => {
+                    eprintln!("error: task {id} not found");
+                    std::process::exit(1);
+                }
+                DepOutcome::NotDep => println!("{dep_id} is not a dependency of {id}"),
+                DepOutcome::Removed => println!("Removed dependency: {id} -> {dep_id}"),
+                _ => {}
+            },
+        },
+        Command::Reparent { id, parent, unparent } => {
+            let new_parent = if unparent {
+                None
+            } else if parent.is_some() {
+                parent
+            } else {
+                eprintln!("error: specify --parent TASK_ID or --unparent");
+                std::process::exit(1);
+            };
+            match store::reparent(&root, &id, new_parent)? {
+                Reparent::Error(msg) => {
+                    eprintln!("error: {msg}");
+                    std::process::exit(1);
+                }
+                Reparent::Done { new_parent: None } => println!("Promoted {id} to top-level"),
+                Reparent::Done { new_parent: Some(p) } => println!("Reparented {id} under {p}"),
+            }
+        }
     }
     Ok(())
 }
