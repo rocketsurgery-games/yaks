@@ -6,6 +6,7 @@
 
 mod filter;
 mod model;
+mod rollup;
 mod store;
 
 use anyhow::Result;
@@ -141,6 +142,8 @@ enum Command {
         #[arg(long)]
         unparent: bool,
     },
+    /// Group yaks by the external issue they roll up to.
+    Rollup(RollupArgs),
 }
 
 #[derive(Subcommand)]
@@ -149,6 +152,15 @@ enum DepAction {
     Add { id: String, dep_id: String },
     /// Remove DEP_ID as a dependency of ID.
     Remove { id: String, dep_id: String },
+}
+
+#[derive(Args, Default)]
+struct RollupArgs {
+    #[command(flatten)]
+    filter: FilterFlags,
+    /// Print just the external keys (one per line) for pasting into a PR body.
+    #[arg(long)]
+    keys: bool,
 }
 
 const NON_DEAD: [Status; 3] = [Status::Hairy, Status::Shaving, Status::Shorn];
@@ -398,6 +410,39 @@ fn main() -> Result<()> {
                 }
                 Reparent::Done { new_parent: None } => println!("Promoted {id} to top-level"),
                 Reparent::Done { new_parent: Some(p) } => println!("Reparented {id} under {p}"),
+            }
+        }
+        Command::Rollup(args) => {
+            let tasks = store::load(&root, &NON_DEAD)?;
+            let (groups, unsourced) = rollup::build(&tasks, &build_spec(args.filter));
+            if args.keys {
+                let mut seen = std::collections::HashSet::new();
+                for g in &groups {
+                    let k = g.head();
+                    if seen.insert(k.clone()) {
+                        println!("{k}");
+                    }
+                }
+                return Ok(());
+            }
+            if groups.is_empty() {
+                println!("No yaks with an external source.");
+            } else {
+                for g in &groups {
+                    println!("{}  ({})  {}", g.head(), g.tracker, g.source);
+                    for y in &g.yaks {
+                        let mut row = fmt_row(y.task);
+                        if let Some(from) = &y.inherited_from {
+                            row.push_str(&format!("  (via {from})"));
+                        }
+                        println!("{row}");
+                    }
+                    println!();
+                }
+                if unsourced > 0 {
+                    let noun = if unsourced == 1 { "yak" } else { "yaks" };
+                    println!("{unsourced} {noun} in scope with no external source (omitted).");
+                }
             }
         }
     }
