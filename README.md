@@ -38,8 +38,11 @@ cargo build --release
 
 ```sh
 cargo build --release
-hyperfine --warmup 5 './target/release/yaks list'   # vs the ~45 ms Python baseline
+python3 bench/startup.py        # rust vs python; prefers hyperfine if installed
+# or directly: hyperfine -N './target/release/yaks list'
 ```
+
+Current numbers on the dev herd: Rust `yaks list` ~6 ms median vs Python ~45 ms.
 
 ## Roadmap (from the yak-2219 research)
 
