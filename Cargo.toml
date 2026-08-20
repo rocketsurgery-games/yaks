@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # Planned, not yet wired — see README roadmap and the yak-2219 research arc:
 #   ratatui + crossterm   TUI                                  (yak-ef0f)

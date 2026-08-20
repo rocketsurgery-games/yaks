@@ -181,7 +181,6 @@ fn non_empty(s: String) -> Option<String> {
 ///
 /// Marked `allow(dead_code)` for now: exercised by the round-trip tests and
 /// wired into the `create`/`update` commands next (yaksrs-a2a4).
-#[allow(dead_code)]
 pub mod write {
     use super::*;
 
@@ -320,6 +319,93 @@ pub mod write {
         fs::rename(&tmp, path).with_context(|| format!("renaming into {}", path.display()))?;
         Ok(())
     }
+}
+
+/// Config read from `.yaks/config.yaml` (only the keys we use).
+pub struct Config {
+    pub prefix: String,
+    pub default_type: String,
+    pub default_priority: u8,
+}
+
+/// Read `.yaks/config.yaml`; missing file/keys fall back to the Python
+/// defaults (prefix "yak", type "task", priority 3).
+pub fn read_config(root: &Path) -> Config {
+    let mut c = Config {
+        prefix: "yak".to_string(),
+        default_type: "task".to_string(),
+        default_priority: 3,
+    };
+    if let Ok(text) = fs::read_to_string(root.join("config.yaml")) {
+        for line in text.lines() {
+            let Some((k, v)) = line.split_once(':') else {
+                continue;
+            };
+            let v = unquote(v.trim());
+            match k.trim() {
+                "prefix" if !v.is_empty() => c.prefix = v,
+                "default_type" if !v.is_empty() => c.default_type = v,
+                "default_priority" => {
+                    if let Ok(n) = v.parse() {
+                        c.default_priority = n;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    c
+}
+
+/// Every task id present on disk (all statuses, including dead).
+pub fn all_ids(root: &Path) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    for st in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
+        let Ok(rd) = fs::read_dir(root.join(st.dir())) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.extension().and_then(|e| e.to_str()) == Some("md") {
+                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                    ids.insert(stem.to_string());
+                }
+            }
+        }
+    }
+    ids
+}
+
+/// Generate a collision-free `{prefix}-{4 lowercase hex}` id (Python-compatible).
+pub fn generate_id(root: &Path, prefix: &str) -> Result<String> {
+    let existing = all_ids(root);
+    let mut state = rng_seed();
+    for _ in 0..1000 {
+        let n = xorshift(&mut state) & 0xffff;
+        let id = format!("{prefix}-{n:04x}");
+        if !existing.contains(&id) {
+            return Ok(id);
+        }
+    }
+    anyhow::bail!("could not generate a unique id after 1000 attempts")
+}
+
+fn rng_seed() -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let s = nanos ^ ((std::process::id() as u64) << 32) ^ 0x9e37_79b9_7f4a_7c15;
+    if s == 0 { 0x1234_5678_9abc_def0 } else { s }
+}
+
+fn xorshift(s: &mut u64) -> u64 {
+    let mut x = *s;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *s = x;
+    x
 }
 
 #[cfg(test)]

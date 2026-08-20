@@ -1,13 +1,14 @@
 //! yaks-rs — a filesystem-native task tracker (Rust port).
 //!
 //! Reads and writes the SAME `.yaks/` files as the Python `yaks` tool.
-//! Read-only commands so far: `list`, `show`, `next`. The write path
-//! (create/update/status-moves) is being ported under Phase 1 (yaksrs-6e21).
+//! Commands so far: `list`, `show`, `next`, `create`. More of the write path
+//! (update, status moves, deps) is being ported under Phase 1 (yaksrs-6e21).
 
 mod model;
 mod store;
 
 use anyhow::Result;
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 use std::env;
@@ -32,11 +33,34 @@ enum Command {
     Show { id: String },
     /// List hairy tasks whose dependencies are all resolved.
     Next,
+    /// Create a new task (in hairy).
+    Create {
+        #[arg(long)]
+        title: String,
+        #[arg(long = "type")]
+        kind: Option<String>,
+        #[arg(long)]
+        priority: Option<u8>,
+        #[arg(long)]
+        parent: Option<String>,
+        #[arg(long, num_args = 1..)]
+        labels: Vec<String>,
+        #[arg(long = "depends-on", num_args = 1..)]
+        depends_on: Vec<String>,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+    },
 }
 
 // Every non-dead status, matching the Python tool's default `list` view.
 const NON_DEAD: [Status; 3] = [Status::Hairy, Status::Shaving, Status::Shorn];
 const EVERY: [Status; 4] = [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead];
+
+fn now_iso() -> String {
+    Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -79,6 +103,42 @@ fn main() -> Result<()> {
                 println!("{}", t.summary());
             }
             eprintln!("\n{} ready", ready.len());
+        }
+        Command::Create {
+            title,
+            kind,
+            priority,
+            parent,
+            labels,
+            depends_on,
+            source,
+            description,
+        } => {
+            let cfg = store::read_config(&root);
+            if let Some(p) = &parent {
+                if !store::all_ids(&root).contains(p) {
+                    eprintln!("error: parent task {p} not found");
+                    std::process::exit(1);
+                }
+            }
+            let id = store::generate_id(&root, &cfg.prefix)?;
+            let now = now_iso();
+            let task = Task {
+                id: id.clone(),
+                title: title.clone(),
+                kind: kind.unwrap_or(cfg.default_type),
+                priority: priority.unwrap_or(cfg.default_priority),
+                status: Status::Hairy,
+                created: Some(now.clone()),
+                updated: Some(now),
+                parent,
+                labels,
+                depends_on,
+                source,
+                body: description.unwrap_or_default(),
+            };
+            store::write::save(&root, &task)?;
+            println!("Created {id}: {title}");
         }
     }
     Ok(())
