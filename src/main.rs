@@ -1,19 +1,19 @@
 //! yaks-rs — a filesystem-native task tracker (Rust port).
 //!
 //! Reads and writes the SAME `.yaks/` files as the Python `yaks` tool.
-//! Commands: list, show, next, create, and the status moves
-//! (shave/shorn/regrow/slaughter/revive). More of Phase 1 (update, deps,
-//! filtering) is in progress under yaksrs-6e21.
+//! Commands: list, show, next, tangled, search, stats, create, update, and
+//! the status moves (shave/shorn/regrow/slaughter/revive).
 
+mod filter;
 mod model;
 mod store;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
-use std::collections::HashMap;
+use clap::{Args, Parser, Subcommand};
 use std::env;
 use std::path::Path;
 
+use filter::FilterSpec;
 use model::{Status, Task};
 use store::MoveOutcome;
 
@@ -24,10 +24,33 @@ struct Cli {
     command: Command,
 }
 
+/// Shared narrowing flags (AND across fields; OR within a repeated field).
+#[derive(Args, Default)]
+struct FilterFlags {
+    #[arg(long)]
+    status: Vec<String>,
+    #[arg(long = "type")]
+    kind: Vec<String>,
+    #[arg(long)]
+    priority: Vec<u8>,
+    #[arg(long)]
+    label: Vec<String>,
+    #[arg(long)]
+    search: Option<String>,
+    #[arg(long)]
+    ready: bool,
+    #[arg(long)]
+    tangled: bool,
+    #[arg(long = "parent-of")]
+    parent_of: Option<String>,
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// List tasks (non-dead by default; --all also includes dead).
     List {
+        #[command(flatten)]
+        filter: FilterFlags,
         #[arg(long)]
         all: bool,
     },
@@ -35,7 +58,24 @@ enum Command {
     Show { id: String },
     /// List hairy tasks whose dependencies are all resolved.
     #[command(visible_alias = "ready")]
-    Next,
+    Next {
+        #[command(flatten)]
+        filter: FilterFlags,
+    },
+    /// List hairy tasks with at least one unresolved dependency.
+    #[command(visible_alias = "blocked")]
+    Tangled {
+        #[command(flatten)]
+        filter: FilterFlags,
+    },
+    /// Substring search over id/title/description.
+    Search {
+        query: String,
+        #[command(flatten)]
+        filter: FilterFlags,
+    },
+    /// Show task statistics.
+    Stats,
     /// Create a new task (in hairy).
     Create {
         #[arg(long)]
@@ -55,19 +95,6 @@ enum Command {
         #[arg(long)]
         description: Option<String>,
     },
-    /// Start shaving a yak (move to shaving).
-    #[command(visible_alias = "work")]
-    Shave { id: String },
-    /// Mark a yak shorn (move to shorn).
-    #[command(visible_alias = "close")]
-    Shorn { id: String },
-    /// Regrow a shorn yak (move back to hairy).
-    #[command(visible_alias = "reopen")]
-    Regrow { id: String },
-    /// Slaughter a yak (move to dead).
-    Slaughter { id: String },
-    /// Revive a dead yak (move back to hairy).
-    Revive { id: String },
     /// Update fields, labels, or append a timestamped note.
     Update {
         id: String,
@@ -88,25 +115,40 @@ enum Command {
         #[arg(long)]
         note: Option<String>,
     },
+    /// Start shaving a yak (move to shaving).
+    #[command(visible_alias = "work")]
+    Shave { id: String },
+    /// Mark a yak shorn (move to shorn).
+    #[command(visible_alias = "close")]
+    Shorn { id: String },
+    /// Regrow a shorn yak (move back to hairy).
+    #[command(visible_alias = "reopen")]
+    Regrow { id: String },
+    /// Slaughter a yak (move to dead).
+    Slaughter { id: String },
+    /// Revive a dead yak (move back to hairy).
+    Revive { id: String },
 }
 
-// Every non-dead status, matching the Python tool's default `list` view.
 const NON_DEAD: [Status; 3] = [Status::Hairy, Status::Shaving, Status::Shorn];
 const EVERY: [Status; 4] = [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead];
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let cwd = env::current_dir()?;
-    let root = store::discover_root(&cwd)?;
+    let root = store::discover_root(&env::current_dir()?)?;
 
     match cli.command {
-        Command::List { all } => {
-            let statuses: &[Status] = if all { &EVERY } else { &NON_DEAD };
-            let tasks = store::load(&root, statuses)?;
-            for t in &tasks {
-                println!("{}", t.summary());
+        Command::List { filter, all } => {
+            let tasks = store::load(&root, &EVERY)?;
+            let mut rows = filter::apply(&tasks, &build_spec(filter), all);
+            rows.sort_by(|a, b| status_rank(a.status).cmp(&status_rank(b.status)).then_with(|| a.id.cmp(&b.id)));
+            if rows.is_empty() {
+                println!("No tasks found.");
+            } else {
+                for t in rows {
+                    println!("{}", fmt_row(t));
+                }
             }
-            eprintln!("\n{} task(s)", tasks.len());
         }
         Command::Show { id } => {
             let all = store::load(&root, &EVERY)?;
@@ -118,23 +160,78 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Command::Next => {
-            let all = store::load(&root, &EVERY)?;
-            let status_by_id: HashMap<&str, Status> =
-                all.iter().map(|t| (t.id.as_str(), t.status)).collect();
-            let ready: Vec<&Task> = all
-                .iter()
-                .filter(|t| t.status == Status::Hairy)
-                .filter(|t| {
-                    t.depends_on
-                        .iter()
-                        .all(|d| status_by_id.get(d.as_str()).is_none_or(|s| s.is_resolved()))
-                })
-                .collect();
-            for t in &ready {
-                println!("{}", t.summary());
+        Command::Next { filter } => {
+            let mut spec = build_spec(filter);
+            spec.statuses = vec![Status::Hairy];
+            spec.ready_only = true;
+            let tasks = store::load(&root, &EVERY)?;
+            let rows = filter::apply(&tasks, &spec, false);
+            if rows.is_empty() {
+                println!("No yaks ready to shave.");
+            } else {
+                println!("Ready to shave (all dependencies met):");
+                for t in rows {
+                    println!("{}", fmt_plain_row(t));
+                }
             }
-            eprintln!("\n{} ready", ready.len());
+        }
+        Command::Tangled { filter } => {
+            let mut spec = build_spec(filter);
+            spec.statuses = vec![Status::Hairy];
+            spec.tangled_only = true;
+            let tasks = store::load(&root, &EVERY)?;
+            let resolved = filter::resolved_ids(&tasks);
+            let rows = filter::apply(&tasks, &spec, false);
+            if rows.is_empty() {
+                println!("No tangled yaks.");
+            } else {
+                println!("Tangled yaks:");
+                for t in rows {
+                    let waiting = filter::unresolved_deps(t, &resolved).join(", ");
+                    println!("  {}  {}  (waiting on: {})", t.id, t.title, waiting);
+                }
+            }
+        }
+        Command::Search { query, filter } => {
+            let mut spec = build_spec(filter);
+            spec.search = Some(query);
+            let tasks = store::load(&root, &EVERY)?;
+            let mut rows = filter::apply(&tasks, &spec, false);
+            rows.sort_by(|a, b| status_rank(a.status).cmp(&status_rank(b.status)).then_with(|| a.id.cmp(&b.id)));
+            if rows.is_empty() {
+                println!("No tasks found.");
+            } else {
+                for t in rows {
+                    println!("{}", fmt_row(t));
+                }
+            }
+        }
+        Command::Stats => {
+            let tasks = store::load(&root, &NON_DEAD)?;
+            let count = |s: Status| tasks.iter().filter(|t| t.status == s).count();
+            println!(
+                "Total: {}  Hairy: {}  Shaving: {}  Shorn: {}",
+                tasks.len(),
+                count(Status::Hairy),
+                count(Status::Shaving),
+                count(Status::Shorn),
+            );
+            let mut by_type: Vec<(String, usize)> = fold_counts(tasks.iter().map(|t| t.kind.clone()));
+            if !by_type.is_empty() {
+                by_type.sort();
+                println!("By type:");
+                for (k, v) in by_type {
+                    println!("  {k}: {v}");
+                }
+            }
+            let mut by_pri: Vec<(u8, usize)> = fold_counts(tasks.iter().map(|t| t.priority));
+            if !by_pri.is_empty() {
+                by_pri.sort();
+                println!("By priority:");
+                for (k, v) in by_pri {
+                    println!("  p{k}: {v}");
+                }
+            }
         }
         Command::Create {
             title,
@@ -172,11 +269,6 @@ fn main() -> Result<()> {
             store::write::save(&root, &task)?;
             println!("Created {id}: {title}");
         }
-        Command::Shave { id } => move_cmd(&root, &id, Status::Shaving, "already being shaved", "Shaving")?,
-        Command::Shorn { id } => move_cmd(&root, &id, Status::Shorn, "already shorn", "Shorn!")?,
-        Command::Regrow { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Regrown:")?,
-        Command::Slaughter { id } => move_cmd(&root, &id, Status::Dead, "already dead", "Slaughtered:")?,
-        Command::Revive { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Revived:")?,
         Command::Update {
             id,
             title,
@@ -240,11 +332,84 @@ fn main() -> Result<()> {
                 println!("No changes specified.");
             }
         }
+        Command::Shave { id } => move_cmd(&root, &id, Status::Shaving, "already being shaved", "Shaving")?,
+        Command::Shorn { id } => move_cmd(&root, &id, Status::Shorn, "already shorn", "Shorn!")?,
+        Command::Regrow { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Regrown:")?,
+        Command::Slaughter { id } => move_cmd(&root, &id, Status::Dead, "already dead", "Slaughtered:")?,
+        Command::Revive { id } => move_cmd(&root, &id, Status::Hairy, "already hairy", "Revived:")?,
     }
     Ok(())
 }
 
-/// Perform a status move and render Python-compatible messages.
+fn build_spec(f: FilterFlags) -> FilterSpec {
+    FilterSpec {
+        statuses: f.status.iter().filter_map(|s| parse_status(s)).collect(),
+        types: f.kind,
+        priorities: f.priority,
+        labels: f.label,
+        search: f.search,
+        ready_only: f.ready,
+        tangled_only: f.tangled,
+        parent: f.parent_of,
+    }
+}
+
+fn status_rank(s: Status) -> u8 {
+    match s {
+        Status::Hairy => 0,
+        Status::Shaving => 1,
+        Status::Shorn => 2,
+        Status::Dead => 3,
+    }
+}
+
+fn parse_status(s: &str) -> Option<Status> {
+    match s.to_lowercase().as_str() {
+        "hairy" => Some(Status::Hairy),
+        "shaving" => Some(Status::Shaving),
+        "shorn" => Some(Status::Shorn),
+        "dead" => Some(Status::Dead),
+        _ => None,
+    }
+}
+
+fn fold_counts<K: std::hash::Hash + Eq, I: Iterator<Item = K>>(it: I) -> Vec<(K, usize)> {
+    let mut m: std::collections::HashMap<K, usize> = std::collections::HashMap::new();
+    for k in it {
+        *m.entry(k).or_insert(0) += 1;
+    }
+    m.into_iter().collect()
+}
+
+/// `  [X] id  pN type     title [labels] (deps: ...)` — matches Python _fmt_task_row.
+fn fmt_row(t: &Task) -> String {
+    let labels = if t.labels.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", t.labels.join(","))
+    };
+    let deps = if t.depends_on.is_empty() {
+        String::new()
+    } else {
+        format!(" (deps: {})", t.depends_on.join(","))
+    };
+    format!(
+        "  [{}] {}  p{} {:8} {}{}{}",
+        t.status.glyph(),
+        t.id,
+        t.priority,
+        t.kind,
+        t.title,
+        labels,
+        deps
+    )
+}
+
+/// `  id  pN type     title` — matches Python cmd_next row (no status glyph).
+fn fmt_plain_row(t: &Task) -> String {
+    format!("  {}  p{} {:8} {}", t.id, t.priority, t.kind, t.title)
+}
+
 fn move_cmd(root: &Path, id: &str, dest: Status, already: &str, done: &str) -> Result<()> {
     match store::move_task(root, id, dest)? {
         MoveOutcome::NotFound => {

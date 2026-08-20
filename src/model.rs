@@ -30,7 +30,7 @@ impl Status {
         match self {
             Status::Hairy => 'H',
             Status::Shaving => 'S',
-            Status::Shorn => 'C', // Complete
+            Status::Shorn => 'N',
             Status::Dead => 'X',
         }
     }
@@ -62,24 +62,3 @@ pub struct Task {
     pub body: String,
 }
 
-impl Task {
-    /// One-line summary for `list` / `next`.
-    pub fn summary(&self) -> String {
-        let mut extra = String::new();
-        if !self.labels.is_empty() {
-            extra.push_str(&format!(" [{}]", self.labels.join(",")));
-        }
-        if !self.depends_on.is_empty() {
-            extra.push_str(&format!(" (deps: {})", self.depends_on.join(",")));
-        }
-        format!(
-            "[{}] {:<9} p{} {:<8} {}{}",
-            self.status.glyph(),
-            self.id,
-            self.priority,
-            self.kind,
-            self.title,
-            extra
-        )
-    }
-}
