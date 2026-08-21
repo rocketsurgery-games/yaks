@@ -3,9 +3,9 @@ source: src/tui.rs
 expression: "draw(&app, 72, 14)"
 ---
  Hairy 2 · Shaving 1 · Shorn 1
-▸ [H] p2 Root A  (+2)           │ id       a0
-                                │ title    Root A
-                                │ type     task
+▾ [H] p2 Root A                 │ id       a0
+    [H] p3 Child A1             │ title    Root A
+    [N] p3 Child A2 done        │ type     task
                                 │ priority 2
                                 │
                                 │
@@ -15,4 +15,4 @@ expression: "draw(&app, 72, 14)"
                                 │
                                 │
                                 │
-j/k move · c new · E edit · S/P/T/L/X · D/R link · / find · Tab tab · q
+/child

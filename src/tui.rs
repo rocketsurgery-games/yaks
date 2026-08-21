@@ -61,6 +61,8 @@ enum Overlay {
     Edit(Editor),
     /// A filter-as-you-type task picker (dependencies, reparent).
     Fuzzy(FuzzyPick),
+    /// Inline incremental search: edits `App.filter.search` live.
+    Search(SearchBox),
 }
 
 /// What a resolved single-key pick should do (carries the target task id).
@@ -146,6 +148,33 @@ enum FuzzyAction {
     Reparent(String),
 }
 
+/// Inline incremental search box. Editing it updates `App.filter.search` on
+/// every keystroke (live preview); Esc restores the pre-search query.
+struct SearchBox {
+    query: RefCell<EditorState>,
+    handler: EditorEventHandler,
+    /// The `filter.search` value before opening, restored on cancel.
+    saved: Option<String>,
+}
+
+impl SearchBox {
+    fn new(vim: bool, initial: Option<String>) -> Self {
+        let seed = initial.clone().unwrap_or_default();
+        let mut st = EditorState::new(Lines::from(seed.as_str()));
+        st.set_single_line(true);
+        st.mode = EditorMode::Insert;
+        SearchBox {
+            query: RefCell::new(st),
+            handler: make_handler(vim),
+            saved: initial,
+        }
+    }
+
+    fn query_text(&self) -> String {
+        self.query.borrow().lines.to_string()
+    }
+}
+
 impl FuzzyPick {
     fn new(
         vim: bool,
@@ -225,6 +254,8 @@ pub struct App {
     focus: Focus,
     detail_scroll: u16,
     collapsed: HashSet<String>,
+    /// The live view filter applied by the tree (re-colors + prunes).
+    filter: FilterSpec,
     /// Approx. list viewport height, refreshed each loop for paging math.
     page: u16,
     overlay: Overlay,
@@ -248,6 +279,7 @@ impl App {
             focus: Focus::List,
             detail_scroll: 0,
             collapsed: HashSet::new(),
+            filter: FilterSpec::default(),
             page: 10,
             overlay: Overlay::None,
             notification: None,
@@ -292,8 +324,18 @@ impl App {
 
     /// Visible rows for the current tab (tree built + collapse applied).
     fn rows(&self) -> Vec<tree::Row<'_>> {
-        let flat = tree::build(&self.all, self.tab_status());
+        let flat = tree::build(&self.all, self.tab_status(), &self.filter);
         tree::apply_collapse(flat, &self.collapsed)
+    }
+
+    /// Keep the cursor within the current row count (after a filter change).
+    fn clamp_cursor(&mut self) {
+        let len = self.rows().len();
+        self.cursor = if len == 0 {
+            0
+        } else {
+            self.cursor.min(len - 1)
+        };
     }
 
     fn selected(&self) -> Option<&Task> {
@@ -483,6 +525,11 @@ impl App {
         ));
     }
 
+    fn open_search(&mut self) {
+        let cur = self.filter.search.clone();
+        self.overlay = Overlay::Search(SearchBox::new(self.editor_vim, cur));
+    }
+
     /// Jump to the Hairy tab (where new tasks land) and place the cursor on `id`.
     fn select_id(&mut self, id: &str) {
         if let Some(i) = self.tabs.iter().position(|&s| s == Status::Hairy) {
@@ -539,6 +586,46 @@ impl App {
             }
             return;
         }
+        // Inline search: every keystroke edits the live filter for instant
+        // preview; Enter keeps it, Esc restores the pre-search query.
+        if matches!(self.overlay, Overlay::Search(_)) {
+            match k.code {
+                KeyCode::Esc => {
+                    let saved = match &self.overlay {
+                        Overlay::Search(sb) => sb.saved.clone(),
+                        _ => None,
+                    };
+                    self.filter.search = saved;
+                    self.overlay = Overlay::None;
+                    self.clamp_cursor();
+                    self.notification = Some("search cleared".into());
+                }
+                KeyCode::Enter => {
+                    let q = match &self.overlay {
+                        Overlay::Search(sb) => sb.query_text(),
+                        _ => String::new(),
+                    };
+                    self.overlay = Overlay::None;
+                    self.notification = Some(if q.is_empty() {
+                        "search cleared".into()
+                    } else {
+                        format!("filter: {q}")
+                    });
+                }
+                _ => {
+                    if let Overlay::Search(sb) = &mut self.overlay {
+                        sb.handler.on_key_event(k, &mut sb.query.borrow_mut());
+                    }
+                    let q = match &self.overlay {
+                        Overlay::Search(sb) => sb.query_text(),
+                        _ => String::new(),
+                    };
+                    self.filter.search = if q.is_empty() { None } else { Some(q) };
+                    self.clamp_cursor();
+                }
+            }
+            return;
+        }
         // Editors are handled in place (most keys flow to edtui); only the
         // Pick/Confirm variants move their action out on resolution.
         if let Overlay::Edit(ed) = &mut self.overlay {
@@ -559,7 +646,7 @@ impl App {
             return;
         }
         match std::mem::replace(&mut self.overlay, Overlay::None) {
-            Overlay::None | Overlay::Edit(_) | Overlay::Fuzzy(_) => {}
+            Overlay::None | Overlay::Edit(_) | Overlay::Fuzzy(_) | Overlay::Search(_) => {}
             Overlay::Pick {
                 prompt,
                 keys,
@@ -889,6 +976,14 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('E') => app.open_body_edit(),
             KeyCode::Char('D') => app.open_dep_picker(),
             KeyCode::Char('R') => app.open_reparent_picker(),
+            KeyCode::Char('/') => app.open_search(),
+            KeyCode::Esc => {
+                if app.filter.content_active() {
+                    app.filter = FilterSpec::default();
+                    app.clamp_cursor();
+                    app.notification = Some("filter cleared".into());
+                }
+            }
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
                 if app.selected().is_some() {
                     app.focus = Focus::Detail;
@@ -1181,6 +1276,11 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         render_query_line("search: ", &fp.query, frame, area);
         return;
     }
+    // Inline search field.
+    if let Overlay::Search(sb) = &app.overlay {
+        render_query_line("/", &sb.query, frame, area);
+        return;
+    }
     // Otherwise: an active modal prompt, else a transient notification, else the
     // context help hint. (A multi-line editor falls through to notification/help.)
     let (text, style) = match &app.overlay {
@@ -1193,16 +1293,54 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         ),
         _ => match &app.notification {
             Some(n) => (n.clone(), Style::new().fg(Color::Yellow)),
+            None if app.filter.content_active() => (
+                format!("filter: {}  (Esc clears)", filter_summary(&app.filter)),
+                Style::new().fg(Color::Yellow),
+            ),
             None => (help_hint(app).to_string(), Style::new().fg(Color::DarkGray)),
         },
     };
     frame.render_widget(Paragraph::new(Span::styled(text, style)), area);
 }
 
+/// One-line description of the active content facets (for the status line).
+fn filter_summary(f: &FilterSpec) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(s) = f.search.as_deref().filter(|s| !s.is_empty()) {
+        parts.push(format!("\u{201c}{s}\u{201d}"));
+    }
+    if !f.types.is_empty() {
+        parts.push(f.types.join("|"));
+    }
+    if !f.priorities.is_empty() {
+        parts.push(
+            f.priorities
+                .iter()
+                .map(|p| format!("p{p}"))
+                .collect::<Vec<_>>()
+                .join("|"),
+        );
+    }
+    if !f.labels.is_empty() {
+        parts.push(f.labels.join(","));
+    }
+    if f.ready_only {
+        parts.push("ready".into());
+    }
+    if f.tangled_only {
+        parts.push("tangled".into());
+    }
+    if parts.is_empty() {
+        "(all)".into()
+    } else {
+        parts.join(" · ")
+    }
+}
+
 fn help_hint(app: &App) -> &'static str {
     match app.focus {
         Focus::List => {
-            "j/k move · c new · E edit · S/P/T/L/X adjust · Space fold · Tab tab · l detail · q quit"
+            "j/k move · c new · E edit · S/P/T/L/X · D/R link · / find · Tab tab · q quit"
         }
         Focus::Detail => "j/k scroll · h back · q quit",
     }
@@ -1405,6 +1543,51 @@ mod tests {
         let mut app = editable();
         handle_key(&mut app, key('E'));
         insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    fn typ(app: &mut App, s: &str) {
+        for c in s.chars() {
+            handle_key(app, key(c));
+        }
+    }
+
+    #[test]
+    fn inline_search_field_and_recolor() {
+        // '/' then "child" focuses the two matching children; Root A dims as
+        // their ancestor, Root B is pruned.
+        let mut app = sample();
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "child");
+        assert!(matches!(app.overlay, Overlay::Search(_)));
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn inline_search_updates_filter_live() {
+        let mut app = sample();
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "child");
+        assert_eq!(app.filter.search.as_deref(), Some("child"));
+        let ids: Vec<&str> = app.rows().iter().map(|r| r.task.id.as_str()).collect();
+        assert_eq!(ids, vec!["a0", "a1", "a2"]); // b0 pruned; a0 dimmed ancestor
+        // Enter keeps the filter.
+        handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(app.overlay, Overlay::None));
+        assert_eq!(app.filter.search.as_deref(), Some("child"));
+        // Esc in the list clears the active filter.
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.filter.content_active());
+    }
+
+    #[test]
+    fn inline_search_esc_restores_previous() {
+        let mut app = sample();
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "zzz");
+        assert_eq!(app.filter.search.as_deref(), Some("zzz"));
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(app.overlay, Overlay::None));
+        assert!(app.filter.search.is_none());
     }
 
     #[test]

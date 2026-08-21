@@ -26,7 +26,22 @@ pub struct FilterSpec {
 }
 
 impl FilterSpec {
-    fn matches(&self, t: &Task, resolved: &HashSet<&str>) -> bool {
+    /// True when any content predicate is set (status/parent scope excluded).
+    /// Drives the tree's re-coloring: an active content filter makes matches
+    /// the focus and demotes the rest to context.
+    pub fn content_active(&self) -> bool {
+        !self.types.is_empty()
+            || !self.priorities.is_empty()
+            || !self.labels.is_empty()
+            || self.search.as_deref().is_some_and(|s| !s.is_empty())
+            || self.ready_only
+            || self.tangled_only
+    }
+
+    /// Per-task content predicate (ignores status + parent scope), shared by
+    /// `apply` and the tree's focus computation. Mirrors Python
+    /// `FilterSpec.matches`.
+    pub fn matches(&self, t: &Task, resolved: &HashSet<&str>) -> bool {
         if !self.types.is_empty() && !self.types.iter().any(|k| k == &t.kind) {
             return false;
         }

@@ -11,6 +11,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
+use crate::filter::{self, FilterSpec};
 use crate::model::{Status, Task};
 
 pub struct Row<'a> {
@@ -45,8 +46,12 @@ fn cmp_child(a: &Task, b: &Task) -> Ordering {
         .then(a.id.cmp(&b.id))
 }
 
-/// Build the pre-ordered tree rows for `tab`'s scope over `all`.
-pub fn build(all: &[Task], tab: Status) -> Vec<Row<'_>> {
+/// Build the pre-ordered tree rows for `tab`'s scope over `all`, honoring the
+/// live `spec`. With no content filter, the tab's own tasks are the focus and
+/// their family is dimmed context. With a content filter, matches anywhere in
+/// that family become the focus and non-matching ancestors are dimmed to root
+/// them; everything else is pruned. Mirrors Python `tree.build_tree`.
+pub fn build<'a>(all: &'a [Task], tab: Status, spec: &FilterSpec) -> Vec<Row<'a>> {
     let by_id: HashMap<&str, &Task> = all.iter().map(|t| (t.id.as_str(), t)).collect();
 
     let mut children_of: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -61,26 +66,38 @@ pub fn build(all: &[Task], tab: Status) -> Vec<Row<'_>> {
         }
     }
 
+    // Effective status scope: the spec's statuses override the tab; else the tab.
+    let eff: Vec<Status> = if spec.statuses.is_empty() {
+        vec![tab]
+    } else {
+        spec.statuses.clone()
+    };
     let anchors: HashSet<&str> = all
         .iter()
-        .filter(|t| t.status == tab)
+        .filter(|t| eff.contains(&t.status))
         .map(|t| t.id.as_str())
         .collect();
 
-    // universe = anchors + ancestors (up) + descendants (down), any status.
-    let mut universe: HashSet<&str> = anchors.clone();
-    for &a in &anchors {
-        let mut pid = by_id.get(a).and_then(|t| t.parent.as_deref());
+    let ancestors_of = |start: &str| -> Vec<&'a str> {
+        let mut out = Vec::new();
         let mut seen: HashSet<&str> = HashSet::new();
+        let mut pid = by_id.get(start).and_then(|t| t.parent.as_deref());
         while let Some(p) = pid {
             if !seen.insert(p) {
                 break;
             }
-            if by_id.contains_key(p) {
-                universe.insert(p);
+            if let Some(t) = by_id.get(p) {
+                out.push(t.id.as_str());
             }
             pid = by_id.get(p).and_then(|t| t.parent.as_deref());
         }
+        out
+    };
+
+    // universe = anchors + ancestors (up) + descendants (down), any status.
+    let mut universe: HashSet<&str> = anchors.clone();
+    for &a in &anchors {
+        universe.extend(ancestors_of(a));
     }
     let mut stack: Vec<&str> = anchors.iter().copied().collect();
     while let Some(cur) = stack.pop() {
@@ -93,12 +110,30 @@ pub fn build(all: &[Task], tab: Status) -> Vec<Row<'_>> {
         }
     }
 
+    // Content filter re-colors within the universe: matches become the focus,
+    // their ancestors join as dimmed context, and non-members are pruned.
+    let (focus, members): (HashSet<&str>, HashSet<&str>) = if spec.content_active() {
+        let resolved = filter::resolved_ids(all);
+        let focus: HashSet<&str> = universe
+            .iter()
+            .copied()
+            .filter(|&tid| spec.matches(by_id[tid], &resolved))
+            .collect();
+        let mut members = focus.clone();
+        for &tid in &focus {
+            members.extend(ancestors_of(tid));
+        }
+        (focus, members)
+    } else {
+        (anchors.clone(), universe.clone())
+    };
+
     // roots = members whose parent is not itself a member.
-    let mut roots: Vec<&str> = universe
+    let mut roots: Vec<&str> = members
         .iter()
         .copied()
         .filter(|id| match by_id[id].parent.as_deref() {
-            Some(p) => !universe.contains(p),
+            Some(p) => !members.contains(p),
             None => true,
         })
         .collect();
@@ -118,7 +153,7 @@ pub fn build(all: &[Task], tab: Status) -> Vec<Row<'_>> {
 
     let mut out = Vec::new();
     for r in roots {
-        flatten(r, 0, &by_id, &children_of, &universe, &anchors, &mut out);
+        flatten(r, 0, &by_id, &children_of, &members, &focus, &mut out);
     }
     out
 }
@@ -128,25 +163,25 @@ fn flatten<'a>(
     depth: u16,
     by_id: &HashMap<&'a str, &'a Task>,
     children_of: &HashMap<&'a str, Vec<&'a str>>,
-    universe: &HashSet<&'a str>,
-    anchors: &HashSet<&str>,
+    members: &HashSet<&'a str>,
+    focus: &HashSet<&str>,
     out: &mut Vec<Row<'a>>,
 ) {
     let mut kids: Vec<&str> = children_of
         .get(id)
-        .map(|v| v.iter().copied().filter(|c| universe.contains(c)).collect())
+        .map(|v| v.iter().copied().filter(|c| members.contains(c)).collect())
         .unwrap_or_default();
     kids.sort_by(|&a, &b| cmp_child(by_id[a], by_id[b]));
     out.push(Row {
         task: by_id[id],
         depth,
-        ghost: !anchors.contains(id),
+        ghost: !focus.contains(id),
         has_children: !kids.is_empty(),
         collapsed: false,
         hidden: 0,
     });
     for c in kids {
-        flatten(c, depth + 1, by_id, children_of, universe, anchors, out);
+        flatten(c, depth + 1, by_id, children_of, members, focus, out);
     }
 }
 
@@ -214,12 +249,37 @@ mod tests {
             t("a1", Status::Hairy, Some("a")),
             t("a2", Status::Hairy, Some("a")),
         ];
-        let flat = build(&all, Status::Hairy);
+        let flat = build(&all, Status::Hairy, &FilterSpec::default());
         assert_eq!(flat.len(), 3);
         let collapsed: HashSet<String> = ["a".to_string()].into_iter().collect();
         let vis = apply_collapse(flat, &collapsed);
         assert_eq!(vis.len(), 1);
         assert!(vis[0].collapsed);
         assert_eq!(vis[0].hidden, 2);
+    }
+
+    #[test]
+    fn content_filter_focuses_matches_and_dims_ancestors() {
+        // a > a1 > a2 ; only a2's title matches. a2 is focus (bright), a + a1
+        // come along as dimmed ancestors, and unrelated b is pruned.
+        let mut a = t("a", Status::Hairy, None);
+        a.title = "root alpha".into();
+        let mut a1 = t("a1", Status::Hairy, Some("a"));
+        a1.title = "mid".into();
+        let mut a2 = t("a2", Status::Hairy, Some("a1"));
+        a2.title = "needle here".into();
+        let b = t("b", Status::Hairy, None);
+        let all = vec![a, a1, a2, b];
+
+        let spec = FilterSpec {
+            search: Some("needle".into()),
+            ..Default::default()
+        };
+        let flat = build(&all, Status::Hairy, &spec);
+        let ids: Vec<&str> = flat.iter().map(|r| r.task.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "a1", "a2"]); // b pruned
+        let ghost = |id: &str| flat.iter().find(|r| r.task.id == id).unwrap().ghost;
+        assert!(ghost("a") && ghost("a1"), "non-matching ancestors dim");
+        assert!(!ghost("a2"), "the match is the focus");
     }
 }

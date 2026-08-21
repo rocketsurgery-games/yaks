@@ -4,7 +4,7 @@ title: 'TUI slice 1: skeleton (yaks tui, backend-agnostic render, two-pane nav)'
 type: task
 priority: 2
 created: '2026-08-20T22:58:15Z'
-updated: '2026-08-20T23:00:46Z'
+updated: '2026-08-21T01:24:30Z'
 parent: yaksrs-86a3
 labels:
 - rust
