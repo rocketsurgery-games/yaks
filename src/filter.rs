@@ -95,6 +95,30 @@ pub fn descendant_ids(tasks: &[Task], root_id: &str, include_dead: bool) -> Hash
     out
 }
 
+/// True if `start` (transitively) depends on `target` through `depends_on`
+/// edges. Used to keep a new dependency from forming a cycle: adding `target`
+/// as a dep of `start` is safe only when `target` does not already reach
+/// `start`. Mirrors the Python `deps.depends_on_transitively`.
+pub fn depends_on_transitively(tasks: &[Task], start: &str, target: &str) -> bool {
+    let by_id: HashMap<&str, &Task> = tasks.iter().map(|t| (t.id.as_str(), t)).collect();
+    let mut stack: Vec<&str> = vec![start];
+    let mut seen: HashSet<&str> = HashSet::new();
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        if let Some(t) = by_id.get(id) {
+            for d in &t.depends_on {
+                if d == target {
+                    return true;
+                }
+                stack.push(d.as_str());
+            }
+        }
+    }
+    false
+}
+
 /// Apply `spec` over a fully-loaded task set. `include_dead` only affects the
 /// default scope when `spec.statuses` is empty.
 pub fn apply<'a>(tasks: &'a [Task], spec: &FilterSpec, include_dead: bool) -> Vec<&'a Task> {
@@ -148,10 +172,10 @@ mod tests {
     fn herd() -> Vec<Task> {
         vec![
             t("a", Status::Shorn, &[], None),
-            t("b", Status::Hairy, &["a"], None),       // ready (dep a shorn)
-            t("c", Status::Hairy, &["d"], None),       // tangled (dep d hairy)
+            t("b", Status::Hairy, &["a"], None), // ready (dep a shorn)
+            t("c", Status::Hairy, &["d"], None), // tangled (dep d hairy)
             t("d", Status::Hairy, &[], None),
-            t("k", Status::Hairy, &[], Some("b")),     // child of b
+            t("k", Status::Hairy, &[], Some("b")), // child of b
             t("z", Status::Dead, &[], None),
         ]
     }
@@ -163,16 +187,41 @@ mod tests {
     }
 
     #[test]
+    fn transitive_deps_detect_cycles() {
+        // b -> a ; c -> d. b reaches a; c does not reach b.
+        let h = herd();
+        assert!(depends_on_transitively(&h, "b", "a"));
+        assert!(!depends_on_transitively(&h, "a", "b"));
+        assert!(!depends_on_transitively(&h, "c", "b"));
+        // Multi-hop: x -> y -> a.
+        let chain = vec![
+            t("x", Status::Hairy, &["y"], None),
+            t("y", Status::Hairy, &["a"], None),
+            t("a", Status::Hairy, &[], None),
+        ];
+        assert!(depends_on_transitively(&chain, "x", "a"));
+        assert!(!depends_on_transitively(&chain, "a", "x"));
+    }
+
+    #[test]
     fn ready_only_is_hairy_with_resolved_deps() {
         let h = herd();
-        let spec = FilterSpec { statuses: vec![Status::Hairy], ready_only: true, ..Default::default() };
+        let spec = FilterSpec {
+            statuses: vec![Status::Hairy],
+            ready_only: true,
+            ..Default::default()
+        };
         assert_eq!(ids(apply(&h, &spec, false)), vec!["b", "d", "k"]);
     }
 
     #[test]
     fn tangled_only_is_hairy_with_unresolved_deps() {
         let h = herd();
-        let spec = FilterSpec { statuses: vec![Status::Hairy], tangled_only: true, ..Default::default() };
+        let spec = FilterSpec {
+            statuses: vec![Status::Hairy],
+            tangled_only: true,
+            ..Default::default()
+        };
         assert_eq!(ids(apply(&h, &spec, false)), vec!["c"]);
     }
 
@@ -187,14 +236,20 @@ mod tests {
     #[test]
     fn parent_of_scopes_to_descendants() {
         let h = herd();
-        let spec = FilterSpec { parent: Some("b".into()), ..Default::default() };
+        let spec = FilterSpec {
+            parent: Some("b".into()),
+            ..Default::default()
+        };
         assert_eq!(ids(apply(&h, &spec, false)), vec!["k"]);
     }
 
     #[test]
     fn search_is_case_insensitive_over_id_title_body() {
         let h = herd();
-        let spec = FilterSpec { search: Some("TITLE C".into()), ..Default::default() };
+        let spec = FilterSpec {
+            search: Some("TITLE C".into()),
+            ..Default::default()
+        };
         assert_eq!(ids(apply(&h, &spec, false)), vec!["c"]);
     }
 }

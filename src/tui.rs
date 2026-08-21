@@ -29,8 +29,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Tabs, Wrap};
 use ratatui::{Frame, Terminal};
 
-use crate::filter::FilterSpec;
-use crate::herd::{CreateOutcome, Herd, MoveOutcome, NewTask, TaskEdit, UpdateOutcome};
+use crate::filter::{self, FilterSpec};
+use crate::herd::{
+    CreateOutcome, DepOutcome, Herd, MoveOutcome, NewTask, Reparent, TaskEdit, UpdateOutcome,
+};
 use crate::model::{Status, Task};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -57,6 +59,8 @@ enum Overlay {
     },
     /// An in-frame edtui editor (single-line field or multi-line body).
     Edit(Editor),
+    /// A filter-as-you-type task picker (dependencies, reparent).
+    Fuzzy(FuzzyPick),
 }
 
 /// What a resolved single-key pick should do (carries the target task id).
@@ -120,6 +124,93 @@ impl Editor {
     fn text(&self) -> String {
         self.state.borrow().lines.to_string()
     }
+}
+
+/// A filter-as-you-type picker over the task set. The query is an edtui
+/// single-line editor; candidates are ranked substring matches (Python's
+/// `fuzzy_pick_task` semantics). `RefCell` for the same render-purity reason.
+struct FuzzyPick {
+    label: String,
+    query: RefCell<EditorState>,
+    handler: EditorEventHandler,
+    /// Ids never offered (self, existing deps/parents, cycle- or loop-forming).
+    exclude: HashSet<String>,
+    /// When true, a synthetic top row clears the parent (reparent to root).
+    allow_none: bool,
+    sel: usize,
+    action: FuzzyAction,
+}
+
+enum FuzzyAction {
+    AddDep(String),
+    Reparent(String),
+}
+
+impl FuzzyPick {
+    fn new(
+        vim: bool,
+        label: String,
+        exclude: HashSet<String>,
+        allow_none: bool,
+        action: FuzzyAction,
+    ) -> Self {
+        let mut st = EditorState::new(Lines::from(""));
+        st.set_single_line(true);
+        st.mode = EditorMode::Insert;
+        FuzzyPick {
+            label,
+            query: RefCell::new(st),
+            handler: make_handler(vim),
+            exclude,
+            allow_none,
+            sel: 0,
+            action,
+        }
+    }
+
+    fn query_text(&self) -> String {
+        self.query.borrow().lines.to_string()
+    }
+}
+
+/// Ranked substring matches over `all`, honoring the picker's exclude set and
+/// query. Empty query lists everything (capped). Score: id-prefix < id-substr
+/// < title-substr, then priority, then id.
+fn fuzzy_candidates<'a>(all: &'a [Task], fp: &FuzzyPick) -> Vec<&'a Task> {
+    let q = fp.query_text().to_lowercase();
+    let mut scored: Vec<(u8, u8, &Task)> = Vec::new();
+    for t in all {
+        if fp.exclude.contains(&t.id) {
+            continue;
+        }
+        let score = if q.is_empty() {
+            0
+        } else {
+            let tid = t.id.to_lowercase();
+            let title = t.title.to_lowercase();
+            if tid.starts_with(&q) {
+                0
+            } else if tid.contains(&q) {
+                1
+            } else if title.contains(&q) {
+                2
+            } else {
+                continue;
+            }
+        };
+        scored.push((score, t.priority, t));
+    }
+    scored.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then(a.1.cmp(&b.1))
+            .then_with(|| a.2.id.cmp(&b.2.id))
+    });
+    scored.into_iter().take(20).map(|(_, _, t)| t).collect()
+}
+
+/// Number of selectable rows (candidates plus the optional clear-parent row).
+fn fuzzy_total(all: &[Task], fp: &FuzzyPick) -> usize {
+    fuzzy_candidates(all, fp).len() + fp.allow_none as usize
 }
 
 /// TUI state. Holds the loaded task set plus (in live use) a `Herd` handle so
@@ -351,6 +442,47 @@ impl App {
         }
     }
 
+    fn open_dep_picker(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        let mut exclude: HashSet<String> = HashSet::new();
+        exclude.insert(id.clone());
+        if let Some(t) = self.task(&id) {
+            for d in &t.depends_on {
+                exclude.insert(d.clone());
+            }
+        }
+        // Exclude any task that already reaches `id`, which would form a cycle.
+        for t in &self.all {
+            if t.id != id && filter::depends_on_transitively(&self.all, &t.id, &id) {
+                exclude.insert(t.id.clone());
+            }
+        }
+        self.overlay = Overlay::Fuzzy(FuzzyPick::new(
+            self.editor_vim,
+            format!("Add dependency to {id}"),
+            exclude,
+            false,
+            FuzzyAction::AddDep(id),
+        ));
+    }
+
+    fn open_reparent_picker(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        let mut exclude = filter::descendant_ids(&self.all, &id, true);
+        exclude.insert(id.clone());
+        let has_parent = self.task(&id).map(|t| t.parent.is_some()).unwrap_or(false);
+        if let Some(cur) = self.task(&id).and_then(|t| t.parent.clone()) {
+            exclude.insert(cur);
+        }
+        self.overlay = Overlay::Fuzzy(FuzzyPick::new(
+            self.editor_vim,
+            format!("Reparent {id}"),
+            exclude,
+            has_parent,
+            FuzzyAction::Reparent(id),
+        ));
+    }
+
     /// Jump to the Hairy tab (where new tasks land) and place the cursor on `id`.
     fn select_id(&mut self, id: &str) {
         if let Some(i) = self.tabs.iter().position(|&s| s == Status::Hairy) {
@@ -365,6 +497,48 @@ impl App {
 
     fn handle_overlay_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        // The fuzzy picker: nav/commit/cancel are intercepted; everything else
+        // edits the query (and resets the selection to the top match).
+        if matches!(self.overlay, Overlay::Fuzzy(_)) {
+            let up = k.code == KeyCode::Up || (ctrl && k.code == KeyCode::Char('p'));
+            let down = matches!(k.code, KeyCode::Down | KeyCode::Tab)
+                || (ctrl && k.code == KeyCode::Char('n'));
+            match k.code {
+                KeyCode::Esc => {
+                    self.overlay = Overlay::None;
+                    self.notification = Some("cancelled".into());
+                }
+                KeyCode::Enter => {
+                    if let Overlay::Fuzzy(fp) = std::mem::replace(&mut self.overlay, Overlay::None)
+                    {
+                        self.commit_fuzzy(fp);
+                    }
+                }
+                _ if up => {
+                    if let Overlay::Fuzzy(fp) = &mut self.overlay {
+                        fp.sel = fp.sel.saturating_sub(1);
+                    }
+                }
+                _ if down => {
+                    let total = match &self.overlay {
+                        Overlay::Fuzzy(fp) => fuzzy_total(&self.all, fp),
+                        _ => 0,
+                    };
+                    if let Overlay::Fuzzy(fp) = &mut self.overlay {
+                        if total > 0 {
+                            fp.sel = (fp.sel + 1).min(total - 1);
+                        }
+                    }
+                }
+                _ => {
+                    if let Overlay::Fuzzy(fp) = &mut self.overlay {
+                        fp.handler.on_key_event(k, &mut fp.query.borrow_mut());
+                        fp.sel = 0;
+                    }
+                }
+            }
+            return;
+        }
         // Editors are handled in place (most keys flow to edtui); only the
         // Pick/Confirm variants move their action out on resolution.
         if let Overlay::Edit(ed) = &mut self.overlay {
@@ -385,7 +559,7 @@ impl App {
             return;
         }
         match std::mem::replace(&mut self.overlay, Overlay::None) {
-            Overlay::None | Overlay::Edit(_) => {}
+            Overlay::None | Overlay::Edit(_) | Overlay::Fuzzy(_) => {}
             Overlay::Pick {
                 prompt,
                 keys,
@@ -466,6 +640,56 @@ impl App {
                     keys: "tbfi".into(),
                     action: PickAction::CreateType { title, parent },
                 };
+            }
+        }
+    }
+
+    fn commit_fuzzy(&mut self, fp: FuzzyPick) {
+        let cands = fuzzy_candidates(&self.all, &fp);
+        // Resolve the selection to a target: `None` = clear-parent row,
+        // `Some(id)` = a task, or bail if the selection points at nothing.
+        let target: Option<Option<String>> = if fp.allow_none {
+            if fp.sel == 0 {
+                Some(None)
+            } else {
+                cands.get(fp.sel - 1).map(|t| Some(t.id.clone()))
+            }
+        } else {
+            cands.get(fp.sel).map(|t| Some(t.id.clone()))
+        };
+        let Some(target) = target else {
+            self.notification = Some("nothing selected".into());
+            return;
+        };
+        match fp.action {
+            FuzzyAction::AddDep(id) => {
+                let Some(dep) = target else { return };
+                let Some(h) = &self.herd else { return };
+                match h.dep_add(&id, &dep) {
+                    Ok(DepOutcome::Added) => {
+                        self.reload();
+                        self.notification = Some(format!("{id} depends on {dep}"));
+                    }
+                    Ok(DepOutcome::AlreadyDep) => {
+                        self.notification = Some(format!("{id} already depends on {dep}"))
+                    }
+                    Ok(_) => self.notification = Some("dependency not added".into()),
+                    Err(e) => self.notification = Some(format!("error: {e}")),
+                }
+            }
+            FuzzyAction::Reparent(id) => {
+                let Some(h) = &self.herd else { return };
+                match h.reparent(&id, target.clone()) {
+                    Ok(Reparent::Done { new_parent }) => {
+                        self.reload();
+                        self.notification = Some(match new_parent {
+                            Some(p) => format!("{id} reparented under {p}"),
+                            None => format!("{id} moved to top level"),
+                        });
+                    }
+                    Ok(Reparent::Error(m)) => self.notification = Some(m),
+                    Err(e) => self.notification = Some(format!("error: {e}")),
+                }
             }
         }
     }
@@ -663,6 +887,8 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('c') => app.open_create(false),
             KeyCode::Char('C') => app.open_create(true),
             KeyCode::Char('E') => app.open_body_edit(),
+            KeyCode::Char('D') => app.open_dep_picker(),
+            KeyCode::Char('R') => app.open_reparent_picker(),
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
                 if app.selected().is_some() {
                     app.focus = Focus::Detail;
@@ -703,6 +929,7 @@ fn render(app: &App, frame: &mut Frame) {
     // live on the status line, so the detail pane stays put for them.
     match &app.overlay {
         Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, right),
+        Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, right),
         _ => render_detail(app, frame, right),
     }
     render_status(app, frame, bot);
@@ -727,23 +954,67 @@ fn render_editor_panel(ed: &Editor, frame: &mut Frame, area: Rect) {
     frame.render_widget(EditorView::new(&mut state).theme(editor_theme()), body);
 }
 
-fn render_line_editor(ed: &Editor, frame: &mut Frame, area: Rect) {
-    let label_w = (ed.label.chars().count() as u16).min(area.width);
+/// Render `label` + a single-line edtui field across one row.
+fn render_query_line(label: &str, state: &RefCell<EditorState>, frame: &mut Frame, area: Rect) {
+    let label_w = (label.chars().count() as u16).min(area.width);
     let [lab, fld] =
         Layout::horizontal([Constraint::Length(label_w), Constraint::Min(0)]).areas(area);
     frame.render_widget(
         Paragraph::new(Span::styled(
-            ed.label.clone(),
+            label.to_string(),
             Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         )),
         lab,
     );
-    let mut state = ed.state.borrow_mut();
+    let mut st = state.borrow_mut();
     frame.render_widget(
-        EditorView::new(&mut state)
+        EditorView::new(&mut st)
             .theme(editor_theme())
             .single_line(true),
         fld,
+    );
+}
+
+fn render_line_editor(ed: &Editor, frame: &mut Frame, area: Rect) {
+    render_query_line(&ed.label, &ed.state, frame, area);
+}
+
+fn render_fuzzy_results(app: &App, fp: &FuzzyPick, frame: &mut Frame, area: Rect) {
+    let [head, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+    let cands = fuzzy_candidates(&app.all, fp);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            format!("{}  ({} matches)", fp.label, cands.len()),
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        head,
+    );
+    let mut items: Vec<ListItem> = Vec::new();
+    if fp.allow_none {
+        items.push(ListItem::new(Line::from(Span::styled(
+            "(clear parent — make top-level)",
+            Style::new().fg(Color::DarkGray),
+        ))));
+    }
+    for t in &cands {
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(
+                format!("[{}] ", t.status.glyph()),
+                Style::new().fg(Color::DarkGray),
+            ),
+            Span::styled(format!("{} ", t.id), Style::new().fg(Color::DarkGray)),
+            Span::raw(t.title.clone()),
+        ])));
+    }
+    let total = cands.len() + fp.allow_none as usize;
+    let mut state = ListState::default();
+    if total > 0 {
+        state.select(Some(fp.sel.min(total - 1)));
+    }
+    frame.render_stateful_widget(
+        List::new(items).highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
+        body,
+        &mut state,
     );
 }
 
@@ -904,6 +1175,11 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
             render_line_editor(ed, frame, area);
             return;
         }
+    }
+    // The fuzzy picker's query line owns the status line too.
+    if let Overlay::Fuzzy(fp) = &app.overlay {
+        render_query_line("search: ", &fp.query, frame, area);
+        return;
     }
     // Otherwise: an active modal prompt, else a transient notification, else the
     // context help hint. (A multi-line editor falls through to notification/help.)
@@ -1131,6 +1407,25 @@ mod tests {
         insta::assert_snapshot!(draw(&app, 72, 14));
     }
 
+    #[test]
+    fn dep_picker_overlay() {
+        // D on Root A: results (self excluded) in the right pane, query at foot.
+        let mut app = sample();
+        handle_key(&mut app, key('D'));
+        assert!(matches!(app.overlay, Overlay::Fuzzy(_)));
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn reparent_picker_overlay() {
+        // R on Child A1 (has a parent) shows the clear-parent row first.
+        let mut app = sample();
+        handle_key(&mut app, key('j')); // move to a1
+        handle_key(&mut app, key('R'));
+        assert!(matches!(app.overlay, Overlay::Fuzzy(_)));
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
     // -- live mutation through a temp herd --------------------------------
 
     mod live {
@@ -1304,6 +1599,72 @@ mod tests {
             ctrl_s(&mut app);
             assert!(matches!(app.overlay, Overlay::None));
             assert_eq!(app.task("t0").unwrap().body, "hello");
+        }
+
+        fn with_deps(id: &str, status: Status, deps: &[&str]) -> Task {
+            let mut t = task(id, id, status, 3, None);
+            t.depends_on = deps.iter().map(|s| s.to_string()).collect();
+            t
+        }
+
+        #[test]
+        fn dep_add_via_picker() {
+            let (_dir, herd) = temp_herd(&[
+                task("t0", "t0", Status::Hairy, 3, None),
+                task("t1", "t1", Status::Hairy, 3, None),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            assert_eq!(app.selected_id().as_deref(), Some("t0"));
+            press(&mut app, "D"); // open picker (t0 excluded)
+            enter(&mut app); // pick first candidate (t1)
+            assert!(matches!(app.overlay, Overlay::None));
+            assert_eq!(app.task("t0").unwrap().depends_on, vec!["t1".to_string()]);
+            assert_eq!(app.notification.as_deref(), Some("t0 depends on t1"));
+        }
+
+        #[test]
+        fn dep_cycle_target_is_excluded() {
+            // t1 already depends on t0, so t0 -> t1 would cycle: t1 is not offered.
+            let (_dir, herd) = temp_herd(&[
+                task("t0", "t0", Status::Hairy, 3, None),
+                with_deps("t1", Status::Hairy, &["t0"]),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            assert_eq!(app.selected_id().as_deref(), Some("t0"));
+            press(&mut app, "D");
+            enter(&mut app); // no candidates -> nothing selected
+            assert!(app.task("t0").unwrap().depends_on.is_empty());
+            assert_eq!(app.notification.as_deref(), Some("nothing selected"));
+        }
+
+        #[test]
+        fn reparent_via_picker() {
+            let (_dir, herd) = temp_herd(&[
+                task("p0", "p0", Status::Hairy, 3, None),
+                task("t0", "t0", Status::Hairy, 3, None),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "j"); // move to t0
+            assert_eq!(app.selected_id().as_deref(), Some("t0"));
+            press(&mut app, "R");
+            enter(&mut app); // pick first candidate (p0)
+            assert_eq!(app.task("t0").unwrap().parent.as_deref(), Some("p0"));
+            assert_eq!(app.notification.as_deref(), Some("t0 reparented under p0"));
+        }
+
+        #[test]
+        fn reparent_clear_to_root() {
+            let (_dir, herd) = temp_herd(&[
+                task("p0", "p0", Status::Hairy, 3, None),
+                task("c0", "c0", Status::Hairy, 3, Some("p0")),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "j"); // move to c0 (child of p0)
+            assert_eq!(app.selected_id().as_deref(), Some("c0"));
+            press(&mut app, "R"); // p0 excluded (current parent); only clear-parent row
+            enter(&mut app);
+            assert!(app.task("c0").unwrap().parent.is_none());
+            assert_eq!(app.notification.as_deref(), Some("c0 moved to top level"));
         }
     }
 }
