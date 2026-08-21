@@ -66,6 +66,8 @@ enum Overlay {
     Search(SearchBox),
     /// The multi-row filter drawer (chips + text facets).
     Drawer(Drawer),
+    /// Detail-pane find: edits `App.detail_find` live.
+    DetailFind(SearchBox),
 }
 
 /// What a resolved single-key pick should do (carries the target task id).
@@ -416,6 +418,9 @@ pub struct App {
     detail_scroll: u16,
     /// Index into the current detail's jumplist (Tab-cycled link targets).
     detail_link: usize,
+    /// Active detail-pane find query + which match is current (n/N cycle).
+    detail_find: Option<String>,
+    detail_match: usize,
     collapsed: HashSet<String>,
     /// The live view filter applied by the tree (re-colors + prunes).
     filter: FilterSpec,
@@ -442,6 +447,8 @@ impl App {
             focus: Focus::List,
             detail_scroll: 0,
             detail_link: 0,
+            detail_find: None,
+            detail_match: 0,
             collapsed: HashSet::new(),
             filter: FilterSpec::default(),
             page: 10,
@@ -823,6 +830,32 @@ impl App {
         self.detail_scroll = jumps[self.detail_link].line as u16;
     }
 
+    fn open_detail_find(&mut self) {
+        let cur = self.detail_find.clone();
+        self.overlay = Overlay::DetailFind(SearchBox::new(self.editor_vim, cur));
+    }
+
+    /// (line, col, len) of every detail-find match for the current selection.
+    fn detail_find_matches(&self) -> Vec<(usize, usize, usize)> {
+        let Some(q) = self.detail_find.as_deref().filter(|s| !s.is_empty()) else {
+            return vec![];
+        };
+        let Some(t) = self.selected() else {
+            return vec![];
+        };
+        detail_scan(&detail::build(t, &self.all), q)
+    }
+
+    fn detail_find_jump(&mut self, delta: i32) {
+        let m = self.detail_find_matches();
+        if m.is_empty() {
+            return;
+        }
+        let n = m.len() as i32;
+        self.detail_match = (self.detail_match as i32 + delta).rem_euclid(n) as usize;
+        self.detail_scroll = m[self.detail_match].0 as u16;
+    }
+
     fn follow_link(&mut self) {
         let jumps = self.detail_jumps();
         let Some(j) = jumps.into_iter().nth(self.detail_link) else {
@@ -939,6 +972,36 @@ impl App {
             }
             return;
         }
+        // Detail-pane find: live-highlight matches; Enter keeps, Esc restores.
+        if matches!(self.overlay, Overlay::DetailFind(_)) {
+            match k.code {
+                KeyCode::Esc => {
+                    let saved = match &self.overlay {
+                        Overlay::DetailFind(sb) => sb.saved.clone(),
+                        _ => None,
+                    };
+                    self.detail_find = saved;
+                    self.overlay = Overlay::None;
+                }
+                KeyCode::Enter => self.overlay = Overlay::None,
+                _ => {
+                    if let Overlay::DetailFind(sb) = &mut self.overlay {
+                        sb.handler.on_key_event(k, &mut sb.query.borrow_mut());
+                    }
+                    let q = match &self.overlay {
+                        Overlay::DetailFind(sb) => sb.query_text(),
+                        _ => String::new(),
+                    };
+                    self.detail_find = if q.is_empty() { None } else { Some(q) };
+                    self.detail_match = 0;
+                    let m = self.detail_find_matches();
+                    if let Some(first) = m.first() {
+                        self.detail_scroll = first.0 as u16;
+                    }
+                }
+            }
+            return;
+        }
         // Editors are handled in place (most keys flow to edtui); only the
         // Pick/Confirm variants move their action out on resolution.
         if let Overlay::Edit(ed) = &mut self.overlay {
@@ -963,7 +1026,8 @@ impl App {
             | Overlay::Edit(_)
             | Overlay::Fuzzy(_)
             | Overlay::Search(_)
-            | Overlay::Drawer(_) => {}
+            | Overlay::Drawer(_)
+            | Overlay::DetailFind(_) => {}
             Overlay::Pick {
                 prompt,
                 keys,
@@ -1307,6 +1371,8 @@ fn handle_key(app: &mut App, k: KeyEvent) {
                     app.focus = Focus::Detail;
                     app.detail_scroll = 0;
                     app.detail_link = 0;
+                    app.detail_find = None;
+                    app.detail_match = 0;
                 }
             }
             _ => {}
@@ -1316,6 +1382,9 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => app.focus = Focus::List,
             KeyCode::Tab | KeyCode::Char(']') => app.jump_link(1),
             KeyCode::BackTab | KeyCode::Char('[') => app.jump_link(-1),
+            KeyCode::Char('/') => app.open_detail_find(),
+            KeyCode::Char('n') => app.detail_find_jump(1),
+            KeyCode::Char('N') => app.detail_find_jump(-1),
             KeyCode::Enter => app.follow_link(),
             KeyCode::Char('j') | KeyCode::Down => {
                 app.detail_scroll = app.detail_scroll.saturating_add(1)
@@ -1673,71 +1742,119 @@ fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         None
     };
+    let matches = if focused {
+        app.detail_find_matches()
+    } else {
+        vec![]
+    };
     let rendered: Vec<Line> = lines
         .iter()
         .enumerate()
-        .map(|(i, dl)| render_dline(dl, cur, i))
+        .map(|(i, dl)| {
+            let lm: Vec<(usize, usize, bool)> = matches
+                .iter()
+                .enumerate()
+                .filter(|(_, (ln, _, _))| *ln == i)
+                .map(|(mi, (_, col, len))| (*col, *len, mi == app.detail_match))
+                .collect();
+            render_dline(dl, cur, i, &lm)
+        })
         .collect();
-    // No wrap: link highlight columns must stay valid.
+    // No wrap: link/match highlight columns must stay valid.
     let p = Paragraph::new(rendered)
         .block(block)
         .scroll((app.detail_scroll, 0));
     frame.render_widget(p, area);
 }
 
-/// Render one detail line, styling link spans (and the focused jump target).
+/// Render one detail line by computing a per-char style (base -> link ->
+/// find-match, each overriding the last) and coalescing equal runs into spans.
 fn render_dline<'a>(
     dl: &'a detail::DLine,
     cur: Option<&detail::Jump>,
     line_idx: usize,
+    matches: &[(usize, usize, bool)],
 ) -> Line<'a> {
-    let base = match dl.kind {
-        detail::Kind::Section => Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        _ => Style::new(),
-    };
-    if dl.links.is_empty() {
-        // Plain field: dim the fixed-width label, leave the value default.
-        if dl.kind == detail::Kind::Field && dl.text.len() > 9 {
-            let (label, value) = dl.text.split_at(9);
-            return Line::from(vec![
-                Span::styled(label.to_string(), Style::new().fg(Color::DarkGray)),
-                Span::raw(value.to_string()),
-            ]);
-        }
-        return Line::from(Span::styled(dl.text.clone(), base));
-    }
     let chars: Vec<char> = dl.text.chars().collect();
-    let mut links = dl.links.clone();
-    links.sort_by_key(|(c, _, _)| *c);
-    let mut spans: Vec<Span> = Vec::new();
-    let mut pos = 0usize;
-    for (col, len, _target) in links {
-        let col = col.min(chars.len());
-        let end = (col + len).min(chars.len());
-        if col > pos {
-            spans.push(Span::styled(
-                chars[pos..col].iter().collect::<String>(),
-                Style::new().fg(Color::DarkGray),
-            ));
-        }
-        let is_current = cur.is_some_and(|j| j.line == line_idx && j.col == col);
-        let style = if is_current {
+    let n = chars.len();
+    if n == 0 {
+        return Line::from(String::new());
+    }
+    // Base per-char style: dim label prefix on plain fields; section headers cyan.
+    let label_end = if dl.links.is_empty() && dl.kind == detail::Kind::Field && n > 9 {
+        9
+    } else {
+        0
+    };
+    let mut styles: Vec<Style> = (0..n)
+        .map(|i| {
+            if i < label_end {
+                Style::new().fg(Color::DarkGray)
+            } else if dl.kind == detail::Kind::Section {
+                Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else {
+                Style::new()
+            }
+        })
+        .collect();
+    for (col, len, _) in &dl.links {
+        let is_current = cur.is_some_and(|j| j.line == line_idx && j.col == *col);
+        let st = if is_current {
             Style::new().fg(Color::Black).bg(Color::Cyan)
         } else {
             Style::new()
                 .fg(Color::Blue)
                 .add_modifier(Modifier::UNDERLINED)
         };
-        spans.push(Span::styled(
-            chars[col..end].iter().collect::<String>(),
-            style,
-        ));
-        pos = end;
+        for s in styles.iter_mut().take((col + len).min(n)).skip(*col) {
+            *s = st;
+        }
     }
-    if pos < chars.len() {
-        spans.push(Span::raw(chars[pos..].iter().collect::<String>()));
+    for (col, len, is_current) in matches {
+        let st = if *is_current {
+            Style::new()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(Color::Black).bg(Color::Yellow)
+        };
+        for s in styles.iter_mut().take((col + len).min(n)).skip(*col) {
+            *s = st;
+        }
+    }
+    let mut spans: Vec<Span> = Vec::new();
+    let mut i = 0;
+    while i < n {
+        let st = styles[i];
+        let start = i;
+        while i < n && styles[i] == st {
+            i += 1;
+        }
+        spans.push(Span::styled(chars[start..i].iter().collect::<String>(), st));
     }
     Line::from(spans)
+}
+
+/// (line, col, len) of every case-insensitive occurrence of `q` in the lines.
+fn detail_scan(lines: &[detail::DLine], q: &str) -> Vec<(usize, usize, usize)> {
+    let ql = q.to_lowercase();
+    if ql.is_empty() {
+        return vec![];
+    }
+    let qlen = ql.chars().count();
+    let mut out = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        let text = l.text.to_lowercase();
+        let mut from = 0usize;
+        while let Some(pos) = text[from..].find(&ql) {
+            let byte = from + pos;
+            let col = text[..byte].chars().count();
+            out.push((i, col, qlen));
+            from = byte + ql.len();
+        }
+    }
+    out
 }
 
 fn render_status(app: &App, frame: &mut Frame, area: Rect) {
@@ -1756,6 +1873,11 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     // Inline search field.
     if let Overlay::Search(sb) = &app.overlay {
         render_query_line("/", &sb.query, frame, area);
+        return;
+    }
+    // Detail-pane find field.
+    if let Overlay::DetailFind(sb) = &app.overlay {
+        render_query_line("find: ", &sb.query, frame, area);
         return;
     }
     // Drawer help hint.
@@ -2192,6 +2314,45 @@ mod tests {
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
         );
         assert_eq!(app.detail_link, 0);
+    }
+
+    #[test]
+    fn detail_find_matches_and_cycles() {
+        let mut app = linked();
+        enter_key(&mut app); // focus detail
+        handle_key(&mut app, key('/')); // open detail find
+        typ(&mut app, "child");
+        assert_eq!(app.detail_find.as_deref(), Some("child"));
+        assert!(app.detail_find_matches().len() >= 2); // both child lines
+        enter_key(&mut app); // keep the find
+        assert!(matches!(app.overlay, Overlay::None));
+        assert_eq!(app.focus, Focus::Detail);
+        assert_eq!(app.detail_match, 0);
+        handle_key(&mut app, key('n'));
+        assert_eq!(app.detail_match, 1);
+        handle_key(&mut app, key('N'));
+        assert_eq!(app.detail_match, 0);
+    }
+
+    #[test]
+    fn detail_find_esc_restores() {
+        let mut app = linked();
+        enter_key(&mut app);
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "zzz");
+        assert_eq!(app.detail_find.as_deref(), Some("zzz"));
+        esc_key(&mut app);
+        assert!(matches!(app.overlay, Overlay::None));
+        assert!(app.detail_find.is_none());
+    }
+
+    #[test]
+    fn detail_find_overlay() {
+        let mut app = linked();
+        enter_key(&mut app);
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "child");
+        insta::assert_snapshot!(draw(&app, 72, 16));
     }
 
     #[test]
