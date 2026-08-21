@@ -5,6 +5,7 @@
 //! buffer (snapshot tests + the future demo-cast pipeline). Key handling only
 //! mutates `App`; mutating keys route through the `Herd` facade and then reload.
 
+mod detail;
 mod tree;
 
 use std::cell::RefCell;
@@ -26,7 +27,7 @@ use ratatui::crossterm::terminal::{
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Tabs, Wrap};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Tabs};
 use ratatui::{Frame, Terminal};
 
 use crate::filter::{self, FilterSpec};
@@ -35,7 +36,7 @@ use crate::herd::{
 };
 use crate::model::{Status, Task};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Focus {
     List,
     Detail,
@@ -413,6 +414,8 @@ pub struct App {
     cursor: usize,
     focus: Focus,
     detail_scroll: u16,
+    /// Index into the current detail's jumplist (Tab-cycled link targets).
+    detail_link: usize,
     collapsed: HashSet<String>,
     /// The live view filter applied by the tree (re-colors + prunes).
     filter: FilterSpec,
@@ -438,6 +441,7 @@ impl App {
             cursor: 0,
             focus: Focus::List,
             detail_scroll: 0,
+            detail_link: 0,
             collapsed: HashSet::new(),
             filter: FilterSpec::default(),
             page: 10,
@@ -783,6 +787,55 @@ impl App {
         }
         if changed {
             self.drawer_live_preview();
+        }
+    }
+
+    /// Select an existing task wherever it lives: switch to its status tab (if
+    /// one is shown) and place the cursor on it, then focus the list.
+    fn select_task(&mut self, id: &str) {
+        if let Some(st) = self.task(id).map(|t| t.status) {
+            if let Some(i) = self.tabs.iter().position(|&s| s == st) {
+                self.tab = i;
+            }
+        }
+        if let Some(pos) = self.rows().iter().position(|r| r.task.id == id) {
+            self.cursor = pos;
+        }
+        self.focus = Focus::List;
+    }
+
+    /// Detail jumplist for the current selection (empty when nothing selected).
+    fn detail_jumps(&self) -> Vec<detail::Jump> {
+        match self.selected() {
+            Some(t) => detail::jumplist(&detail::build(t, &self.all)),
+            None => Vec::new(),
+        }
+    }
+
+    fn jump_link(&mut self, delta: i32) {
+        let jumps = self.detail_jumps();
+        if jumps.is_empty() {
+            return;
+        }
+        let n = jumps.len() as i32;
+        self.detail_link = (self.detail_link as i32 + delta).rem_euclid(n) as usize;
+        // Bring the target line into view.
+        self.detail_scroll = jumps[self.detail_link].line as u16;
+    }
+
+    fn follow_link(&mut self) {
+        let jumps = self.detail_jumps();
+        let Some(j) = jumps.into_iter().nth(self.detail_link) else {
+            return;
+        };
+        match j.target {
+            detail::Target::Task(id) => {
+                self.select_task(&id);
+                self.notification = Some(format!("→ {id}"));
+            }
+            detail::Target::Url(u) => {
+                self.notification = Some(format!("link: {u}"));
+            }
         }
     }
 
@@ -1253,6 +1306,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
                 if app.selected().is_some() {
                     app.focus = Focus::Detail;
                     app.detail_scroll = 0;
+                    app.detail_link = 0;
                 }
             }
             _ => {}
@@ -1260,6 +1314,9 @@ fn handle_key(app: &mut App, k: KeyEvent) {
         Focus::Detail => match k.code {
             KeyCode::Char('q') => app.quit = true,
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => app.focus = Focus::List,
+            KeyCode::Tab | KeyCode::Char(']') => app.jump_link(1),
+            KeyCode::BackTab | KeyCode::Char('[') => app.jump_link(-1),
+            KeyCode::Enter => app.follow_link(),
             KeyCode::Char('j') | KeyCode::Down => {
                 app.detail_scroll = app.detail_scroll.saturating_add(1)
             }
@@ -1603,54 +1660,84 @@ fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
             Style::new().fg(Color::DarkGray)
         })
         .padding(Padding::horizontal(1));
-    let text = match app.selected() {
-        None => vec![Line::from(Span::styled(
-            "(no task)",
-            Style::new().fg(Color::DarkGray),
-        ))],
-        Some(t) => detail_lines(t),
+    let Some(t) = app.selected() else {
+        let p = Paragraph::new(Span::styled("(no task)", Style::new().fg(Color::DarkGray)))
+            .block(block);
+        frame.render_widget(p, area);
+        return;
     };
-    let p = Paragraph::new(text)
+    let lines = detail::build(t, &app.all);
+    let jumps = detail::jumplist(&lines);
+    let cur = if focused {
+        jumps.get(app.detail_link)
+    } else {
+        None
+    };
+    let rendered: Vec<Line> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, dl)| render_dline(dl, cur, i))
+        .collect();
+    // No wrap: link highlight columns must stay valid.
+    let p = Paragraph::new(rendered)
         .block(block)
-        .wrap(Wrap { trim: false })
         .scroll((app.detail_scroll, 0));
     frame.render_widget(p, area);
 }
 
-fn detail_lines(t: &Task) -> Vec<Line<'static>> {
-    let mut out = vec![
-        field("id", &t.id),
-        field("title", &t.title),
-        field("type", &t.kind),
-        field("priority", &t.priority.to_string()),
-    ];
-    if let Some(p) = &t.parent {
-        out.push(field("parent", p));
-    }
-    if !t.labels.is_empty() {
-        out.push(field("labels", &t.labels.join(", ")));
-    }
-    if !t.depends_on.is_empty() {
-        out.push(field("depends", &t.depends_on.join(", ")));
-    }
-    if let Some(s) = &t.source {
-        out.push(field("source", s));
-    }
-    let body = t.body.trim();
-    if !body.is_empty() {
-        out.push(Line::from(""));
-        for l in body.lines() {
-            out.push(Line::from(l.to_string()));
+/// Render one detail line, styling link spans (and the focused jump target).
+fn render_dline<'a>(
+    dl: &'a detail::DLine,
+    cur: Option<&detail::Jump>,
+    line_idx: usize,
+) -> Line<'a> {
+    let base = match dl.kind {
+        detail::Kind::Section => Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        _ => Style::new(),
+    };
+    if dl.links.is_empty() {
+        // Plain field: dim the fixed-width label, leave the value default.
+        if dl.kind == detail::Kind::Field && dl.text.len() > 9 {
+            let (label, value) = dl.text.split_at(9);
+            return Line::from(vec![
+                Span::styled(label.to_string(), Style::new().fg(Color::DarkGray)),
+                Span::raw(value.to_string()),
+            ]);
         }
+        return Line::from(Span::styled(dl.text.clone(), base));
     }
-    out
-}
-
-fn field(k: &str, v: &str) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{k:<9}"), Style::new().fg(Color::DarkGray)),
-        Span::raw(v.to_string()),
-    ])
+    let chars: Vec<char> = dl.text.chars().collect();
+    let mut links = dl.links.clone();
+    links.sort_by_key(|(c, _, _)| *c);
+    let mut spans: Vec<Span> = Vec::new();
+    let mut pos = 0usize;
+    for (col, len, _target) in links {
+        let col = col.min(chars.len());
+        let end = (col + len).min(chars.len());
+        if col > pos {
+            spans.push(Span::styled(
+                chars[pos..col].iter().collect::<String>(),
+                Style::new().fg(Color::DarkGray),
+            ));
+        }
+        let is_current = cur.is_some_and(|j| j.line == line_idx && j.col == col);
+        let style = if is_current {
+            Style::new().fg(Color::Black).bg(Color::Cyan)
+        } else {
+            Style::new()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::UNDERLINED)
+        };
+        spans.push(Span::styled(
+            chars[col..end].iter().collect::<String>(),
+            style,
+        ));
+        pos = end;
+    }
+    if pos < chars.len() {
+        spans.push(Span::raw(chars[pos..].iter().collect::<String>()));
+    }
+    Line::from(spans)
 }
 
 fn render_status(app: &App, frame: &mut Frame, area: Rect) {
@@ -2056,6 +2143,55 @@ mod tests {
         assert_eq!(app.filter.search.as_deref(), Some("root"));
         enter_key(&mut app);
         assert_eq!(app.filter.search.as_deref(), Some("root"));
+    }
+
+    fn linked() -> App {
+        let mut a0 = task("a0", "Root A", Status::Hairy, 2, None);
+        a0.body = "follow a1 then a2".into();
+        App::new(vec![
+            a0,
+            task("a1", "Child A1", Status::Hairy, 3, Some("a0")),
+            task("a2", "Child A2", Status::Hairy, 3, Some("a0")),
+        ])
+    }
+
+    fn tab_key(app: &mut App) {
+        handle_key(app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn detail_shows_children_and_links() {
+        let mut app = linked();
+        enter_key(&mut app); // list Enter -> focus detail
+        assert_eq!(app.focus, Focus::Detail);
+        insta::assert_snapshot!(draw(&app, 72, 16));
+    }
+
+    #[test]
+    fn detail_jumplist_follows_to_task() {
+        let mut app = linked();
+        enter_key(&mut app); // enter detail
+        assert_eq!(app.focus, Focus::Detail);
+        // Jumplist order for a0: child a1, child a2, body a1, body a2.
+        assert!(app.detail_jumps().len() >= 2);
+        enter_key(&mut app); // follow link 0 -> a1
+        assert_eq!(app.focus, Focus::List);
+        assert_eq!(app.selected_id().as_deref(), Some("a1"));
+        assert_eq!(app.notification.as_deref(), Some("→ a1"));
+    }
+
+    #[test]
+    fn detail_tab_cycles_links() {
+        let mut app = linked();
+        enter_key(&mut app);
+        assert_eq!(app.detail_link, 0);
+        tab_key(&mut app);
+        assert_eq!(app.detail_link, 1);
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
+        );
+        assert_eq!(app.detail_link, 0);
     }
 
     #[test]

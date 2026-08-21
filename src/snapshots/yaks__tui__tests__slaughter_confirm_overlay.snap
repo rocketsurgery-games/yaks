@@ -6,8 +6,8 @@ expression: "draw(&app, 72, 14)"
 ▾ [H] p2 Root A                 │ id       a1
     [H] p3 Child A1             │ title    Child A1
     [N] p3 Child A2 done        │ type     task
-                                │ priority 3
-                                │ parent   a0
+                                │ priority p3
+                                │ parent   H a0  Root A
                                 │
                                 │
                                 │

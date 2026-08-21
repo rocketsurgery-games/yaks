@@ -6,7 +6,7 @@ expression: "draw(&app, 72, 14)"
   [H] p3 Editable               │ id       e0
                                 │ title    Editable
                                 │ type     task
-                                │ priority 3
+                                │ priority p3
                                 │ labels   rust, tui
                                 │
                                 │ First line.

@@ -1,18 +1,20 @@
 ---
 source: src/tui.rs
-expression: "draw(&app, 72, 14)"
+expression: "draw(&app, 72, 16)"
 ---
- Hairy 2 · Shaving 1 · Shorn 1
+ Hairy 3 · Shaving 0 · Shorn 0
 ▾ [H] p2 Root A                 │ id       a0
     [H] p3 Child A1             │ title    Root A
-    [N] p3 Child A2 done        │ type     task
+    [H] p3 Child A2             │ type     task
                                 │ priority p2
                                 │ children
                                 │   H a1  Child A1
-                                │   N a2  Child A2 done
+                                │   H a2  Child A2
+                                │
+                                │ follow a1 then a2
                                 │
                                 │
                                 │
                                 │
                                 │
-State for a0: h=hairy s=shaving n=shorn x=slaughter  (Esc=cancel)
+j/k scroll · h back · q quit

@@ -6,10 +6,10 @@ expression: "draw(&app, 72, 14)"
 ▾ [H] p2 Root A                 │ id       a0
     [H] p3 Child A1             │ title    Root A
     [N] p3 Child A2 done        │ type     task
-                                │ priority 2
-                                │
-                                │
-                                │
+                                │ priority p2
+                                │ children
+                                │   H a1  Child A1
+                                │   N a2  Child A2 done
                                 │
                                 │
                                 │
