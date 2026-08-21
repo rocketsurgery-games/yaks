@@ -5,6 +5,7 @@
 //! buffer (snapshot tests + the future demo-cast pipeline). Key handling only
 //! mutates `App`; mutating keys route through the `Herd` facade and then reload.
 
+mod cache;
 mod detail;
 mod tree;
 
@@ -464,10 +465,20 @@ impl App {
     pub fn with_herd(herd: Herd) -> Result<Self> {
         let all = herd.list(FilterSpec::default(), false)?;
         let vim = herd.config().vim_mode;
+        let collapsed = cache::load_collapsed(herd.root());
         let mut app = App::new(all);
         app.editor_vim = vim;
+        app.collapsed = collapsed;
         app.herd = Some(herd);
+        app.clamp_cursor();
         Ok(app)
+    }
+
+    /// Persist the (rebuildable) collapsed-tree state to the per-user cache.
+    fn save_collapsed(&self) {
+        if let Some(h) = &self.herd {
+            cache::save_collapsed(h.root(), &self.collapsed);
+        }
     }
 
     /// Re-query the herd view after a mutation and keep the cursor in range.
@@ -546,6 +557,7 @@ impl App {
                 if !self.collapsed.remove(&id) {
                     self.collapsed.insert(id);
                 }
+                self.save_collapsed();
             }
         }
     }

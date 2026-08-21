@@ -114,6 +114,11 @@ impl Herd {
         store::read_config(&self.root)
     }
 
+    /// The herd's `.yaks/` root, e.g. for locating the per-user UI-state cache.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     // -- queries ----------------------------------------------------------
 
     /// Tasks matching `spec`, grouped by status then id (the `list`/`search` view).
