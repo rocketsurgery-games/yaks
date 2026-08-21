@@ -63,6 +63,8 @@ enum Overlay {
     Fuzzy(FuzzyPick),
     /// Inline incremental search: edits `App.filter.search` live.
     Search(SearchBox),
+    /// The multi-row filter drawer (chips + text facets).
+    Drawer(Drawer),
 }
 
 /// What a resolved single-key pick should do (carries the target task id).
@@ -155,6 +157,164 @@ struct SearchBox {
     handler: EditorEventHandler,
     /// The `filter.search` value before opening, restored on cancel.
     saved: Option<String>,
+}
+
+// Filter-drawer layout: 7 rows, three of them free-text.
+const DRAWER_ROWS: usize = 7;
+const STATUS_CHOICES: [Status; 4] = [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead];
+const TYPE_CHOICES: [&str; 4] = ["task", "bug", "feature", "idea"];
+const PRI_CHOICES: [u8; 5] = [1, 2, 3, 4, 5];
+const DEPS_CHOICES: [&str; 2] = ["ready", "tangled"];
+
+/// The filter drawer: a small form of chip facets (status/type/priority/deps)
+/// and text facets (labels/search/parent). Editing it previews live on the
+/// list; Enter applies, Esc reverts to `saved`. Reproduces Python `_DrawerState`.
+struct Drawer {
+    saved: FilterSpec,
+    statuses: Vec<Status>,
+    types: Vec<String>,
+    priorities: Vec<u8>,
+    ready: bool,
+    tangled: bool,
+    labels: RefCell<EditorState>,
+    search: RefCell<EditorState>,
+    parent: RefCell<EditorState>,
+    handler: EditorEventHandler,
+    row: usize,
+    chip_idx: usize,
+}
+
+fn text_field(seed: &str, vim: bool) -> RefCell<EditorState> {
+    let mut st = EditorState::new(Lines::from(seed));
+    st.set_single_line(true);
+    st.mode = EditorMode::Insert;
+    let _ = vim;
+    RefCell::new(st)
+}
+
+fn toggle<T: PartialEq>(v: &mut Vec<T>, val: T) {
+    if let Some(i) = v.iter().position(|x| *x == val) {
+        v.remove(i);
+    } else {
+        v.push(val);
+    }
+}
+
+impl Drawer {
+    fn from_filter(vim: bool, f: &FilterSpec) -> Self {
+        Drawer {
+            saved: clone_spec(f),
+            statuses: f.statuses.clone(),
+            types: f.types.clone(),
+            priorities: f.priorities.clone(),
+            ready: f.ready_only,
+            tangled: f.tangled_only,
+            labels: text_field(&f.labels.join(", "), vim),
+            search: text_field(f.search.as_deref().unwrap_or(""), vim),
+            parent: text_field(f.parent.as_deref().unwrap_or(""), vim),
+            handler: make_handler(vim),
+            row: 0,
+            chip_idx: 0,
+        }
+    }
+
+    fn is_text_row(&self) -> bool {
+        matches!(self.row, 3 | 4 | 5)
+    }
+
+    fn chip_count(&self) -> usize {
+        match self.row {
+            0 => STATUS_CHOICES.len(),
+            1 => TYPE_CHOICES.len(),
+            2 => PRI_CHOICES.len(),
+            6 => DEPS_CHOICES.len(),
+            _ => 0,
+        }
+    }
+
+    fn toggle_chip(&mut self) {
+        match self.row {
+            0 => toggle(&mut self.statuses, STATUS_CHOICES[self.chip_idx]),
+            1 => toggle(&mut self.types, TYPE_CHOICES[self.chip_idx].to_string()),
+            2 => toggle(&mut self.priorities, PRI_CHOICES[self.chip_idx]),
+            6 => {
+                if self.chip_idx == 0 {
+                    self.ready = !self.ready;
+                } else {
+                    self.tangled = !self.tangled;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn clear(&mut self) {
+        self.statuses.clear();
+        self.types.clear();
+        self.priorities.clear();
+        self.ready = false;
+        self.tangled = false;
+        *self.labels.borrow_mut() = {
+            let mut s = EditorState::new(Lines::from(""));
+            s.set_single_line(true);
+            s.mode = EditorMode::Insert;
+            s
+        };
+        *self.search.borrow_mut() = {
+            let mut s = EditorState::new(Lines::from(""));
+            s.set_single_line(true);
+            s.mode = EditorMode::Insert;
+            s
+        };
+        *self.parent.borrow_mut() = {
+            let mut s = EditorState::new(Lines::from(""));
+            s.set_single_line(true);
+            s.mode = EditorMode::Insert;
+            s
+        };
+    }
+
+    fn text_of(cell: &RefCell<EditorState>) -> String {
+        cell.borrow().lines.to_string()
+    }
+
+    fn build_spec(&self) -> FilterSpec {
+        let labels: Vec<String> = Self::text_of(&self.labels)
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+        let non_empty = |cell: &RefCell<EditorState>| {
+            let s = Self::text_of(cell).trim().to_string();
+            if s.is_empty() { None } else { Some(s) }
+        };
+        FilterSpec {
+            statuses: self.statuses.clone(),
+            types: self.types.clone(),
+            priorities: self.priorities.clone(),
+            labels,
+            search: non_empty(&self.search),
+            ready_only: self.ready,
+            tangled_only: self.tangled,
+            parent: non_empty(&self.parent),
+        }
+    }
+}
+
+/// FilterSpec isn't Clone; rebuild it field-by-field (used for the drawer's
+/// revert snapshot).
+fn clone_spec(f: &FilterSpec) -> FilterSpec {
+    FilterSpec {
+        statuses: f.statuses.clone(),
+        types: f.types.clone(),
+        priorities: f.priorities.clone(),
+        labels: f.labels.clone(),
+        search: f.search.clone(),
+        ready_only: f.ready_only,
+        tangled_only: f.tangled_only,
+        parent: f.parent.clone(),
+    }
 }
 
 impl SearchBox {
@@ -530,6 +690,102 @@ impl App {
         self.overlay = Overlay::Search(SearchBox::new(self.editor_vim, cur));
     }
 
+    fn open_drawer(&mut self) {
+        self.overlay = Overlay::Drawer(Drawer::from_filter(self.editor_vim, &self.filter));
+    }
+
+    fn drawer_live_preview(&mut self) {
+        let spec = match &self.overlay {
+            Overlay::Drawer(d) => Some(d.build_spec()),
+            _ => None,
+        };
+        if let Some(s) = spec {
+            self.filter = s;
+            self.clamp_cursor();
+        }
+    }
+
+    fn close_drawer(&mut self, commit: bool) {
+        if let Overlay::Drawer(d) = std::mem::replace(&mut self.overlay, Overlay::None) {
+            self.filter = if commit { d.build_spec() } else { d.saved };
+            self.clamp_cursor();
+            self.notification = Some(if commit {
+                "filter applied".into()
+            } else {
+                "filter unchanged".into()
+            });
+        }
+    }
+
+    fn handle_drawer_key(&mut self, k: KeyEvent) {
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        let (row, is_text) = match &self.overlay {
+            Overlay::Drawer(d) => (d.row, d.is_text_row()),
+            _ => return,
+        };
+        // Global apply / cancel / clear.
+        match k.code {
+            KeyCode::Enter => return self.close_drawer(true),
+            KeyCode::Esc => return self.close_drawer(false),
+            KeyCode::Char('C') => {
+                if let Overlay::Drawer(d) = &mut self.overlay {
+                    d.clear();
+                }
+                return self.drawer_live_preview();
+            }
+            _ => {}
+        }
+        // Row navigation. On text rows only Tab/arrows/Ctrl move rows (so j/k
+        // remain typeable); on chip rows j/k also navigate.
+        let nav_down = matches!(k.code, KeyCode::Down | KeyCode::Tab)
+            || (ctrl && k.code == KeyCode::Char('n'))
+            || (!is_text && k.code == KeyCode::Char('j'));
+        let nav_up = matches!(k.code, KeyCode::Up | KeyCode::BackTab)
+            || (ctrl && k.code == KeyCode::Char('p'))
+            || (!is_text && k.code == KeyCode::Char('k'));
+        if nav_down || nav_up {
+            if let Overlay::Drawer(d) = &mut self.overlay {
+                d.row = if nav_down {
+                    (d.row + 1) % DRAWER_ROWS
+                } else {
+                    (d.row + DRAWER_ROWS - 1) % DRAWER_ROWS
+                };
+                d.chip_idx = 0;
+            }
+            return;
+        }
+        if is_text {
+            if let Overlay::Drawer(d) = &mut self.overlay {
+                match row {
+                    3 => d.handler.on_key_event(k, &mut d.labels.borrow_mut()),
+                    4 => d.handler.on_key_event(k, &mut d.search.borrow_mut()),
+                    5 => d.handler.on_key_event(k, &mut d.parent.borrow_mut()),
+                    _ => {}
+                }
+            }
+            return self.drawer_live_preview();
+        }
+        // Chip rows: left/right move the cursor, Space toggles.
+        let mut changed = false;
+        if let Overlay::Drawer(d) = &mut self.overlay {
+            let n = d.chip_count();
+            match k.code {
+                KeyCode::Left | KeyCode::Char('h') if n > 0 => {
+                    d.chip_idx = (d.chip_idx + n - 1) % n
+                }
+                KeyCode::Right | KeyCode::Char('l') if n > 0 => d.chip_idx = (d.chip_idx + 1) % n,
+                KeyCode::Char(' ') => {
+                    d.toggle_chip();
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        if changed {
+            self.drawer_live_preview();
+        }
+    }
+
     /// Jump to the Hairy tab (where new tasks land) and place the cursor on `id`.
     fn select_id(&mut self, id: &str) {
         if let Some(i) = self.tabs.iter().position(|&s| s == Status::Hairy) {
@@ -544,6 +800,10 @@ impl App {
 
     fn handle_overlay_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        if matches!(self.overlay, Overlay::Drawer(_)) {
+            self.handle_drawer_key(k);
+            return;
+        }
         // The fuzzy picker: nav/commit/cancel are intercepted; everything else
         // edits the query (and resets the selection to the top match).
         if matches!(self.overlay, Overlay::Fuzzy(_)) {
@@ -646,7 +906,11 @@ impl App {
             return;
         }
         match std::mem::replace(&mut self.overlay, Overlay::None) {
-            Overlay::None | Overlay::Edit(_) | Overlay::Fuzzy(_) | Overlay::Search(_) => {}
+            Overlay::None
+            | Overlay::Edit(_)
+            | Overlay::Fuzzy(_)
+            | Overlay::Search(_)
+            | Overlay::Drawer(_) => {}
             Overlay::Pick {
                 prompt,
                 keys,
@@ -977,6 +1241,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('D') => app.open_dep_picker(),
             KeyCode::Char('R') => app.open_reparent_picker(),
             KeyCode::Char('/') => app.open_search(),
+            KeyCode::Char('f') => app.open_drawer(),
             KeyCode::Esc => {
                 if app.filter.content_active() {
                     app.filter = FilterSpec::default();
@@ -1025,9 +1290,134 @@ fn render(app: &App, frame: &mut Frame) {
     match &app.overlay {
         Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, right),
         Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, right),
+        Overlay::Drawer(d) => render_drawer(d, frame, right),
         _ => render_detail(app, frame, right),
     }
     render_status(app, frame, bot);
+}
+
+fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
+    let rows = Layout::vertical([
+        Constraint::Length(1), // header
+        Constraint::Length(1), // status chips
+        Constraint::Length(1), // type chips
+        Constraint::Length(1), // priority chips
+        Constraint::Length(1), // labels
+        Constraint::Length(1), // search
+        Constraint::Length(1), // parent
+        Constraint::Length(1), // deps chips
+        Constraint::Min(0),
+    ])
+    .split(area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "Filter",
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        rows[0],
+    );
+    let statuses: Vec<(String, bool)> = STATUS_CHOICES
+        .iter()
+        .map(|&s| (status_word(s).to_string(), d.statuses.contains(&s)))
+        .collect();
+    let types: Vec<(String, bool)> = TYPE_CHOICES
+        .iter()
+        .map(|&k| (k.to_string(), d.types.iter().any(|t| t == k)))
+        .collect();
+    let pris: Vec<(String, bool)> = PRI_CHOICES
+        .iter()
+        .map(|&p| (format!("p{p}"), d.priorities.contains(&p)))
+        .collect();
+    let deps: Vec<(String, bool)> = vec![("ready".into(), d.ready), ("tangled".into(), d.tangled)];
+    render_chip_row(d, 0, "status", &statuses, frame, rows[1]);
+    render_chip_row(d, 1, "type", &types, frame, rows[2]);
+    render_chip_row(d, 2, "priority", &pris, frame, rows[3]);
+    render_text_row(d, 3, "labels", &d.labels, frame, rows[4]);
+    render_text_row(d, 4, "search", &d.search, frame, rows[5]);
+    render_text_row(d, 5, "parent", &d.parent, frame, rows[6]);
+    render_chip_row(d, 6, "deps", &deps, frame, rows[7]);
+}
+
+fn render_chip_row(
+    d: &Drawer,
+    row: usize,
+    label: &str,
+    choices: &[(String, bool)],
+    frame: &mut Frame,
+    area: Rect,
+) {
+    let current_row = d.row == row;
+    let mut spans = vec![
+        Span::styled(
+            if current_row { "▸ " } else { "  " },
+            Style::new().fg(Color::Cyan),
+        ),
+        Span::styled(format!("{label:<9}"), Style::new().fg(Color::DarkGray)),
+    ];
+    for (j, (disp, sel)) in choices.iter().enumerate() {
+        let mut style = if *sel {
+            Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(Color::DarkGray)
+        };
+        if current_row && d.chip_idx == j {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(disp.clone(), style));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn render_text_row(
+    d: &Drawer,
+    row: usize,
+    label: &str,
+    cell: &RefCell<EditorState>,
+    frame: &mut Frame,
+    area: Rect,
+) {
+    let current = d.row == row;
+    let [g, lab, fld] = Layout::horizontal([
+        Constraint::Length(2),
+        Constraint::Length(9),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            if current { "▸ " } else { "  " },
+            Style::new().fg(Color::Cyan),
+        )),
+        g,
+    );
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            label.to_string(),
+            Style::new().fg(Color::DarkGray),
+        )),
+        lab,
+    );
+    if current {
+        let mut st = cell.borrow_mut();
+        frame.render_widget(
+            EditorView::new(&mut st)
+                .theme(editor_theme())
+                .single_line(true),
+            fld,
+        );
+    } else {
+        let text = cell.borrow().lines.to_string();
+        let shown = if text.is_empty() {
+            "(any)".to_string()
+        } else {
+            text
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(shown, Style::new().fg(Color::DarkGray))),
+            fld,
+        );
+    }
 }
 
 fn editor_theme() -> EditorTheme<'static> {
@@ -1279,6 +1669,17 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     // Inline search field.
     if let Overlay::Search(sb) = &app.overlay {
         render_query_line("/", &sb.query, frame, area);
+        return;
+    }
+    // Drawer help hint.
+    if matches!(&app.overlay, Overlay::Drawer(_)) {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "↑↓/Tab rows · ←→ chips · Space toggle · C clear · Enter apply · Esc cancel",
+                Style::new().fg(Color::DarkGray),
+            )),
+            area,
+        );
         return;
     }
     // Otherwise: an active modal prompt, else a transient notification, else the
@@ -1588,6 +1989,73 @@ mod tests {
         handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(matches!(app.overlay, Overlay::None));
         assert!(app.filter.search.is_none());
+    }
+
+    fn enter_key(app: &mut App) {
+        handle_key(app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    }
+    fn esc_key(app: &mut App) {
+        handle_key(app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    }
+    fn down_key(app: &mut App) {
+        handle_key(app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn filter_drawer_overlay() {
+        // f opens the drawer; toggle the first status chip to show selection.
+        let mut app = sample();
+        handle_key(&mut app, key('f'));
+        handle_key(&mut app, key(' ')); // toggle status=hairy (row 0, chip 0)
+        assert!(matches!(app.overlay, Overlay::Drawer(_)));
+        insta::assert_snapshot!(draw(&app, 72, 16));
+    }
+
+    #[test]
+    fn drawer_toggle_applies_live_and_commits() {
+        let mut app = sample();
+        handle_key(&mut app, key('f')); // row 0 (status)
+        handle_key(&mut app, key('j')); // -> row 1 (type)
+        handle_key(&mut app, key(' ')); // toggle type=task (chip 0)
+        assert_eq!(app.filter.types, vec!["task".to_string()]); // live preview
+        enter_key(&mut app); // apply
+        assert!(matches!(app.overlay, Overlay::None));
+        assert_eq!(app.filter.types, vec!["task".to_string()]);
+    }
+
+    #[test]
+    fn drawer_cancel_restores_saved() {
+        let mut app = sample();
+        handle_key(&mut app, key('f'));
+        handle_key(&mut app, key('j')); // row 1 (type)
+        handle_key(&mut app, key(' ')); // toggle task (live)
+        assert!(app.filter.content_active());
+        esc_key(&mut app); // cancel reverts
+        assert!(matches!(app.overlay, Overlay::None));
+        assert!(!app.filter.content_active());
+    }
+
+    #[test]
+    fn drawer_clear_empties_filter() {
+        let mut app = sample();
+        app.filter.types = vec!["bug".into()];
+        handle_key(&mut app, key('f')); // seeded from the active filter
+        handle_key(&mut app, key('C')); // clear all
+        assert!(!app.filter.content_active());
+    }
+
+    #[test]
+    fn drawer_text_row_typing_sets_search() {
+        let mut app = sample();
+        handle_key(&mut app, key('f'));
+        // Navigate to the search text row (row 4) with Down (works on all rows).
+        for _ in 0..4 {
+            down_key(&mut app);
+        }
+        typ(&mut app, "root");
+        assert_eq!(app.filter.search.as_deref(), Some("root"));
+        enter_key(&mut app);
+        assert_eq!(app.filter.search.as_deref(), Some("root"));
     }
 
     #[test]

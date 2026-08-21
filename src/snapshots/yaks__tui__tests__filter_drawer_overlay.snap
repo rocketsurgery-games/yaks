@@ -1,0 +1,20 @@
+---
+source: src/tui.rs
+expression: "draw(&app, 72, 16)"
+---
+ Hairy 2 · Shaving 1 · Shorn 1
+▾ [H] p2 Root A                 Filter
+    [H] p3 Child A1             ▸ status    hairy shaving shorn dead
+    [N] p3 Child A2 done          type      task bug feature idea
+                                  priority  p1 p2 p3 p4 p5
+                                  labels   (any)
+                                  search   (any)
+                                  parent   (any)
+                                  deps      ready tangled
+
+
+
+
+
+
+↑↓/Tab rows · ←→ chips · Space toggle · C clear · Enter apply · Esc canc
