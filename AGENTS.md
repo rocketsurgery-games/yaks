@@ -26,3 +26,13 @@ making architectural decisions.
 cargo build --release
 cargo test
 ```
+
+## Task tracking
+
+This project uses Yaks. The Yaks skill has the full workflow.
+
+1. Never start coding without a shaving yak. No exceptions.
+2. Shear a yak as soon as its work is done. If the project commits its yaks (`.yaks/` is tracked by git), commit the shorn yak alongside the code that completed it; if `.yaks/` is gitignored, keep yak files — and their IDs — out of commits, PRs, and anything external.
+3. Check existing yaks before creating new ones.
+4. Append progress notes to yak descriptions as you work.
+5. When unsure what's next, run `yaks next` — don't freelance.
