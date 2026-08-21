@@ -439,8 +439,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Tui => {
-            let tasks = herd.list(FilterSpec::default(), false)?;
-            tui::run(tui::App::new(tasks))?;
+            tui::run(tui::App::with_herd(herd)?)?;
         }
     }
     Ok(())

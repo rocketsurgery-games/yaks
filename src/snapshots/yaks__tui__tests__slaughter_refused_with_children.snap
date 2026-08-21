@@ -1,0 +1,5 @@
+---
+source: src/tui.rs
+expression: app.notification.clone().unwrap()
+---
+a0 has 2 children; slaughter them first

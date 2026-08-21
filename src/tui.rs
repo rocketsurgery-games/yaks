@@ -3,7 +3,7 @@
 //! All drawing goes through the pure `render(&App, &mut Frame)`, so the same
 //! painter can target a real terminal (crossterm) or an in-memory `TestBackend`
 //! buffer (snapshot tests + the future demo-cast pipeline). Key handling only
-//! mutates `App`; later slices route mutating keys through `herd::Herd`.
+//! mutates `App`; mutating keys route through the `Herd` facade and then reload.
 
 mod tree;
 
@@ -27,6 +27,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Tabs, Wrap};
 use ratatui::{Frame, Terminal};
 
+use crate::filter::FilterSpec;
+use crate::herd::{Herd, MoveOutcome, TaskEdit, UpdateOutcome};
 use crate::model::{Status, Task};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -35,9 +37,41 @@ enum Focus {
     Detail,
 }
 
-/// TUI state. Holds the loaded task set; per-tab tree views are derived on
-/// demand. (Read-only in slices 1-2; later slices add a `Herd` handle.)
+/// A modal prompt painted on the bottom line, reproducing the Python TUI's
+/// `pick()` (single keypress) and `confirm()` (y/N) dialogs. Kept as plain
+/// data so `render` stays pure — the action to perform on commit rides along.
+enum Overlay {
+    None,
+    /// Single-key picker: any char in `keys` resolves `action`; Esc cancels.
+    Pick {
+        prompt: String,
+        keys: String,
+        action: PickAction,
+    },
+    /// y/N confirmation; Enter and Esc both default to "no".
+    Confirm {
+        prompt: String,
+        action: ConfirmAction,
+    },
+}
+
+/// What a resolved single-key pick should do (carries the target task id).
+enum PickAction {
+    State(String),
+    Priority(String),
+    Type(String),
+}
+
+/// What a confirmed y/N prompt should do.
+enum ConfirmAction {
+    Slaughter(String),
+}
+
+/// TUI state. Holds the loaded task set plus (in live use) a `Herd` handle so
+/// mutations re-query through the core. Per-tab tree views are derived on demand.
 pub struct App {
+    /// `None` in read-only snapshot tests; `Some` in live use (`with_herd`).
+    herd: Option<Herd>,
     all: Vec<Task>,
     tabs: Vec<Status>,
     tab: usize,
@@ -47,12 +81,18 @@ pub struct App {
     collapsed: HashSet<String>,
     /// Approx. list viewport height, refreshed each loop for paging math.
     page: u16,
+    overlay: Overlay,
+    /// Transient one-line status message shown until the next mutation.
+    notification: Option<String>,
     quit: bool,
 }
 
 impl App {
+    /// Read-only constructor: renders `all` with no herd behind it. Mutating
+    /// keys become no-ops. Used by snapshot tests and any preview caller.
     pub fn new(all: Vec<Task>) -> Self {
         App {
+            herd: None,
             all,
             tabs: vec![Status::Hairy, Status::Shaving, Status::Shorn],
             tab: 0,
@@ -61,8 +101,34 @@ impl App {
             detail_scroll: 0,
             collapsed: HashSet::new(),
             page: 10,
+            overlay: Overlay::None,
+            notification: None,
             quit: false,
         }
+    }
+
+    /// Live constructor: loads the current herd view and keeps the handle so
+    /// mutations can re-query after each change.
+    pub fn with_herd(herd: Herd) -> Result<Self> {
+        let all = herd.list(FilterSpec::default(), false)?;
+        let mut app = App::new(all);
+        app.herd = Some(herd);
+        Ok(app)
+    }
+
+    /// Re-query the herd view after a mutation and keep the cursor in range.
+    fn reload(&mut self) {
+        if let Some(h) = &self.herd {
+            if let Ok(all) = h.list(FilterSpec::default(), false) {
+                self.all = all;
+            }
+        }
+        let len = self.rows().len();
+        self.cursor = if len == 0 {
+            0
+        } else {
+            self.cursor.min(len - 1)
+        };
     }
 
     fn tab_status(&self) -> Status {
@@ -81,6 +147,14 @@ impl App {
 
     fn selected(&self) -> Option<&Task> {
         self.rows().into_iter().nth(self.cursor).map(|r| r.task)
+    }
+
+    fn selected_id(&self) -> Option<String> {
+        self.selected().map(|t| t.id.clone())
+    }
+
+    fn task(&self, id: &str) -> Option<&Task> {
+        self.all.iter().find(|t| t.id == id)
     }
 
     fn switch_tab(&mut self, delta: i32) {
@@ -107,6 +181,193 @@ impl App {
                 let id = row.task.id.clone();
                 if !self.collapsed.remove(&id) {
                     self.collapsed.insert(id);
+                }
+            }
+        }
+    }
+
+    // -- overlay openers --------------------------------------------------
+
+    fn open_state_picker(&mut self) {
+        if let Some(id) = self.selected_id() {
+            self.overlay = Overlay::Pick {
+                prompt: format!(
+                    "State for {id}: h=hairy s=shaving n=shorn x=slaughter  (Esc=cancel)"
+                ),
+                keys: "hsnx".into(),
+                action: PickAction::State(id),
+            };
+        }
+    }
+
+    fn open_priority_picker(&mut self) {
+        if let Some(id) = self.selected_id() {
+            self.overlay = Overlay::Pick {
+                prompt: format!(
+                    "Priority for {id}: 1=urgent 2=high 3=med 4=low 5=lowest  (Esc=cancel)"
+                ),
+                keys: "12345".into(),
+                action: PickAction::Priority(id),
+            };
+        }
+    }
+
+    fn open_type_picker(&mut self) {
+        if let Some(id) = self.selected_id() {
+            self.overlay = Overlay::Pick {
+                prompt: format!("Type for {id}: t=task b=bug f=feature i=idea  (Esc=cancel)"),
+                keys: "tbfi".into(),
+                action: PickAction::Type(id),
+            };
+        }
+    }
+
+    fn open_slaughter_confirm(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        let kids = self
+            .all
+            .iter()
+            .filter(|c| c.parent.as_deref() == Some(id.as_str()) && c.status != Status::Dead)
+            .count();
+        if kids > 0 {
+            let noun = if kids == 1 { "child" } else { "children" };
+            self.notification = Some(format!("{id} has {kids} {noun}; slaughter them first"));
+            return;
+        }
+        let title: String = self
+            .task(&id)
+            .map(|t| t.title.chars().take(40).collect())
+            .unwrap_or_default();
+        self.overlay = Overlay::Confirm {
+            prompt: format!("Slaughter {id} ({title})? (y/N): "),
+            action: ConfirmAction::Slaughter(id),
+        };
+    }
+
+    // -- overlay resolution ----------------------------------------------
+
+    fn handle_overlay_key(&mut self, k: KeyEvent) {
+        match std::mem::replace(&mut self.overlay, Overlay::None) {
+            Overlay::None => {}
+            Overlay::Pick {
+                prompt,
+                keys,
+                action,
+            } => match k.code {
+                KeyCode::Esc => self.notification = Some("cancelled".into()),
+                KeyCode::Char(c) if keys.contains(c) => self.resolve_pick(action, c),
+                _ => {
+                    self.overlay = Overlay::Pick {
+                        prompt,
+                        keys,
+                        action,
+                    }
+                }
+            },
+            Overlay::Confirm { prompt, action } => match k.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => self.resolve_confirm(action),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Enter => {
+                    self.notification = Some("cancelled".into())
+                }
+                _ => self.overlay = Overlay::Confirm { prompt, action },
+            },
+        }
+    }
+
+    fn resolve_pick(&mut self, action: PickAction, c: char) {
+        match action {
+            PickAction::State(id) => {
+                let dest = match c {
+                    'h' => Status::Hairy,
+                    's' => Status::Shaving,
+                    'n' => Status::Shorn,
+                    'x' => Status::Dead,
+                    _ => return,
+                };
+                if self.task(&id).map(|t| t.status) == Some(dest) {
+                    self.notification = Some(format!("{id} already {}", status_word(dest)));
+                    return;
+                }
+                let Some(h) = &self.herd else { return };
+                match h.transition(&id, dest) {
+                    Ok(MoveOutcome::Moved) => {
+                        self.reload();
+                        self.notification = Some(format!("{id} → {}", status_word(dest)));
+                    }
+                    Ok(MoveOutcome::AlreadyThere) => {
+                        self.notification = Some(format!("{id} already {}", status_word(dest)))
+                    }
+                    Ok(MoveOutcome::NotFound) => {
+                        self.notification = Some(format!("{id} not found"))
+                    }
+                    Err(e) => self.notification = Some(format!("error: {e}")),
+                }
+            }
+            PickAction::Priority(id) => {
+                let Some(p) = c.to_digit(10).map(|d| d as u8) else {
+                    return;
+                };
+                if self.task(&id).map(|t| t.priority) == Some(p) {
+                    self.notification = Some(format!("{id} already p{p}"));
+                    return;
+                }
+                self.apply_edit(
+                    &id,
+                    TaskEdit {
+                        priority: Some(p),
+                        ..Default::default()
+                    },
+                    format!("{id} → p{p}"),
+                );
+            }
+            PickAction::Type(id) => {
+                let kind = match c {
+                    't' => "task",
+                    'b' => "bug",
+                    'f' => "feature",
+                    'i' => "idea",
+                    _ => return,
+                };
+                if self.task(&id).map(|t| t.kind.as_str()) == Some(kind) {
+                    self.notification = Some(format!("{id} already {kind}"));
+                    return;
+                }
+                self.apply_edit(
+                    &id,
+                    TaskEdit {
+                        kind: Some(kind.to_string()),
+                        ..Default::default()
+                    },
+                    format!("{id} → {kind}"),
+                );
+            }
+        }
+    }
+
+    fn apply_edit(&mut self, id: &str, edit: TaskEdit, ok_msg: String) {
+        let Some(h) = &self.herd else { return };
+        match h.update(id, edit) {
+            Ok(UpdateOutcome::Updated) => {
+                self.reload();
+                self.notification = Some(ok_msg);
+            }
+            Ok(UpdateOutcome::NoChanges) => self.notification = Some(format!("{id} unchanged")),
+            Ok(UpdateOutcome::NotFound) => self.notification = Some(format!("{id} not found")),
+            Err(e) => self.notification = Some(format!("error: {e}")),
+        }
+    }
+
+    fn resolve_confirm(&mut self, action: ConfirmAction) {
+        match action {
+            ConfirmAction::Slaughter(id) => {
+                let Some(h) = &self.herd else { return };
+                match h.transition(&id, Status::Dead) {
+                    Ok(MoveOutcome::Moved) => {
+                        self.reload();
+                        self.notification = Some(format!("slaughtered {id}"));
+                    }
+                    Ok(_) => self.notification = Some(format!("{id} not slaughtered")),
+                    Err(e) => self.notification = Some(format!("error: {e}")),
                 }
             }
         }
@@ -143,6 +404,11 @@ fn handle_key(app: &mut App, k: KeyEvent) {
         app.quit = true;
         return;
     }
+    // A modal prompt swallows all other input until resolved.
+    if !matches!(app.overlay, Overlay::None) {
+        app.handle_overlay_key(k);
+        return;
+    }
     let half = (app.page / 2).max(1) as i32;
     let full = app.page.max(1) as i32;
     match app.focus {
@@ -159,6 +425,11 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Tab | KeyCode::Char(']') => app.switch_tab(1),
             KeyCode::BackTab | KeyCode::Char('[') => app.switch_tab(-1),
             KeyCode::Char(' ') => app.toggle_collapse(),
+            // Mutations (single-key pickers + confirm).
+            KeyCode::Char('S') => app.open_state_picker(),
+            KeyCode::Char('P') => app.open_priority_picker(),
+            KeyCode::Char('T') => app.open_type_picker(),
+            KeyCode::Char('X') => app.open_slaughter_confirm(),
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
                 if app.selected().is_some() {
                     app.focus = Focus::Detail;
@@ -196,7 +467,7 @@ fn render(app: &App, frame: &mut Frame) {
         Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)]).areas(mid);
     render_list(app, frame, left);
     render_detail(app, frame, right);
-    render_help(app, frame, bot);
+    render_status(app, frame, bot);
 }
 
 fn status_name(s: Status) -> &'static str {
@@ -205,6 +476,15 @@ fn status_name(s: Status) -> &'static str {
         Status::Shaving => "Shaving",
         Status::Shorn => "Shorn",
         Status::Dead => "Dead",
+    }
+}
+
+fn status_word(s: Status) -> &'static str {
+    match s {
+        Status::Hairy => "hairy",
+        Status::Shaving => "shaving",
+        Status::Shorn => "shorn",
+        Status::Dead => "dead",
     }
 }
 
@@ -340,15 +620,32 @@ fn field(k: &str, v: &str) -> Line<'static> {
     ])
 }
 
-fn render_help(app: &App, frame: &mut Frame, area: Rect) {
-    let hint = match app.focus {
-        Focus::List => "j/k move · Space fold · Tab tab · l detail · q quit",
-        Focus::Detail => "j/k scroll · h back · q quit",
+fn render_status(app: &App, frame: &mut Frame, area: Rect) {
+    // Priority: an active modal prompt, else a transient notification, else the
+    // context help hint.
+    let (text, style) = match &app.overlay {
+        Overlay::Pick { prompt, .. } | Overlay::Confirm { prompt, .. } => (
+            prompt.clone(),
+            Style::new()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Overlay::None => match &app.notification {
+            Some(n) => (n.clone(), Style::new().fg(Color::Yellow)),
+            None => (help_hint(app).to_string(), Style::new().fg(Color::DarkGray)),
+        },
     };
-    frame.render_widget(
-        Paragraph::new(Span::styled(hint, Style::new().fg(Color::DarkGray))),
-        area,
-    );
+    frame.render_widget(Paragraph::new(Span::styled(text, style)), area);
+}
+
+fn help_hint(app: &App) -> &'static str {
+    match app.focus {
+        Focus::List => {
+            "j/k move · S/P/T state·prio·type · X slay · Space fold · Tab tab · l detail · q quit"
+        }
+        Focus::Detail => "j/k scroll · h back · q quit",
+    }
 }
 
 // -- terminal lifecycle ---------------------------------------------------
@@ -425,6 +722,10 @@ mod tests {
         buffer_to_string(term.backend().buffer())
     }
 
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
     fn sample() -> App {
         // root-a (hairy) with children a1 (hairy) + a2 (shorn, ghost in Hairy tab);
         // root-b (shaving, not in Hairy universe).
@@ -459,5 +760,154 @@ mod tests {
         assert!(a2.ghost, "shorn child should be a ghost in the Hairy tab");
         let a0 = rows.iter().find(|r| r.task.id == "a0").unwrap();
         assert!(a0.has_children && !a0.ghost);
+    }
+
+    // -- overlay rendering (herd-less; opening only needs `selected`) ------
+
+    #[test]
+    fn state_picker_overlay() {
+        let mut app = sample();
+        handle_key(&mut app, key('S'));
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn priority_picker_overlay() {
+        let mut app = sample();
+        handle_key(&mut app, key('P'));
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn type_picker_overlay() {
+        let mut app = sample();
+        handle_key(&mut app, key('T'));
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn slaughter_confirm_overlay() {
+        // Move to a childless leaf (Child A1) so the confirm actually opens.
+        let mut app = sample();
+        handle_key(&mut app, key('j'));
+        handle_key(&mut app, key('X'));
+        assert!(matches!(app.overlay, Overlay::Confirm { .. }));
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn slaughter_refused_with_children() {
+        // Root A has a non-dead child (A1), so X should refuse and not open.
+        let mut app = sample();
+        handle_key(&mut app, key('X'));
+        assert!(matches!(app.overlay, Overlay::None));
+        insta::assert_snapshot!(app.notification.clone().unwrap());
+    }
+
+    #[test]
+    fn esc_cancels_picker() {
+        let mut app = sample();
+        handle_key(&mut app, key('P'));
+        assert!(!matches!(app.overlay, Overlay::None));
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(app.overlay, Overlay::None));
+        assert_eq!(app.notification.as_deref(), Some("cancelled"));
+    }
+
+    // -- live mutation through a temp herd --------------------------------
+
+    mod live {
+        use super::*;
+        use crate::herd::Herd;
+        use crate::store::{self, SCHEMA};
+        use std::fs;
+        use std::path::PathBuf;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+
+        /// A temp project dir containing a `.yaks/` herd seeded with `tasks`.
+        fn temp_herd(tasks: &[Task]) -> (PathBuf, Herd) {
+            let mut proj = std::env::temp_dir();
+            let n = SEQ.fetch_add(1, Ordering::Relaxed);
+            proj.push(format!("yaksrs-tui-{}-{}", std::process::id(), n));
+            let root = proj.join(".yaks");
+            for st in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
+                fs::create_dir_all(root.join(st.dir())).unwrap();
+            }
+            fs::write(root.join("schema"), SCHEMA.to_string()).unwrap();
+            for t in tasks {
+                store::write::save(&root, t).unwrap();
+            }
+            let herd = match Herd::open(&proj) {
+                Ok(h) => h,
+                Err(_) => panic!("failed to open temp herd"),
+            };
+            (proj, herd)
+        }
+
+        fn press(app: &mut App, chars: &str) {
+            for c in chars.chars() {
+                handle_key(app, key(c));
+            }
+        }
+
+        #[test]
+        fn state_pick_transitions_and_reloads() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            // S then n → shorn. The task leaves the Hairy tab.
+            press(&mut app, "Sn");
+            assert!(matches!(app.overlay, Overlay::None));
+            let t = app.task("t0").unwrap();
+            assert_eq!(t.status, Status::Shorn);
+            assert_eq!(app.notification.as_deref(), Some("t0 → shorn"));
+        }
+
+        #[test]
+        fn priority_pick_updates_and_reloads() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "P1");
+            assert_eq!(app.task("t0").unwrap().priority, 1);
+            assert_eq!(app.notification.as_deref(), Some("t0 → p1"));
+        }
+
+        #[test]
+        fn type_pick_updates_and_reloads() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "Tb");
+            assert_eq!(app.task("t0").unwrap().kind, "bug");
+            assert_eq!(app.notification.as_deref(), Some("t0 → bug"));
+        }
+
+        #[test]
+        fn slaughter_confirm_moves_to_dead() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "Xy");
+            // Dead is excluded from the default view, so it drops out of `all`.
+            assert!(app.task("t0").is_none());
+            assert_eq!(app.notification.as_deref(), Some("slaughtered t0"));
+        }
+
+        #[test]
+        fn slaughter_declined_keeps_task() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "Xn");
+            assert_eq!(app.task("t0").unwrap().status, Status::Hairy);
+            assert_eq!(app.notification.as_deref(), Some("cancelled"));
+        }
+
+        #[test]
+        fn state_pick_same_status_is_noop() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "Sh");
+            assert_eq!(app.task("t0").unwrap().status, Status::Hairy);
+            assert_eq!(app.notification.as_deref(), Some("t0 already hairy"));
+        }
     }
 }

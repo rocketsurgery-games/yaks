@@ -3,10 +3,11 @@ source: src/tui.rs
 expression: "draw(&app, 72, 14)"
 ---
  Hairy 2 · Shaving 1 · Shorn 1
-▸ [H] p2 Root A  (+2)           │ id       a0
-                                │ title    Root A
-                                │ type     task
-                                │ priority 2
+▾ [H] p2 Root A                 │ id       a1
+    [H] p3 Child A1             │ title    Child A1
+    [N] p3 Child A2 done        │ type     task
+                                │ priority 3
+                                │ parent   a0
                                 │
                                 │
                                 │
@@ -14,5 +15,4 @@ expression: "draw(&app, 72, 14)"
                                 │
                                 │
                                 │
-                                │
-j/k move · S/P/T state·prio·type · X slay · Space fold · Tab tab · l det
+Slaughter a1 (Child A1)? (y/N):
