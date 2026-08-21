@@ -281,9 +281,27 @@ pub mod write {
     fn is_bool(s: &str) -> bool {
         matches!(
             s,
-            "y" | "Y" | "yes" | "Yes" | "YES" | "n" | "N" | "no" | "No" | "NO"
-                | "true" | "True" | "TRUE" | "false" | "False" | "FALSE"
-                | "on" | "On" | "ON" | "off" | "Off" | "OFF"
+            "y" | "Y"
+                | "yes"
+                | "Yes"
+                | "YES"
+                | "n"
+                | "N"
+                | "no"
+                | "No"
+                | "NO"
+                | "true"
+                | "True"
+                | "TRUE"
+                | "false"
+                | "False"
+                | "FALSE"
+                | "on"
+                | "On"
+                | "ON"
+                | "off"
+                | "Off"
+                | "OFF"
         )
     }
 
@@ -323,10 +341,13 @@ pub mod write {
 }
 
 /// Config read from `.yaks/config.yaml` (only the keys we use).
+#[derive(Clone)]
 pub struct Config {
     pub prefix: String,
     pub default_type: String,
     pub default_priority: u8,
+    /// When true, embedded editors use vim keybindings; otherwise emacs.
+    pub vim_mode: bool,
 }
 
 /// Read `.yaks/config.yaml`; missing file/keys fall back to the Python
@@ -336,6 +357,7 @@ pub fn read_config(root: &Path) -> Config {
         prefix: "yak".to_string(),
         default_type: "task".to_string(),
         default_priority: 3,
+        vim_mode: true,
     };
     if let Ok(text) = fs::read_to_string(root.join("config.yaml")) {
         for line in text.lines() {
@@ -351,6 +373,7 @@ pub fn read_config(root: &Path) -> Config {
                         c.default_priority = n;
                     }
                 }
+                "vim_mode" => c.vim_mode = matches!(v.as_str(), "true" | "True" | "yes" | "1"),
                 _ => {}
             }
         }
@@ -537,13 +560,17 @@ pub fn reparent(root: &Path, id: &str, new_parent: Option<String>) -> Result<Rep
     let old_parent = task.parent.clone();
     if let Some(np) = &new_parent {
         if np == id {
-            return Ok(Reparent::Error("cannot reparent a task under itself".into()));
+            return Ok(Reparent::Error(
+                "cannot reparent a task under itself".into(),
+            ));
         }
         if !all.iter().any(|t| &t.id == np) {
             return Ok(Reparent::Error(format!("parent task {np} not found")));
         }
         if crate::filter::descendant_ids(&all, id, true).contains(np.as_str()) {
-            return Ok(Reparent::Error("cannot reparent under own descendant".into()));
+            return Ok(Reparent::Error(
+                "cannot reparent under own descendant".into(),
+            ));
         }
         if old_parent.as_deref() == Some(np.as_str()) {
             return Ok(Reparent::Error(format!("{id} is already a child of {np}")));
@@ -619,13 +646,19 @@ mod tests {
     #[test]
     fn timestamps_quoted_priority_plain_id_plain() {
         let text = write::render(&sample());
-        assert!(text.contains("\ncreated: '2026-08-19T00:00:00Z'\n"), "{text}");
+        assert!(
+            text.contains("\ncreated: '2026-08-19T00:00:00Z'\n"),
+            "{text}"
+        );
         assert!(text.contains("\npriority: 2\n"), "{text}");
         assert!(text.contains("\nid: yaksrs-6b8c\n"), "{text}");
         // Title has ": " so it must be single-quoted.
         assert!(text.contains("\ntitle: 'Task model: full fields"), "{text}");
         // Block list at column 0.
-        assert!(text.contains("\ndepends_on:\n- yaksrs-aaaa\n- yaksrs-bbbb\n"), "{text}");
+        assert!(
+            text.contains("\ndepends_on:\n- yaksrs-aaaa\n- yaksrs-bbbb\n"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -692,7 +725,10 @@ mod move_tests {
         write::save(&root, &task("yaksrs-mv01", Status::Hairy)).unwrap();
         assert!(root.join("hairy/yaksrs-mv01.md").is_file());
 
-        assert_eq!(move_task(&root, "yaksrs-mv01", Status::Shaving).unwrap(), MoveOutcome::Moved);
+        assert_eq!(
+            move_task(&root, "yaksrs-mv01", Status::Shaving).unwrap(),
+            MoveOutcome::Moved
+        );
         assert!(!root.join("hairy/yaksrs-mv01.md").exists());
         assert!(root.join("shaving/yaksrs-mv01.md").is_file());
 
@@ -707,8 +743,14 @@ mod move_tests {
     fn move_is_noop_when_already_there_and_reports_missing() {
         let root = temp_root();
         write::save(&root, &task("yaksrs-mv02", Status::Shorn)).unwrap();
-        assert_eq!(move_task(&root, "yaksrs-mv02", Status::Shorn).unwrap(), MoveOutcome::AlreadyThere);
-        assert_eq!(move_task(&root, "does-not-exist", Status::Hairy).unwrap(), MoveOutcome::NotFound);
+        assert_eq!(
+            move_task(&root, "yaksrs-mv02", Status::Shorn).unwrap(),
+            MoveOutcome::AlreadyThere
+        );
+        assert_eq!(
+            move_task(&root, "does-not-exist", Status::Hairy).unwrap(),
+            MoveOutcome::NotFound
+        );
         let _ = fs::remove_dir_all(&root);
     }
 }
@@ -719,13 +761,19 @@ mod note_tests {
 
     #[test]
     fn append_note_on_empty_body_has_no_leading_blank() {
-        assert_eq!(append_note("", "2026-01-01T00:00:00Z", "hi"), "---\n\u{25b8} 2026-01-01T00:00:00Z\nhi");
+        assert_eq!(
+            append_note("", "2026-01-01T00:00:00Z", "hi"),
+            "---\n\u{25b8} 2026-01-01T00:00:00Z\nhi"
+        );
     }
 
     #[test]
     fn append_note_separates_from_existing_body() {
         let out = append_note("Existing.\n", "2026-01-01T00:00:00Z", "second");
-        assert_eq!(out, "Existing.\n\n---\n\u{25b8} 2026-01-01T00:00:00Z\nsecond");
+        assert_eq!(
+            out,
+            "Existing.\n\n---\n\u{25b8} 2026-01-01T00:00:00Z\nsecond"
+        );
     }
 }
 
@@ -739,7 +787,11 @@ mod graph_tests {
 
     fn temp_root() -> PathBuf {
         let mut p = std::env::temp_dir();
-        p.push(format!("yaksrs-graph-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        p.push(format!(
+            "yaksrs-graph-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         for st in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
             fs::create_dir_all(p.join(st.dir())).unwrap();
         }
@@ -769,14 +821,44 @@ mod graph_tests {
         let root = temp_root();
         mk(&root, "yaksrs-a", None);
         mk(&root, "yaksrs-b", None);
-        assert_eq!(add_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(), DepOutcome::Added);
-        assert_eq!(add_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(), DepOutcome::AlreadyDep);
-        assert_eq!(add_dep(&root, "yaksrs-a", "ghost").unwrap(), DepOutcome::DepNotFound);
-        assert_eq!(add_dep(&root, "ghost", "yaksrs-b").unwrap(), DepOutcome::TaskNotFound);
-        assert_eq!(load_task_by_id(&root, "yaksrs-a").unwrap().unwrap().depends_on, vec!["yaksrs-b".to_string()]);
-        assert_eq!(remove_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(), DepOutcome::Removed);
-        assert_eq!(remove_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(), DepOutcome::NotDep);
-        assert!(load_task_by_id(&root, "yaksrs-a").unwrap().unwrap().depends_on.is_empty());
+        assert_eq!(
+            add_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(),
+            DepOutcome::Added
+        );
+        assert_eq!(
+            add_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(),
+            DepOutcome::AlreadyDep
+        );
+        assert_eq!(
+            add_dep(&root, "yaksrs-a", "ghost").unwrap(),
+            DepOutcome::DepNotFound
+        );
+        assert_eq!(
+            add_dep(&root, "ghost", "yaksrs-b").unwrap(),
+            DepOutcome::TaskNotFound
+        );
+        assert_eq!(
+            load_task_by_id(&root, "yaksrs-a")
+                .unwrap()
+                .unwrap()
+                .depends_on,
+            vec!["yaksrs-b".to_string()]
+        );
+        assert_eq!(
+            remove_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(),
+            DepOutcome::Removed
+        );
+        assert_eq!(
+            remove_dep(&root, "yaksrs-a", "yaksrs-b").unwrap(),
+            DepOutcome::NotDep
+        );
+        assert!(
+            load_task_by_id(&root, "yaksrs-a")
+                .unwrap()
+                .unwrap()
+                .depends_on
+                .is_empty()
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -786,14 +868,44 @@ mod graph_tests {
         mk(&root, "yaksrs-p", None);
         mk(&root, "yaksrs-c", None);
         mk(&root, "yaksrs-g", Some("yaksrs-c")); // g is a child of c
-        assert!(matches!(reparent(&root, "yaksrs-c", Some("yaksrs-c".into())).unwrap(), Reparent::Error(_)));
-        assert!(matches!(reparent(&root, "yaksrs-c", Some("ghost".into())).unwrap(), Reparent::Error(_)));
-        assert!(matches!(reparent(&root, "yaksrs-c", Some("yaksrs-g".into())).unwrap(), Reparent::Error(_)));
-        assert_eq!(reparent(&root, "yaksrs-c", Some("yaksrs-p".into())).unwrap(), Reparent::Done { new_parent: Some("yaksrs-p".into()) });
-        assert_eq!(load_task_by_id(&root, "yaksrs-c").unwrap().unwrap().parent.as_deref(), Some("yaksrs-p"));
-        assert!(matches!(reparent(&root, "yaksrs-c", Some("yaksrs-p".into())).unwrap(), Reparent::Error(_)));
-        assert_eq!(reparent(&root, "yaksrs-c", None).unwrap(), Reparent::Done { new_parent: None });
-        assert!(matches!(reparent(&root, "yaksrs-c", None).unwrap(), Reparent::Error(_)));
+        assert!(matches!(
+            reparent(&root, "yaksrs-c", Some("yaksrs-c".into())).unwrap(),
+            Reparent::Error(_)
+        ));
+        assert!(matches!(
+            reparent(&root, "yaksrs-c", Some("ghost".into())).unwrap(),
+            Reparent::Error(_)
+        ));
+        assert!(matches!(
+            reparent(&root, "yaksrs-c", Some("yaksrs-g".into())).unwrap(),
+            Reparent::Error(_)
+        ));
+        assert_eq!(
+            reparent(&root, "yaksrs-c", Some("yaksrs-p".into())).unwrap(),
+            Reparent::Done {
+                new_parent: Some("yaksrs-p".into())
+            }
+        );
+        assert_eq!(
+            load_task_by_id(&root, "yaksrs-c")
+                .unwrap()
+                .unwrap()
+                .parent
+                .as_deref(),
+            Some("yaksrs-p")
+        );
+        assert!(matches!(
+            reparent(&root, "yaksrs-c", Some("yaksrs-p".into())).unwrap(),
+            Reparent::Error(_)
+        ));
+        assert_eq!(
+            reparent(&root, "yaksrs-c", None).unwrap(),
+            Reparent::Done { new_parent: None }
+        );
+        assert!(matches!(
+            reparent(&root, "yaksrs-c", None).unwrap(),
+            Reparent::Error(_)
+        ));
         let _ = fs::remove_dir_all(&root);
     }
 }
@@ -806,7 +918,11 @@ mod schema_tests {
 
     fn temp_root(schema: Option<&str>) -> PathBuf {
         let mut p = std::env::temp_dir();
-        p.push(format!("yaksrs-schema-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        p.push(format!(
+            "yaksrs-schema-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         fs::create_dir_all(&p).unwrap();
         if let Some(v) = schema {
             fs::write(p.join("schema"), v).unwrap();
@@ -816,10 +932,19 @@ mod schema_tests {
 
     #[test]
     fn schema_gate() {
-        assert_eq!(schema_status(&temp_root(Some("3"))), SchemaStatus::Compatible);
-        assert_eq!(schema_status(&temp_root(Some("4\n"))), SchemaStatus::Newer(4));
+        assert_eq!(
+            schema_status(&temp_root(Some("3"))),
+            SchemaStatus::Compatible
+        );
+        assert_eq!(
+            schema_status(&temp_root(Some("4\n"))),
+            SchemaStatus::Newer(4)
+        );
         assert_eq!(schema_status(&temp_root(Some("2"))), SchemaStatus::Older(2));
         assert_eq!(schema_status(&temp_root(None)), SchemaStatus::Compatible);
-        assert_eq!(schema_status(&temp_root(Some("garbage"))), SchemaStatus::Compatible);
+        assert_eq!(
+            schema_status(&temp_root(Some("garbage"))),
+            SchemaStatus::Compatible
+        );
     }
 }

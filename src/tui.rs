@@ -7,10 +7,12 @@
 
 mod tree;
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{self, Stdout};
 
 use anyhow::Result;
+use edtui::{EditorEventHandler, EditorMode, EditorState, EditorTheme, EditorView, Lines};
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
@@ -28,7 +30,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Parag
 use ratatui::{Frame, Terminal};
 
 use crate::filter::FilterSpec;
-use crate::herd::{Herd, MoveOutcome, TaskEdit, UpdateOutcome};
+use crate::herd::{CreateOutcome, Herd, MoveOutcome, NewTask, TaskEdit, UpdateOutcome};
 use crate::model::{Status, Task};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -53,6 +55,8 @@ enum Overlay {
         prompt: String,
         action: ConfirmAction,
     },
+    /// An in-frame edtui editor (single-line field or multi-line body).
+    Edit(Editor),
 }
 
 /// What a resolved single-key pick should do (carries the target task id).
@@ -60,11 +64,62 @@ enum PickAction {
     State(String),
     Priority(String),
     Type(String),
+    /// Second step of create: title already captured, now pick the type.
+    CreateType {
+        title: String,
+        parent: Option<String>,
+    },
 }
 
 /// What a confirmed y/N prompt should do.
 enum ConfirmAction {
     Slaughter(String),
+}
+
+/// An embedded edtui editor plus what to do with its text on commit. The
+/// `EditorState` is `RefCell`-wrapped because `EditorView` needs `&mut` at
+/// render time, while our `render(&App, ..)` borrows the app immutably.
+struct Editor {
+    state: RefCell<EditorState>,
+    handler: EditorEventHandler,
+    single_line: bool,
+    /// Prompt label (bottom-line prefix for fields; header for the body panel).
+    label: String,
+    action: EditAction,
+}
+
+enum EditAction {
+    Labels(String),
+    Body(String),
+    CreateTitle { parent: Option<String> },
+}
+
+fn make_handler(vim: bool) -> EditorEventHandler {
+    if vim {
+        EditorEventHandler::vim_mode()
+    } else {
+        EditorEventHandler::emacs_mode()
+    }
+}
+
+impl Editor {
+    fn new(vim: bool, single_line: bool, label: String, initial: &str, action: EditAction) -> Self {
+        let mut state = EditorState::new(Lines::from(initial));
+        state.set_single_line(single_line);
+        // Start in Insert so the user can type immediately (vim `i` is implied).
+        state.mode = EditorMode::Insert;
+        Editor {
+            state: RefCell::new(state),
+            handler: make_handler(vim),
+            single_line,
+            label,
+            action,
+        }
+    }
+
+    fn text(&self) -> String {
+        self.state.borrow().lines.to_string()
+    }
 }
 
 /// TUI state. Holds the loaded task set plus (in live use) a `Herd` handle so
@@ -84,6 +139,8 @@ pub struct App {
     overlay: Overlay,
     /// Transient one-line status message shown until the next mutation.
     notification: Option<String>,
+    /// Editor keybinding profile (vim vs emacs), from herd config.
+    editor_vim: bool,
     quit: bool,
 }
 
@@ -103,6 +160,7 @@ impl App {
             page: 10,
             overlay: Overlay::None,
             notification: None,
+            editor_vim: true,
             quit: false,
         }
     }
@@ -111,7 +169,9 @@ impl App {
     /// mutations can re-query after each change.
     pub fn with_herd(herd: Herd) -> Result<Self> {
         let all = herd.list(FilterSpec::default(), false)?;
+        let vim = herd.config().vim_mode;
         let mut app = App::new(all);
+        app.editor_vim = vim;
         app.herd = Some(herd);
         Ok(app)
     }
@@ -244,11 +304,88 @@ impl App {
         };
     }
 
+    fn open_labels(&mut self) {
+        if let Some(id) = self.selected_id() {
+            let initial = self
+                .task(&id)
+                .map(|t| t.labels.join(", "))
+                .unwrap_or_default();
+            self.overlay = Overlay::Edit(Editor::new(
+                self.editor_vim,
+                true,
+                format!("Labels for {id}: "),
+                &initial,
+                EditAction::Labels(id),
+            ));
+        }
+    }
+
+    fn open_create(&mut self, child: bool) {
+        let parent = if child { self.selected_id() } else { None };
+        if child && parent.is_none() {
+            return;
+        }
+        let label = match &parent {
+            Some(p) => format!("New child of {p} — title: "),
+            None => "New yak — title: ".into(),
+        };
+        self.overlay = Overlay::Edit(Editor::new(
+            self.editor_vim,
+            true,
+            label,
+            "",
+            EditAction::CreateTitle { parent },
+        ));
+    }
+
+    fn open_body_edit(&mut self) {
+        if let Some(id) = self.selected_id() {
+            let initial = self.task(&id).map(|t| t.body.clone()).unwrap_or_default();
+            self.overlay = Overlay::Edit(Editor::new(
+                self.editor_vim,
+                false,
+                format!("Edit {id} — Ctrl-S save · Ctrl-C cancel"),
+                &initial,
+                EditAction::Body(id),
+            ));
+        }
+    }
+
+    /// Jump to the Hairy tab (where new tasks land) and place the cursor on `id`.
+    fn select_id(&mut self, id: &str) {
+        if let Some(i) = self.tabs.iter().position(|&s| s == Status::Hairy) {
+            self.tab = i;
+        }
+        if let Some(pos) = self.rows().iter().position(|r| r.task.id == id) {
+            self.cursor = pos;
+        }
+    }
+
     // -- overlay resolution ----------------------------------------------
 
     fn handle_overlay_key(&mut self, k: KeyEvent) {
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        // Editors are handled in place (most keys flow to edtui); only the
+        // Pick/Confirm variants move their action out on resolution.
+        if let Overlay::Edit(ed) = &mut self.overlay {
+            let commit = (ctrl && k.code == KeyCode::Char('s'))
+                || (ed.single_line && k.code == KeyCode::Enter);
+            let cancel = (ctrl && k.code == KeyCode::Char('c'))
+                || (ed.single_line && k.code == KeyCode::Esc);
+            if commit {
+                if let Overlay::Edit(ed) = std::mem::replace(&mut self.overlay, Overlay::None) {
+                    self.commit_edit(ed);
+                }
+            } else if cancel {
+                self.overlay = Overlay::None;
+                self.notification = Some("cancelled".into());
+            } else {
+                ed.handler.on_key_event(k, &mut ed.state.borrow_mut());
+            }
+            return;
+        }
         match std::mem::replace(&mut self.overlay, Overlay::None) {
-            Overlay::None => {}
+            Overlay::None | Overlay::Edit(_) => {}
             Overlay::Pick {
                 prompt,
                 keys,
@@ -271,6 +408,65 @@ impl App {
                 }
                 _ => self.overlay = Overlay::Confirm { prompt, action },
             },
+        }
+    }
+
+    fn commit_edit(&mut self, ed: Editor) {
+        let text = ed.text();
+        match ed.action {
+            EditAction::Labels(id) => {
+                let new: Vec<String> = text
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect();
+                let cur = self.task(&id).map(|t| t.labels.clone()).unwrap_or_default();
+                if new == cur {
+                    self.notification = Some(format!("{id} labels unchanged"));
+                    return;
+                }
+                let add: Vec<String> = new.iter().filter(|l| !cur.contains(l)).cloned().collect();
+                let remove: Vec<String> =
+                    cur.iter().filter(|l| !new.contains(l)).cloned().collect();
+                let shown = if new.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    new.join(", ")
+                };
+                self.apply_edit(
+                    &id,
+                    TaskEdit {
+                        add_labels: add,
+                        remove_labels: remove,
+                        ..Default::default()
+                    },
+                    format!("{id} labels: {shown}"),
+                );
+            }
+            EditAction::Body(id) => {
+                self.apply_edit(
+                    &id,
+                    TaskEdit {
+                        description: Some(text),
+                        ..Default::default()
+                    },
+                    format!("{id} description updated"),
+                );
+            }
+            EditAction::CreateTitle { parent } => {
+                let title = text.trim().to_string();
+                if title.is_empty() {
+                    self.notification = Some("create cancelled (empty title)".into());
+                    return;
+                }
+                // Second step: pick the type, then actually create.
+                self.overlay = Overlay::Pick {
+                    prompt: "New yak type: t=task b=bug f=feature i=idea  (Esc=cancel)".into(),
+                    keys: "tbfi".into(),
+                    action: PickAction::CreateType { title, parent },
+                };
+            }
         }
     }
 
@@ -341,6 +537,38 @@ impl App {
                     format!("{id} → {kind}"),
                 );
             }
+            PickAction::CreateType { title, parent } => {
+                let kind = match c {
+                    't' => "task",
+                    'b' => "bug",
+                    'f' => "feature",
+                    'i' => "idea",
+                    _ => return,
+                };
+                let Some(h) = &self.herd else { return };
+                let new = NewTask {
+                    title,
+                    kind: Some(kind.to_string()),
+                    priority: None,
+                    parent,
+                    labels: vec![],
+                    depends_on: vec![],
+                    source: None,
+                    description: None,
+                };
+                match h.create(new) {
+                    Ok(CreateOutcome::Created(t)) => {
+                        let id = t.id.clone();
+                        self.reload();
+                        self.select_id(&id);
+                        self.notification = Some(format!("created {id}"));
+                    }
+                    Ok(CreateOutcome::ParentNotFound(p)) => {
+                        self.notification = Some(format!("parent {p} not found"))
+                    }
+                    Err(e) => self.notification = Some(format!("error: {e}")),
+                }
+            }
         }
     }
 
@@ -400,13 +628,14 @@ fn event_loop(term: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> R
 
 fn handle_key(app: &mut App, k: KeyEvent) {
     let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-    if ctrl && k.code == KeyCode::Char('c') {
-        app.quit = true;
-        return;
-    }
-    // A modal prompt swallows all other input until resolved.
+    // A modal prompt swallows all other input until resolved (including Ctrl-C,
+    // which an editor treats as cancel rather than quitting the app).
     if !matches!(app.overlay, Overlay::None) {
         app.handle_overlay_key(k);
+        return;
+    }
+    if ctrl && k.code == KeyCode::Char('c') {
+        app.quit = true;
         return;
     }
     let half = (app.page / 2).max(1) as i32;
@@ -430,6 +659,10 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('P') => app.open_priority_picker(),
             KeyCode::Char('T') => app.open_type_picker(),
             KeyCode::Char('X') => app.open_slaughter_confirm(),
+            KeyCode::Char('L') => app.open_labels(),
+            KeyCode::Char('c') => app.open_create(false),
+            KeyCode::Char('C') => app.open_create(true),
+            KeyCode::Char('E') => app.open_body_edit(),
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
                 if app.selected().is_some() {
                     app.focus = Focus::Detail;
@@ -466,8 +699,52 @@ fn render(app: &App, frame: &mut Frame) {
     let [left, right] =
         Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)]).areas(mid);
     render_list(app, frame, left);
-    render_detail(app, frame, right);
+    // The multi-line body editor takes over the detail pane; single-line fields
+    // live on the status line, so the detail pane stays put for them.
+    match &app.overlay {
+        Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, right),
+        _ => render_detail(app, frame, right),
+    }
     render_status(app, frame, bot);
+}
+
+fn editor_theme() -> EditorTheme<'static> {
+    EditorTheme::default()
+        .hide_status_line()
+        .block(Block::default())
+}
+
+fn render_editor_panel(ed: &Editor, frame: &mut Frame, area: Rect) {
+    let [head, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            ed.label.clone(),
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        head,
+    );
+    let mut state = ed.state.borrow_mut();
+    frame.render_widget(EditorView::new(&mut state).theme(editor_theme()), body);
+}
+
+fn render_line_editor(ed: &Editor, frame: &mut Frame, area: Rect) {
+    let label_w = (ed.label.chars().count() as u16).min(area.width);
+    let [lab, fld] =
+        Layout::horizontal([Constraint::Length(label_w), Constraint::Min(0)]).areas(area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            ed.label.clone(),
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )),
+        lab,
+    );
+    let mut state = ed.state.borrow_mut();
+    frame.render_widget(
+        EditorView::new(&mut state)
+            .theme(editor_theme())
+            .single_line(true),
+        fld,
+    );
 }
 
 fn status_name(s: Status) -> &'static str {
@@ -621,8 +898,15 @@ fn field(k: &str, v: &str) -> Line<'static> {
 }
 
 fn render_status(app: &App, frame: &mut Frame, area: Rect) {
-    // Priority: an active modal prompt, else a transient notification, else the
-    // context help hint.
+    // A single-line editor field owns the status line while active.
+    if let Overlay::Edit(ed) = &app.overlay {
+        if ed.single_line {
+            render_line_editor(ed, frame, area);
+            return;
+        }
+    }
+    // Otherwise: an active modal prompt, else a transient notification, else the
+    // context help hint. (A multi-line editor falls through to notification/help.)
     let (text, style) = match &app.overlay {
         Overlay::Pick { prompt, .. } | Overlay::Confirm { prompt, .. } => (
             prompt.clone(),
@@ -631,7 +915,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                 .bg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
-        Overlay::None => match &app.notification {
+        _ => match &app.notification {
             Some(n) => (n.clone(), Style::new().fg(Color::Yellow)),
             None => (help_hint(app).to_string(), Style::new().fg(Color::DarkGray)),
         },
@@ -642,7 +926,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
 fn help_hint(app: &App) -> &'static str {
     match app.focus {
         Focus::List => {
-            "j/k move · S/P/T state·prio·type · X slay · Space fold · Tab tab · l detail · q quit"
+            "j/k move · c new · E edit · S/P/T/L/X adjust · Space fold · Tab tab · l detail · q quit"
         }
         Focus::Detail => "j/k scroll · h back · q quit",
     }
@@ -814,6 +1098,39 @@ mod tests {
         assert_eq!(app.notification.as_deref(), Some("cancelled"));
     }
 
+    // -- editor overlay rendering (herd-less; open + render only) ----------
+
+    fn editable() -> App {
+        let mut t = task("e0", "Editable", Status::Hairy, 3, None);
+        t.labels = vec!["rust".into(), "tui".into()];
+        t.body = "First line.\nSecond line.".into();
+        App::new(vec![t])
+    }
+
+    #[test]
+    fn label_editor_field() {
+        // L opens a single-line field on the status line, seeded with labels.
+        let mut app = editable();
+        handle_key(&mut app, key('L'));
+        assert!(matches!(app.overlay, Overlay::Edit(_)));
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn create_title_field() {
+        let mut app = editable();
+        handle_key(&mut app, key('c'));
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn body_editor_panel() {
+        // E takes over the detail pane with a header + multi-line body.
+        let mut app = editable();
+        handle_key(&mut app, key('E'));
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
     // -- live mutation through a temp herd --------------------------------
 
     mod live {
@@ -850,6 +1167,21 @@ mod tests {
             for c in chars.chars() {
                 handle_key(app, key(c));
             }
+        }
+
+        fn enter(app: &mut App) {
+            handle_key(app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        }
+
+        fn ctrl_s(app: &mut App) {
+            handle_key(
+                app,
+                KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL),
+            );
+        }
+
+        fn esc(app: &mut App) {
+            handle_key(app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         }
 
         #[test]
@@ -908,6 +1240,70 @@ mod tests {
             press(&mut app, "Sh");
             assert_eq!(app.task("t0").unwrap().status, Status::Hairy);
             assert_eq!(app.notification.as_deref(), Some("t0 already hairy"));
+        }
+
+        #[test]
+        fn create_root_via_editor_then_type_pick() {
+            let (_dir, herd) = temp_herd(&[]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "c"); // open create title field
+            press(&mut app, "foo"); // type the title
+            enter(&mut app); // commit title -> type picker
+            press(&mut app, "b"); // pick bug -> create
+            assert!(matches!(app.overlay, Overlay::None));
+            let created = app.all.iter().find(|t| t.title == "foo").expect("created");
+            assert_eq!(created.kind, "bug");
+            assert_eq!(created.status, Status::Hairy);
+            // The cursor lands on the new task.
+            assert_eq!(app.selected().map(|t| t.title.as_str()), Some("foo"));
+        }
+
+        #[test]
+        fn create_child_sets_parent() {
+            let (_dir, herd) = temp_herd(&[task("p0", "parent", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "C"); // create child of the selected task
+            press(&mut app, "kid");
+            enter(&mut app);
+            press(&mut app, "t");
+            let created = app.all.iter().find(|t| t.title == "kid").expect("child");
+            assert_eq!(created.parent.as_deref(), Some("p0"));
+        }
+
+        #[test]
+        fn create_cancelled_with_esc() {
+            let (_dir, herd) = temp_herd(&[]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "c");
+            press(&mut app, "foo");
+            esc(&mut app); // single-line Esc cancels
+            assert!(matches!(app.overlay, Overlay::None));
+            assert!(app.all.is_empty());
+            assert_eq!(app.notification.as_deref(), Some("cancelled"));
+        }
+
+        #[test]
+        fn labels_edit_commits() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "L"); // empty labels field
+            press(&mut app, "x, y");
+            enter(&mut app);
+            assert_eq!(
+                app.task("t0").unwrap().labels,
+                vec!["x".to_string(), "y".to_string()]
+            );
+        }
+
+        #[test]
+        fn body_edit_commits_with_ctrl_s() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "E"); // multi-line body editor (empty body)
+            press(&mut app, "hello");
+            ctrl_s(&mut app);
+            assert!(matches!(app.overlay, Overlay::None));
+            assert_eq!(app.task("t0").unwrap().body, "hello");
         }
     }
 }

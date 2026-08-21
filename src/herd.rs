@@ -109,6 +109,11 @@ impl Herd {
         })
     }
 
+    /// The effective per-herd config (prefix, defaults, editor mode).
+    pub fn config(&self) -> store::Config {
+        store::read_config(&self.root)
+    }
+
     // -- queries ----------------------------------------------------------
 
     /// Tasks matching `spec`, grouped by status then id (the `list`/`search` view).
