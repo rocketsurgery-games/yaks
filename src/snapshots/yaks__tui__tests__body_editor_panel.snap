@@ -2,10 +2,11 @@
 source: src/tui.rs
 expression: "draw(&app, 72, 14)"
 ---
- Hairy 1 · Shaving 0 · Shorn 0 · Recent 1 · Starred 0
-  [H] p3 Editable               Edit e0 — Ctrl-S save · Ctrl-C cancel
-                                First line.
-                                Second line.
+ 🦬  Hairy (1)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (1)   ⭐  Starr
+
+ e0   p3 task     [rust,Edit e0 — Ctrl-S save · Ctrl-C cancel
+                        First line.
+                        Second line.
 
 
 
@@ -14,5 +15,4 @@ expression: "draw(&app, 72, 14)"
 
 
 
-
-j/k · c new · E edit · S/P/T/L/X · D/R · / find · f filter · * star · V
+Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state

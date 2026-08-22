@@ -2,16 +2,16 @@
 source: src/tui.rs
 expression: "draw(&app, 72, 16)"
 ---
- Hairy 2* · Shaving 1 · Shorn 1 · Recent 4 · Starred 0
-  [S] p1 Root B shaving         Filter
-▾ [H] p2 Root A                 ▸ status    hairy shaving shorn dead
-    [H] p3 Child A1               type      task bug feature idea
-    [N] p3 Child A2 done          priority  p1 p2 p3 p4 p5
-                                  labels   (any)
-                                  search   (any)
-                                  parent   (any)
-                                  deps      ready tangled
+ 🦬  Hairy* (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Star
 
+ b0   p1 task     🪒  Ro Filter
+ a0   p2 task     🦬  Ro ▸ status    hairy shaving shorn dead
+   a1 p3 task     🦬  Ch   type      task bug feature idea
+   a2 p3 task     🐑  Ch   priority  p1 p2 p3 p4 p5
+                          labels   (any)
+                          search   (any)
+                          parent   (any)
+                          deps      ready tangled
 
 
 

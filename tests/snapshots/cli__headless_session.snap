@@ -2,31 +2,31 @@
 source: tests/cli.rs
 expression: out
 ---
-=== frame 0 · 72x12 · focus=list · view=Hairy · cursor=0 · sel=fix-0001 · overlay=none ===
- Hairy 3 · Shaving 1 · Shorn 1 · Recent 5 · Starred 0
-  [H] p2 Alpha task             │ id       fix-0001
-▾ [N] p3 Gamma done             │ title    Alpha task
-    [H] p2 Delta child          │ type     task
-  [H] p3 Epsilon ready          │ priority p2
-                                │ labels   core
-                                │
-                                │
-                                │
-                                │
-                                │
-j/k · c new · E edit · S/P/T/L/X · D/R · / find · f filter · * star · V
+=== frame 0 · 72x12 · focus=list · view=🦬 Hairy · cursor=0 · sel=fix-0001 · overlay=none ===
+ 🦬  Hairy (3)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (5)   ⭐  Starr
+
+ fix-0001   p2 task     🦬  Alpha task                             [core]
+ fix-0003   p3 bug      🐑  Gamma done
+*  fix-0004 p2 feature  🦬  Delta child
+ fix-0005   p3 task     🦬  Epsilon ready
+
+
+
+
+
+Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state
 === end ===
-=== frame 1 · 72x12 · focus=list · view=Hairy · cursor=1 · sel=fix-0003 · overlay=none ===
- Hairy 3 · Shaving 1 · Shorn 1 · Recent 5 · Starred 0
-  [H] p2 Alpha task             │ id       fix-0003
-▾ [N] p3 Gamma done             │ title    Gamma done
-    [H] p2 Delta child          │ type     bug
-  [H] p3 Epsilon ready          │ priority p3
-                                │ children
-                                │   H fix-0004  Delta child
-                                │ source   https://github.com/acme/widg
-                                │
-                                │ Wrapped up the gamma work.
-                                │
-j/k · c new · E edit · S/P/T/L/X · D/R · / find · f filter · * star · V
+=== frame 1 · 72x12 · focus=list · view=🦬 Hairy · cursor=1 · sel=fix-0003 · overlay=none ===
+ 🦬  Hairy (3)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (5)   ⭐  Starr
+
+ fix-0001   p2 task     🦬  Alpha task                             [core]
+ fix-0003   p3 bug      🐑  Gamma done
+*  fix-0004 p2 feature  🦬  Delta child
+ fix-0005   p3 task     🦬  Epsilon ready
+
+
+
+
+
+Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state
 === end ===

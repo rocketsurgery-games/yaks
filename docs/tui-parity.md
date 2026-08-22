@@ -26,7 +26,11 @@ data · **[keep]** = already matching / intentional.
 
 ---
 
-## 1. Overall layout & panes — [match]
+## 1. Overall layout & panes — [done] (yaksrs-2b56)
+
+List is full-width in list focus; `l` splits into list(1/3)+detail(2/3); blank
+gap row under the tabs. (Right-pane overlays still borrow a split until they're
+relocated to their Python homes — tracked with those overlays.)
 
 - **Python:** list mode is a **full-width list**; pressing `l` enters a detail
   mode that splits into list (left) + detail (right).
@@ -34,7 +38,7 @@ data · **[keep]** = already matching / intentional.
 - Action: give the list the full width when `focus=list`; split only in detail
   focus.
 
-## 2. View / tab bar — [match]
+## 2. View / tab bar — [done] (yaksrs-7103)
 
 - **Python:** ` 🦬 Hairy (3)  🪒 Shaving (1)  🐑 Shorn (1)  🕒 Recent (5)  ⭐ Starred (0)` —
   per-view emoji, `(N)` count in parens, two-space separators, active tab drawn
@@ -44,14 +48,14 @@ data · **[keep]** = already matching / intentional.
 - Action: emoji + `(N)` + two-space separators + blank separator line; match the
   active-tab highlight.
 
-## 3. Status glyphs — [match]
+## 3. Status glyphs — [done] (yaksrs-7103)
 
 - **Python:** 🦬 hairy · 🪒 shaving · 🐑 shorn · (💀 dead).
 - **Rust:** `[H]` `[S]` `[N]` `[X]`.
 - Action: adopt the emoji glyphs. Note width-2 emoji have real layout cost
   (drives the 72-col tab-bar wrap).
 
-## 4. List row format — [match] + [investigate]
+## 4. List row format — [done] (yaksrs-dd68); tree still [investigate] (#5)
 
 - **Python:** ` {id}   p{pri} {type-word}   {glyph} {title}{…}{[labels]}` — id
   shown, spelled-out type (`task`/`bug`/`feature`/`idea`), glyph before the
@@ -117,7 +121,7 @@ data · **[keep]** = already matching / intentional.
   (Esc=cancel)` — **identical** to Rust. Priority/type pickers very likely match
   too (verify).
 
-## 11. Help lines — [match]
+## 11. Help lines — [done] (yaksrs-1472); dynamic f:filter/Esc:clear hint matched
 
 - Per-state help text differs in both wording and the key list, e.g.
   - Python list: `Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state  D:dep  f:filter  Esc:clear`

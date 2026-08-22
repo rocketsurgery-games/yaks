@@ -4,7 +4,7 @@ title: 'Parity: view/tab bar + emoji status glyphs + counts + separator line'
 type: task
 priority: 3
 created: '2026-08-22T03:44:40Z'
-updated: '2026-08-22T03:44:40Z'
+updated: '2026-08-22T04:03:29Z'
 parent: yaksrs-0a93
 labels:
 - rust
@@ -13,3 +13,7 @@ labels:
 ---
 
 Match Python tab bar: per-view emoji, (N) counts in parens, two-space separators, blank separator line beneath, active tab black-on-white bold. Adopt emoji status glyphs 🦬 hairy 🪒 shaving 🐑 shorn 💀 dead (used in tabs + list rows + detail). docs/tui-parity.md #2,#3.
+
+---
+▸ 2026-08-22T04:03:29Z
+Done. Tab bar: " {emoji name}{*} ({count}) " per pinned view (emoji baked into view.name: 🦬 Hairy / 🪒 Shaving / 🐑 Shorn / 🕒 Recent / ⭐ Starred), active black-on-white bold, others dim, capped counts, blank separator row. Notification right-aligned on the tab row; forked-filter indicator after the tabs. status_emoji() glyphs used in rows.

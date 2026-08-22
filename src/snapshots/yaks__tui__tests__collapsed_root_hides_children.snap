@@ -2,17 +2,17 @@
 source: src/tui.rs
 expression: "draw(&app, 72, 14)"
 ---
- Hairy 2 · Shaving 1 · Shorn 1 · Recent 4 · Starred 0
-▸ [H] p2 Root A  (+2)           │ id       a0
-                                │ title    Root A
-                                │ type     task
-                                │ priority p2
-                                │ children
-                                │   H a1  Child A1
-                                │   N a2  Child A2 done
-                                │
-                                │
-                                │
-                                │
-                                │
-j/k · c new · E edit · S/P/T/L/X · D/R · / find · f filter · * star · V
+ 🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starr
+
+ a0   p2 task     🦬  Root A                                         ▶ 2
+
+
+
+
+
+
+
+
+
+
+Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state

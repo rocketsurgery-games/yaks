@@ -33,7 +33,7 @@ use ratatui::crossterm::terminal::{
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Tabs};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::{Frame, Terminal};
 
 use crate::filter::{self, FilterSpec};
@@ -553,6 +553,20 @@ impl App {
             .iter()
             .filter(|r| !r.ghost)
             .count()
+    }
+
+    /// Hairy tasks with at least one unresolved dependency (the blocked set;
+    /// Python marks these with a magenta `*`).
+    fn blocked_ids(&self) -> HashSet<String> {
+        let resolved = filter::resolved_ids(&self.all);
+        self.all
+            .iter()
+            .filter(|t| {
+                t.status == Status::Hairy
+                    && t.depends_on.iter().any(|d| !resolved.contains(d.as_str()))
+            })
+            .map(|t| t.id.clone())
+            .collect()
     }
 
     /// Indices of pinned views — exactly the tab strip, in order.
@@ -1718,24 +1732,36 @@ fn handle_key(app: &mut App, k: KeyEvent) {
 }
 
 fn render(app: &App, frame: &mut Frame) {
-    let [top, mid, bot] = Layout::vertical([
+    // Tab row, a blank gap, the main area, then the help bar (Python layout).
+    let [top, _gap, mid, bot] = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
     .areas(frame.area());
     render_tabs(app, frame, top);
-    let [left, right] =
-        Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)]).areas(mid);
-    render_list(app, frame, left);
-    // The multi-line body editor takes over the detail pane; single-line fields
-    // live on the status line, so the detail pane stays put for them.
-    match &app.overlay {
-        Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, right),
-        Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, right),
-        Overlay::Drawer(d) => render_drawer(d, frame, right),
-        Overlay::ViewPicker(sel) => render_view_picker(app, *sel, frame, right),
-        _ => render_detail(app, frame, right),
+    // Python model: the list is full-width until you focus the detail pane.
+    // (Interim: right-pane overlays still borrow a split until they're
+    // relocated to their Python homes — top drawer, full-screen pickers.)
+    let right_overlay = matches!(&app.overlay, Overlay::Edit(ed) if !ed.single_line)
+        || matches!(
+            app.overlay,
+            Overlay::Fuzzy(_) | Overlay::Drawer(_) | Overlay::ViewPicker(_)
+        );
+    if app.focus == Focus::Detail || right_overlay {
+        let [left, right] =
+            Layout::horizontal([Constraint::Percentage(34), Constraint::Percentage(66)]).areas(mid);
+        render_list(app, frame, left);
+        match &app.overlay {
+            Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, right),
+            Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, right),
+            Overlay::Drawer(d) => render_drawer(d, frame, right),
+            Overlay::ViewPicker(sel) => render_view_picker(app, *sel, frame, right),
+            _ => render_detail(app, frame, right),
+        }
+    } else {
+        render_list(app, frame, mid);
     }
     render_status(app, frame, bot);
 }
@@ -2001,6 +2027,39 @@ fn overlay_name(o: &Overlay) -> &'static str {
     }
 }
 
+/// Emoji status glyph, matching the Python TUI (bison/razor/sheep/skull).
+fn status_emoji(s: Status) -> &'static str {
+    match s {
+        Status::Hairy => "\u{1f9ac}",
+        Status::Shaving => "\u{1fa92}",
+        Status::Shorn => "\u{1f411}",
+        Status::Dead => "\u{1f480}",
+    }
+}
+
+/// Displayed count, capped like Python's format_count (unbounded views).
+fn format_count(n: usize) -> String {
+    if n <= 999 {
+        n.to_string()
+    } else {
+        "999+".into()
+    }
+}
+
+/// Approximate display width: emoji (and other astral glyphs) are width 2.
+fn disp_width(s: &str) -> usize {
+    s.chars()
+        .map(|c| {
+            let cp = c as u32;
+            if cp >= 0x1_F000 || cp == 0x2b50 || cp == 0x2764 {
+                2
+            } else {
+                1
+            }
+        })
+        .sum()
+}
+
 fn status_word(s: Status) -> &'static str {
     match s {
         Status::Hairy => "hairy",
@@ -2011,87 +2070,198 @@ fn status_word(s: Status) -> &'static str {
 }
 
 fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
-    let pinned = app.pinned_indices();
-    let titles: Vec<Line> = pinned
-        .iter()
-        .map(|&i| {
-            let v = &app.views[i];
-            let marker = if i == app.view && app.is_view_modified() {
-                "*"
-            } else {
-                ""
+    // ` {emoji name}{*} ({count}) ` per pinned view, active black-on-white bold,
+    // others dim; a trailing filter indicator when the live filter is forked.
+    let mut spans: Vec<Span> = Vec::new();
+    for &i in &app.pinned_indices() {
+        let v = &app.views[i];
+        let mark = if i == app.view && app.is_view_modified() {
+            "*"
+        } else {
+            ""
+        };
+        let text = format!(" {}{} ({}) ", v.name, mark, format_count(app.view_count(v)));
+        let style = if i == app.view {
+            Style::new()
+                .fg(Color::Black)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().add_modifier(Modifier::DIM)
+        };
+        spans.push(Span::styled(text, style));
+        spans.push(Span::raw(" "));
+    }
+    if app.is_view_modified() {
+        spans.push(Span::styled(
+            format!(" filter: {}", filter_summary(&app.filter)),
+            Style::new().fg(Color::Yellow),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+    // Notification, right-aligned on the tab row (Python placement).
+    if let Some(n) = &app.notification {
+        let w = (disp_width(n) as u16).min(area.width);
+        if w > 0 {
+            let rect = Rect {
+                x: area.x + area.width - w,
+                y: area.y,
+                width: w,
+                height: 1,
             };
-            Line::from(format!("{} {}{}", v.name, app.view_count(v), marker))
-        })
-        .collect();
-    let sel = pinned.iter().position(|&i| i == app.view).unwrap_or(0);
-    let tabs = Tabs::new(titles)
-        .select(sel)
-        .highlight_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .divider(Span::styled("·", Style::new().fg(Color::DarkGray)));
-    frame.render_widget(tabs, area);
+            frame.render_widget(
+                Paragraph::new(Span::styled(
+                    n.clone(),
+                    Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )),
+                rect,
+            );
+        }
+    }
 }
 
 fn render_list(app: &App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::List;
     let rows = app.rows();
+    if rows.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "No tasks.",
+                Style::new().add_modifier(Modifier::DIM),
+            )),
+            area,
+        );
+        return;
+    }
+    // Dynamic id column: widest `id + 2*depth` across visible rows (min 4).
+    let max_id_len = rows
+        .iter()
+        .map(|r| r.task.id.chars().count() + 2 * r.depth as usize)
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    let id_field_w = max_id_len + 2;
+    let blocked = app.blocked_ids();
     let items: Vec<ListItem> = rows
         .iter()
-        .map(|r| list_item(r, app.is_starred(&r.task.id)))
+        .map(|r| {
+            list_item(
+                r,
+                id_field_w,
+                blocked.contains(&r.task.id),
+                app.is_starred(&r.task.id),
+                area.width,
+            )
+        })
         .collect();
     let mut state = ListState::default();
-    if !rows.is_empty() {
-        state.select(Some(app.cursor.min(rows.len() - 1)));
-    }
+    state.select(Some(app.cursor.min(rows.len() - 1)));
     let hl = if focused {
         Style::new().fg(Color::Black).bg(Color::Cyan)
     } else {
         Style::new().add_modifier(Modifier::REVERSED)
     };
-    let list = List::new(items).highlight_style(hl);
-    frame.render_stateful_widget(list, area, &mut state);
+    frame.render_stateful_widget(List::new(items).highlight_style(hl), area, &mut state);
 }
 
-fn list_item<'a>(r: &tree::Row<'a>, starred: bool) -> ListItem<'a> {
+/// Truncate `s` to a maximum display width (emoji counted as 2).
+fn truncate_disp(s: &str, max: usize) -> String {
+    if disp_width(s) <= max {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    let mut w = 0;
+    for c in s.chars() {
+        let cw = if (c as u32) >= 0x1_F000 || c as u32 == 0x2b50 {
+            2
+        } else {
+            1
+        };
+        if w + cw > max {
+            break;
+        }
+        out.push(c);
+        w += cw;
+    }
+    out
+}
+
+fn list_item<'a>(
+    r: &tree::Row<'a>,
+    id_field_w: usize,
+    blocked: bool,
+    starred: bool,
+    width: u16,
+) -> ListItem<'a> {
+    let dim = |st: Style| {
+        if r.ghost {
+            st.add_modifier(Modifier::DIM)
+        } else {
+            st
+        }
+    };
+    let width = width as usize;
     let indent = "  ".repeat(r.depth as usize);
-    let chevron = if r.has_children {
-        if r.collapsed { "▸ " } else { "▾ " }
+    let lead = if blocked { "*" } else { " " };
+    let body = format!("{indent}{}", r.task.id);
+    let body_w = id_field_w.saturating_sub(1);
+    let body_padded = format!("{body:<body_w$}");
+    let pri_s = format!("p{} ", r.task.priority);
+    let type_s = format!("{:8} ", r.task.kind);
+
+    // Right side: right-aligned labels, a star, and a collapse badge.
+    let max_lw = (width / 4).clamp(8, 30);
+    let label_str = if r.task.labels.is_empty() {
+        String::new()
     } else {
-        "  "
+        truncate_disp(&format!("[{}]", r.task.labels.join(", ")), max_lw)
     };
-    let base = if r.ghost {
-        Style::new().fg(Color::DarkGray)
+    let badge = if r.collapsed && r.hidden > 0 {
+        format!(" \u{25b6} {} ", r.hidden)
     } else {
-        Style::new()
+        String::new()
     };
-    let glyph = format!("[{}] ", r.task.status.glyph());
+    let mut right = String::new();
+    if !label_str.is_empty() {
+        right.push_str(&label_str);
+    }
+    if starred {
+        if !right.is_empty() {
+            right.push(' ');
+        }
+        right.push('\u{2b50}');
+    }
+    right.push_str(&badge);
+    let rw = disp_width(&right);
+
+    let left_fixed = 1 + disp_width(&body_padded) + disp_width(&pri_s) + disp_width(&type_s);
+    let title_avail = width.saturating_sub(left_fixed + rw + 1);
+    let title = truncate_disp(
+        &format!("{} {}", status_emoji(r.task.status), r.task.title),
+        title_avail,
+    );
+    let used = left_fixed + disp_width(&title);
+    let pad = width.saturating_sub(used + rw);
+
     let mut spans = vec![
         Span::styled(
-            format!("{indent}{chevron}"),
-            Style::new().fg(Color::DarkGray),
-        ),
-        Span::styled(
-            glyph,
-            if r.ghost {
-                base
+            lead.to_string(),
+            if blocked {
+                Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD)
             } else {
-                Style::new().fg(Color::DarkGray)
+                Style::new()
             },
         ),
-        Span::styled(
-            format!("p{} ", r.task.priority),
-            Style::new().fg(Color::DarkGray),
-        ),
+        Span::styled(body_padded, dim(Style::new().fg(Color::Blue))),
+        Span::styled(pri_s, dim(Style::new().fg(Color::DarkGray))),
+        Span::styled(type_s, dim(Style::new().fg(Color::Rgb(181, 137, 0)))),
+        Span::styled(title, dim(Style::new())),
     ];
-    if starred {
-        spans.push(Span::styled("★ ", Style::new().fg(Color::Yellow)));
+    if pad > 0 {
+        spans.push(Span::raw(" ".repeat(pad)));
     }
-    spans.push(Span::styled(r.task.title.clone(), base));
-    if r.collapsed && r.hidden > 0 {
-        spans.push(Span::styled(
-            format!("  (+{})", r.hidden),
-            Style::new().fg(Color::DarkGray),
-        ));
+    if !right.is_empty() {
+        spans.push(Span::styled(right, dim(Style::new().fg(Color::DarkGray))));
     }
     ListItem::new(Line::from(spans))
 }
@@ -2282,6 +2452,8 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     }
     // Otherwise: an active modal prompt, else a transient notification, else the
     // context help hint. (A multi-line editor falls through to notification/help.)
+    // Otherwise: a single-key modal prompt, else the context help bar.
+    // (Notification + active-filter indicator now live on the tab row.)
     let (text, style) = match &app.overlay {
         Overlay::Pick { prompt, .. } | Overlay::Confirm { prompt, .. } => (
             prompt.clone(),
@@ -2290,14 +2462,7 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
                 .bg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
-        _ => match &app.notification {
-            Some(n) => (n.clone(), Style::new().fg(Color::Yellow)),
-            None if app.is_view_modified() => (
-                format!("filter: {}  (Esc reverts)", filter_summary(&app.filter)),
-                Style::new().fg(Color::Yellow),
-            ),
-            None => (help_hint(app).to_string(), Style::new().fg(Color::DarkGray)),
-        },
+        _ => (help_hint(app), Style::new().fg(Color::DarkGray)),
     };
     frame.render_widget(Paragraph::new(Span::styled(text, style)), area);
 }
@@ -2336,12 +2501,19 @@ fn filter_summary(f: &FilterSpec) -> String {
     }
 }
 
-fn help_hint(app: &App) -> &'static str {
+fn help_hint(app: &App) -> String {
+    let filter_hint = if app.filter.content_active() {
+        "f:filter  Esc:clear"
+    } else {
+        "f:filter  /:search"
+    };
     match app.focus {
-        Focus::List => {
-            "j/k · c new · E edit · S/P/T/L/X · D/R · / find · f filter · * star · V save · Tab view · q"
-        }
-        Focus::Detail => "j/k scroll · h back · q quit",
+        Focus::List => format!(
+            "Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state  D:dep  {filter_hint}  ?:help"
+        ),
+        Focus::Detail => format!(
+            "h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S:state  {filter_hint}  q:quit"
+        ),
     }
 }
 
@@ -2807,9 +2979,9 @@ mod tests {
         let mut app = sample(); // active = Hairy (0)
         handle_key(&mut app, key('v'));
         handle_key(&mut app, key('J')); // move Hairy down
-        assert_eq!(app.views[0].name, "Shaving");
-        assert_eq!(app.views[1].name, "Hairy");
-        assert_eq!(app.active_view().name, "Hairy"); // followed the move
+        assert_eq!(app.views[0].status, Some(Status::Shaving));
+        assert_eq!(app.views[1].status, Some(Status::Hairy));
+        assert_eq!(app.active_view().status, Some(Status::Hairy)); // followed the move
     }
 
     #[test]

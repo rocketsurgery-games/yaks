@@ -2,17 +2,17 @@
 source: src/tui.rs
 expression: "draw(&app, 72, 14)"
 ---
- Hairy 1 · Shaving 0 · Shorn 0 · Recent 1 · Starred 0
-  [H] p3 Editable               │ id       e0
-                                │ title    Editable
-                                │ type     task
-                                │ priority p3
-                                │ labels   rust, tui
-                                │
-                                │ First line.
-                                │ Second line.
-                                │
-                                │
-                                │
-                                │
+ 🦬  Hairy (1)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (1)   ⭐  Starr
+
+ e0   p3 task     🦬  Editable                                [rust, tui]
+
+
+
+
+
+
+
+
+
+
 New yak — title:

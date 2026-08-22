@@ -98,15 +98,15 @@ pub fn status_key(s: Status) -> &'static str {
 
 pub fn builtin_status_views() -> Vec<View> {
     vec![
-        status_view("Hairy", Status::Hairy),
-        status_view("Shaving", Status::Shaving),
-        status_view("Shorn", Status::Shorn),
+        status_view("\u{1f9ac} Hairy", Status::Hairy),
+        status_view("\u{1fa92} Shaving", Status::Shaving),
+        status_view("\u{1f411} Shorn", Status::Shorn),
     ]
 }
 
 pub fn recent_view() -> View {
     View {
-        name: "Recent".into(),
+        name: "\u{1f552} Recent".into(),
         key: "recent".into(),
         status: None,
         builtin: true,
@@ -120,7 +120,7 @@ pub fn recent_view() -> View {
 
 pub fn working_set_view() -> View {
     View {
-        name: "Starred".into(),
+        name: "\u{2b50} Starred".into(),
         key: "working-set".into(),
         status: None,
         builtin: true,
