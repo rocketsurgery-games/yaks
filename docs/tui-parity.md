@@ -102,15 +102,29 @@ Known nit: deps/children still use letter glyphs (H/N/S) vs the list's emoji
 - Action: header, capitalized padded labels, `Status`, humanized
   `Created`/`Updated`, `Blocks:` (reverse deps), `Parent:`/`Children:`.
 
-## 8. Create (c / C) — [match]
+## 8. Create (c / C) — [done: right-pane form] (yaksrs-d13b)
+
+Done. Rust now has a real create **form** (`Overlay::Create`), modeled on the
+filter drawer and placed in the **right pane** (same intentional divergence as
+the drawer, §9 — a wide/short terminal has columns to spare, not rows). It
+shares the drawer's `right_divider` rule and the generalized
+`render_chip_row`/`render_text_row` helpers.
 
 - **Python:** full-screen modal **form** — `title` / `type` / `priority` /
   `labels` fields + a `description` section; `Tab`/`j`/`k` move between rows,
   `←→` pick chips, `Enter` edits a field; shows a `(need title)` hint; `Esc`
   cancels.
-- **Rust:** sequential bottom prompts — a title line editor, then a `t/b/f/i`
-  single-key type picker.
-- Action: build the create form.
+- **Rust:** right-pane form — rows `title` / `type` / `priority` / `labels` /
+  `description`; `Tab`/`↑↓` (and `j`/`k` on chip rows) move rows; `←→` (and
+  `h`/`l`) pick chips as **single-select** (the cursor *is* the value, unlike
+  the drawer's Space-toggle multi-select); text rows edit in place. `Enter`
+  **creates** (guarded on a non-empty title — the status hint flips between
+  `(need title)` and `Enter create`); `Esc` cancels.
+- **Intentional divergences:** right-pane placement (matches §9); `Enter` =
+  create rather than Python's per-field `Enter:edit` submit gesture (which is
+  ambiguous in a single-modal form); header reads `New yak` / `New task (child
+  of …)` (semantic, not byte-parity). Type/priority/labels/description all feed
+  `NewTask` (priority defaults to p3).
 
 ## 9. Filter drawer (f) — [divergence: right-side drawer + delimiter] (yaksrs-d416)
 

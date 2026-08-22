@@ -72,6 +72,8 @@ enum Overlay {
     Search(SearchBox),
     /// The multi-row filter drawer (chips + text facets).
     Drawer(Drawer),
+    /// The create-task form (title/type/priority/labels/description).
+    Create(CreateForm),
     /// Detail-pane find: edits `App.detail_find` live.
     DetailFind(SearchBox),
     /// The view manager (`v`): carries the picker's selection index.
@@ -83,11 +85,6 @@ enum PickAction {
     State(String),
     Priority(String),
     Type(String),
-    /// Second step of create: title already captured, now pick the type.
-    CreateType {
-        title: String,
-        parent: Option<String>,
-    },
 }
 
 /// What a confirmed y/N prompt should do.
@@ -110,7 +107,6 @@ struct Editor {
 enum EditAction {
     Labels(String),
     Body(String),
-    CreateTitle { parent: Option<String> },
     SaveView,
     RenameView { index: usize },
 }
@@ -312,6 +308,82 @@ impl Drawer {
             tangled_only: self.tangled,
             parent: non_empty(&self.parent),
         }
+    }
+}
+
+// Create-form layout: 5 rows (title, type, priority, labels, description).
+const CREATE_ROWS: usize = 5;
+
+/// The create-task form: a small right-pane form modeled on `Drawer`. Two chip
+/// rows (type/priority) are **single-select** — the cursor *is* the value
+/// (unlike the drawer's Space-toggle multi-select) — plus three text rows
+/// (title/labels/description). `Enter` creates, `Esc` cancels. Reproduces the
+/// Python `task_form` create flow as a thin form over `Herd::create`.
+struct CreateForm {
+    title: RefCell<EditorState>,
+    labels: RefCell<EditorState>,
+    description: RefCell<EditorState>,
+    /// Index into `TYPE_CHOICES` (single-select cursor==value).
+    kind_idx: usize,
+    /// Index into `PRI_CHOICES` (single-select cursor==value; default → p3).
+    pri_idx: usize,
+    row: usize,
+    parent: Option<String>,
+    handler: EditorEventHandler,
+}
+
+impl CreateForm {
+    fn new(vim: bool, parent: Option<String>) -> Self {
+        CreateForm {
+            title: text_field("", vim),
+            labels: text_field("", vim),
+            description: text_field("", vim),
+            kind_idx: 0,                                                    // task
+            pri_idx: PRI_CHOICES.iter().position(|&p| p == 3).unwrap_or(2), // p3
+            row: 0,
+            parent,
+            handler: make_handler(vim),
+        }
+    }
+
+    fn is_text_row(&self) -> bool {
+        matches!(self.row, 0 | 3 | 4)
+    }
+
+    /// Move the single-select chip cursor on a chip row (wrapping).
+    fn move_chip(&mut self, delta: i32) {
+        match self.row {
+            1 => {
+                let n = TYPE_CHOICES.len() as i32;
+                self.kind_idx = (self.kind_idx as i32 + delta).rem_euclid(n) as usize;
+            }
+            2 => {
+                let n = PRI_CHOICES.len() as i32;
+                self.pri_idx = (self.pri_idx as i32 + delta).rem_euclid(n) as usize;
+            }
+            _ => {}
+        }
+    }
+
+    fn title_text(&self) -> String {
+        self.title.borrow().lines.to_string().trim().to_string()
+    }
+
+    fn labels_vec(&self) -> Vec<String> {
+        self.labels
+            .borrow()
+            .lines
+            .to_string()
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect()
+    }
+
+    fn description_opt(&self) -> Option<String> {
+        let d = self.description.borrow().lines.to_string();
+        if d.trim().is_empty() { None } else { Some(d) }
     }
 }
 
@@ -945,17 +1017,102 @@ impl App {
         if child && parent.is_none() {
             return;
         }
-        let label = match &parent {
-            Some(p) => format!("New child of {p} — title: "),
-            None => "New yak — title: ".into(),
+        self.overlay = Overlay::Create(CreateForm::new(self.editor_vim, parent));
+    }
+
+    fn handle_create_key(&mut self, k: KeyEvent) {
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        let (row, is_text) = match &self.overlay {
+            Overlay::Create(f) => (f.row, f.is_text_row()),
+            _ => return,
         };
-        self.overlay = Overlay::Edit(Editor::new(
-            self.editor_vim,
-            true,
-            label,
-            "",
-            EditAction::CreateTitle { parent },
-        ));
+        // Global commit / cancel. Enter creates (guarded on a non-empty title,
+        // mirroring Python's `(need title)` — an empty title keeps the form open).
+        match k.code {
+            KeyCode::Enter => {
+                let has_title =
+                    matches!(&self.overlay, Overlay::Create(f) if !f.title_text().is_empty());
+                if has_title {
+                    self.commit_create();
+                }
+                return;
+            }
+            KeyCode::Esc => {
+                self.overlay = Overlay::None;
+                self.notification = Some("create cancelled".into());
+                return;
+            }
+            _ => {}
+        }
+        // Row navigation. On text rows only Tab/arrows/Ctrl move rows (so j/k
+        // stay typeable); on chip rows j/k also navigate.
+        let nav_down = matches!(k.code, KeyCode::Down | KeyCode::Tab)
+            || (ctrl && k.code == KeyCode::Char('n'))
+            || (!is_text && k.code == KeyCode::Char('j'));
+        let nav_up = matches!(k.code, KeyCode::Up | KeyCode::BackTab)
+            || (ctrl && k.code == KeyCode::Char('p'))
+            || (!is_text && k.code == KeyCode::Char('k'));
+        if nav_down || nav_up {
+            if let Overlay::Create(f) = &mut self.overlay {
+                f.row = if nav_down {
+                    (f.row + 1) % CREATE_ROWS
+                } else {
+                    (f.row + CREATE_ROWS - 1) % CREATE_ROWS
+                };
+            }
+            return;
+        }
+        if is_text {
+            if let Overlay::Create(f) = &mut self.overlay {
+                match row {
+                    0 => f.handler.on_key_event(k, &mut f.title.borrow_mut()),
+                    3 => f.handler.on_key_event(k, &mut f.labels.borrow_mut()),
+                    4 => f.handler.on_key_event(k, &mut f.description.borrow_mut()),
+                    _ => {}
+                }
+            }
+            return;
+        }
+        // Chip rows: left/right (h/l) move the single-select cursor = value.
+        if let Overlay::Create(f) = &mut self.overlay {
+            match k.code {
+                KeyCode::Left | KeyCode::Char('h') => f.move_chip(-1),
+                KeyCode::Right | KeyCode::Char('l') => f.move_chip(1),
+                _ => {}
+            }
+        }
+    }
+
+    fn commit_create(&mut self) {
+        let new = match std::mem::replace(&mut self.overlay, Overlay::None) {
+            Overlay::Create(f) => NewTask {
+                title: f.title_text(),
+                kind: Some(TYPE_CHOICES[f.kind_idx].to_string()),
+                priority: Some(PRI_CHOICES[f.pri_idx]),
+                parent: f.parent.clone(),
+                labels: f.labels_vec(),
+                depends_on: vec![],
+                source: None,
+                description: f.description_opt(),
+            },
+            other => {
+                self.overlay = other;
+                return;
+            }
+        };
+        let Some(h) = &self.herd else { return };
+        match h.create(new) {
+            Ok(CreateOutcome::Created(t)) => {
+                let id = t.id.clone();
+                self.reload();
+                self.select_id(&id);
+                self.notification = Some(format!("created {id}"));
+            }
+            Ok(CreateOutcome::ParentNotFound(p)) => {
+                self.notification = Some(format!("parent {p} not found"))
+            }
+            Err(e) => self.notification = Some(format!("error: {e}")),
+        }
     }
 
     fn open_body_edit(&mut self) {
@@ -1220,6 +1377,10 @@ impl App {
             self.handle_drawer_key(k);
             return;
         }
+        if matches!(self.overlay, Overlay::Create(_)) {
+            self.handle_create_key(k);
+            return;
+        }
         if matches!(self.overlay, Overlay::ViewPicker(_)) {
             self.handle_view_picker_key(k);
             return;
@@ -1361,6 +1522,7 @@ impl App {
             | Overlay::Fuzzy(_)
             | Overlay::Search(_)
             | Overlay::Drawer(_)
+            | Overlay::Create(_)
             | Overlay::DetailFind(_)
             | Overlay::ViewPicker(_) => {}
             Overlay::Pick {
@@ -1440,19 +1602,6 @@ impl App {
                 }
                 // Return to the picker on the renamed row.
                 self.overlay = Overlay::ViewPicker(index.min(self.views.len().saturating_sub(1)));
-            }
-            EditAction::CreateTitle { parent } => {
-                let title = text.trim().to_string();
-                if title.is_empty() {
-                    self.notification = Some("create cancelled (empty title)".into());
-                    return;
-                }
-                // Second step: pick the type, then actually create.
-                self.overlay = Overlay::Pick {
-                    prompt: "New yak type: t=task b=bug f=feature i=idea  (Esc=cancel)".into(),
-                    keys: "tbfi".into(),
-                    action: PickAction::CreateType { title, parent },
-                };
             }
         }
     }
@@ -1573,38 +1722,6 @@ impl App {
                     },
                     format!("{id} → {kind}"),
                 );
-            }
-            PickAction::CreateType { title, parent } => {
-                let kind = match c {
-                    't' => "task",
-                    'b' => "bug",
-                    'f' => "feature",
-                    'i' => "idea",
-                    _ => return,
-                };
-                let Some(h) = &self.herd else { return };
-                let new = NewTask {
-                    title,
-                    kind: Some(kind.to_string()),
-                    priority: None,
-                    parent,
-                    labels: vec![],
-                    depends_on: vec![],
-                    source: None,
-                    description: None,
-                };
-                match h.create(new) {
-                    Ok(CreateOutcome::Created(t)) => {
-                        let id = t.id.clone();
-                        self.reload();
-                        self.select_id(&id);
-                        self.notification = Some(format!("created {id}"));
-                    }
-                    Ok(CreateOutcome::ParentNotFound(p)) => {
-                        self.notification = Some(format!("parent {p} not found"))
-                    }
-                    Err(e) => self.notification = Some(format!("error: {e}")),
-                }
             }
         }
     }
@@ -1765,7 +1882,7 @@ fn render(app: &App, frame: &mut Frame) {
     let right_overlay = matches!(&app.overlay, Overlay::Edit(ed) if !ed.single_line)
         || matches!(
             app.overlay,
-            Overlay::Fuzzy(_) | Overlay::Drawer(_) | Overlay::ViewPicker(_)
+            Overlay::Fuzzy(_) | Overlay::Drawer(_) | Overlay::Create(_) | Overlay::ViewPicker(_)
         );
     if app.focus == Focus::Detail || right_overlay {
         let [left, right] =
@@ -1776,6 +1893,7 @@ fn render(app: &App, frame: &mut Frame) {
             Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, inner),
             Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, inner),
             Overlay::Drawer(d) => render_drawer(d, frame, inner),
+            Overlay::Create(f) => render_create(f, frame, inner),
             Overlay::ViewPicker(sel) => render_view_picker(app, *sel, frame, inner),
             _ => render_detail(app, frame, inner),
         }
@@ -1875,30 +1993,180 @@ fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
         .map(|&p| (format!("p{p}"), d.priorities.contains(&p)))
         .collect();
     let deps: Vec<(String, bool)> = vec![("ready".into(), d.ready), ("tangled".into(), d.tangled)];
-    render_chip_row(d, 0, "status", &statuses, frame, rows[1]);
-    render_chip_row(d, 1, "type", &types, frame, rows[2]);
-    render_chip_row(d, 2, "priority", &pris, frame, rows[3]);
-    render_text_row(d, 3, "labels", &d.labels, frame, rows[4]);
-    render_text_row(d, 4, "search", &d.search, frame, rows[5]);
-    render_text_row(d, 5, "parent", &d.parent, frame, rows[6]);
-    render_chip_row(d, 6, "deps", &deps, frame, rows[7]);
+    render_chip_row(
+        d.row == 0,
+        d.chip_idx,
+        DRAWER_LABEL_W,
+        "status",
+        &statuses,
+        frame,
+        rows[1],
+    );
+    render_chip_row(
+        d.row == 1,
+        d.chip_idx,
+        DRAWER_LABEL_W,
+        "type",
+        &types,
+        frame,
+        rows[2],
+    );
+    render_chip_row(
+        d.row == 2,
+        d.chip_idx,
+        DRAWER_LABEL_W,
+        "priority",
+        &pris,
+        frame,
+        rows[3],
+    );
+    render_text_row(
+        d.row == 3,
+        DRAWER_LABEL_W,
+        "labels",
+        &d.labels,
+        "(any)",
+        frame,
+        rows[4],
+    );
+    render_text_row(
+        d.row == 4,
+        DRAWER_LABEL_W,
+        "search",
+        &d.search,
+        "(any)",
+        frame,
+        rows[5],
+    );
+    render_text_row(
+        d.row == 5,
+        DRAWER_LABEL_W,
+        "parent",
+        &d.parent,
+        "(any)",
+        frame,
+        rows[6],
+    );
+    render_chip_row(
+        d.row == 6,
+        d.chip_idx,
+        DRAWER_LABEL_W,
+        "deps",
+        &deps,
+        frame,
+        rows[7],
+    );
 }
 
+/// The create-task form: header + title / type / priority / labels /
+/// description rows, laid out like `render_drawer` and inset by `right_divider`.
+fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
+    let rows = Layout::vertical([
+        Constraint::Length(1), // header
+        Constraint::Length(1), // title
+        Constraint::Length(1), // type chips
+        Constraint::Length(1), // priority chips
+        Constraint::Length(1), // labels
+        Constraint::Length(1), // description
+        Constraint::Min(0),
+    ])
+    .split(area);
+    let header = match &f.parent {
+        Some(p) => format!("New task (child of {p})"),
+        None => "New yak".to_string(),
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            header,
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        rows[0],
+    );
+    let types: Vec<(String, bool)> = TYPE_CHOICES
+        .iter()
+        .enumerate()
+        .map(|(i, &k)| (k.to_string(), i == f.kind_idx))
+        .collect();
+    let pris: Vec<(String, bool)> = PRI_CHOICES
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| (format!("p{p}"), i == f.pri_idx))
+        .collect();
+    render_text_row(
+        f.row == 0,
+        CREATE_LABEL_W,
+        "title",
+        &f.title,
+        "",
+        frame,
+        rows[1],
+    );
+    render_chip_row(
+        f.row == 1,
+        f.kind_idx,
+        CREATE_LABEL_W,
+        "type",
+        &types,
+        frame,
+        rows[2],
+    );
+    render_chip_row(
+        f.row == 2,
+        f.pri_idx,
+        CREATE_LABEL_W,
+        "priority",
+        &pris,
+        frame,
+        rows[3],
+    );
+    render_text_row(
+        f.row == 3,
+        CREATE_LABEL_W,
+        "labels",
+        &f.labels,
+        "",
+        frame,
+        rows[4],
+    );
+    render_text_row(
+        f.row == 4,
+        CREATE_LABEL_W,
+        "description",
+        &f.description,
+        "",
+        frame,
+        rows[5],
+    );
+}
+
+/// Label-column widths (gutter marker excluded): the drawer's longest label is
+/// `priority` (8); the create form's is `description` (11). Each leaves one
+/// trailing space before the chips/field.
+const DRAWER_LABEL_W: usize = 9;
+const CREATE_LABEL_W: usize = 12;
+
+/// Render one chip row: a `▸` gutter, a padded label, then space-separated
+/// chips. `current_row` highlights this row; `cursor_idx` is the chip the
+/// cursor sits on (drawn REVERSED); each choice's bool marks it selected
+/// (green bold). For single-select forms the cursor and the selection coincide.
 fn render_chip_row(
-    d: &Drawer,
-    row: usize,
+    current_row: bool,
+    cursor_idx: usize,
+    label_w: usize,
     label: &str,
     choices: &[(String, bool)],
     frame: &mut Frame,
     area: Rect,
 ) {
-    let current_row = d.row == row;
     let mut spans = vec![
         Span::styled(
             if current_row { "▸ " } else { "  " },
             Style::new().fg(Color::Cyan),
         ),
-        Span::styled(format!("{label:<9}"), Style::new().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{label:<label_w$}"),
+            Style::new().fg(Color::DarkGray),
+        ),
     ];
     for (j, (disp, sel)) in choices.iter().enumerate() {
         let mut style = if *sel {
@@ -1906,7 +2174,7 @@ fn render_chip_row(
         } else {
             Style::new().fg(Color::DarkGray)
         };
-        if current_row && d.chip_idx == j {
+        if current_row && cursor_idx == j {
             style = style.add_modifier(Modifier::REVERSED);
         }
         spans.push(Span::raw(" "));
@@ -1915,18 +2183,21 @@ fn render_chip_row(
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
+/// Render one text-facet row: a `▸` gutter, a padded label, then either a live
+/// edtui field (when `current`) or the dimmed current value / `placeholder`
+/// (shown when the field is empty and unfocused).
 fn render_text_row(
-    d: &Drawer,
-    row: usize,
+    current: bool,
+    label_w: usize,
     label: &str,
     cell: &RefCell<EditorState>,
+    placeholder: &str,
     frame: &mut Frame,
     area: Rect,
 ) {
-    let current = d.row == row;
     let [g, lab, fld] = Layout::horizontal([
         Constraint::Length(2),
-        Constraint::Length(9),
+        Constraint::Length(label_w as u16),
         Constraint::Min(0),
     ])
     .areas(area);
@@ -1955,7 +2226,7 @@ fn render_text_row(
     } else {
         let text = cell.borrow().lines.to_string();
         let shown = if text.is_empty() {
-            "(any)".to_string()
+            placeholder.to_string()
         } else {
             text
         };
@@ -2058,6 +2329,7 @@ fn overlay_name(o: &Overlay) -> &'static str {
         Overlay::Fuzzy(_) => "fuzzy",
         Overlay::Search(_) => "search",
         Overlay::Drawer(_) => "drawer",
+        Overlay::Create(_) => "create",
         Overlay::DetailFind(_) => "detail-find",
         Overlay::ViewPicker(_) => "view-picker",
     }
@@ -2476,6 +2748,22 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         );
         return;
     }
+    // Create-form help hint. The `(need title)` marker mirrors Python's guard.
+    if let Overlay::Create(f) = &app.overlay {
+        let commit = if f.title_text().is_empty() {
+            "(need title)"
+        } else {
+            "Enter create"
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                format!("↑↓/Tab rows · ←→ chips · {commit} · Esc cancel"),
+                Style::new().fg(Color::DarkGray),
+            )),
+            area,
+        );
+        return;
+    }
     // Otherwise: an active modal prompt, else a transient notification, else the
     // context help hint. (A multi-line editor falls through to notification/help.)
     // Otherwise: a single-key modal prompt, else the context help bar.
@@ -2728,9 +3016,13 @@ mod tests {
     }
 
     #[test]
-    fn create_title_field() {
+    fn create_form() {
+        // Open the create form, type a title, then move to the priority chip row.
         let mut app = editable();
         handle_key(&mut app, key('c'));
+        typ(&mut app, "new idea");
+        handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)); // -> type
+        handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)); // -> priority
         insta::assert_snapshot!(draw(&app, 72, 14));
     }
 
@@ -3168,6 +3460,18 @@ mod tests {
             handle_key(app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         }
 
+        fn tab(app: &mut App) {
+            handle_key(app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        }
+
+        fn arrow_right(app: &mut App) {
+            handle_key(app, KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        }
+
+        fn arrow_left(app: &mut App) {
+            handle_key(app, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+        }
+
         fn ctrl_s(app: &mut App) {
             handle_key(
                 app,
@@ -3238,19 +3542,42 @@ mod tests {
         }
 
         #[test]
-        fn create_root_via_editor_then_type_pick() {
+        fn create_root_via_form() {
             let (_dir, herd) = temp_herd(&[]);
             let mut app = App::with_herd(herd).unwrap();
-            press(&mut app, "c"); // open create title field
+            press(&mut app, "c"); // open the create form (title row)
             press(&mut app, "foo"); // type the title
-            enter(&mut app); // commit title -> type picker
-            press(&mut app, "b"); // pick bug -> create
+            tab(&mut app); // -> type row
+            arrow_right(&mut app); // task -> bug (single-select cursor)
+            enter(&mut app); // create
             assert!(matches!(app.overlay, Overlay::None));
             let created = app.all.iter().find(|t| t.title == "foo").expect("created");
             assert_eq!(created.kind, "bug");
+            assert_eq!(created.priority, 3); // default p3
             assert_eq!(created.status, Status::Hairy);
             // The cursor lands on the new task.
             assert_eq!(app.selected().map(|t| t.title.as_str()), Some("foo"));
+        }
+
+        #[test]
+        fn create_form_sets_priority_and_labels() {
+            let (_dir, herd) = temp_herd(&[]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "c"); // title row
+            press(&mut app, "tuned");
+            tab(&mut app); // -> type
+            tab(&mut app); // -> priority (default p3 == idx 2)
+            arrow_left(&mut app); // p3 -> p2
+            tab(&mut app); // -> labels
+            press(&mut app, "rust, tui");
+            enter(&mut app); // create
+            let created = app
+                .all
+                .iter()
+                .find(|t| t.title == "tuned")
+                .expect("created");
+            assert_eq!(created.priority, 2);
+            assert_eq!(created.labels, vec!["rust".to_string(), "tui".to_string()]);
         }
 
         #[test]
@@ -3259,10 +3586,21 @@ mod tests {
             let mut app = App::with_herd(herd).unwrap();
             press(&mut app, "C"); // create child of the selected task
             press(&mut app, "kid");
-            enter(&mut app);
-            press(&mut app, "t");
+            enter(&mut app); // create (defaults: task, p3)
             let created = app.all.iter().find(|t| t.title == "kid").expect("child");
             assert_eq!(created.parent.as_deref(), Some("p0"));
+            assert_eq!(created.kind, "task");
+        }
+
+        #[test]
+        fn create_empty_title_enter_is_noop() {
+            // Enter with an empty title keeps the form open (Python's `(need title)`).
+            let (_dir, herd) = temp_herd(&[]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "c");
+            enter(&mut app);
+            assert!(matches!(app.overlay, Overlay::Create(_)));
+            assert!(app.all.is_empty());
         }
 
         #[test]
@@ -3271,10 +3609,10 @@ mod tests {
             let mut app = App::with_herd(herd).unwrap();
             press(&mut app, "c");
             press(&mut app, "foo");
-            esc(&mut app); // single-line Esc cancels
+            esc(&mut app); // Esc cancels the form
             assert!(matches!(app.overlay, Overlay::None));
             assert!(app.all.is_empty());
-            assert_eq!(app.notification.as_deref(), Some("cancelled"));
+            assert_eq!(app.notification.as_deref(), Some("create cancelled"));
         }
 
         #[test]
