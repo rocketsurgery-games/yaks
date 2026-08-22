@@ -4,7 +4,7 @@ title: 'Encoding: delimited spans (word-preserving inline)'
 type: task
 priority: 3
 created: '2026-08-22T13:29:05Z'
-updated: '2026-08-22T14:23:09Z'
+updated: '2026-08-22T14:43:38Z'
 parent: yaksrs-9b8d
 labels:
 - tui
@@ -32,3 +32,7 @@ Held at 100-wide/12-col tables incl. aligned control (no bias). Robust for reali
 ---
 ▸ 2026-08-22T14:23:09Z
 Survived the cue-free cumulative test to 16 cols / ~100 wide incl. aligned control (no bias). Confirmed as default snapshot encoding for frontier-model UI dev.
+
+---
+▸ 2026-08-22T14:43:38Z
+Implemented as the 'spans' encoding (a39e) and chosen as the recommended default per the eval.
