@@ -2335,16 +2335,6 @@ fn overlay_name(o: &Overlay) -> &'static str {
     }
 }
 
-/// Emoji status glyph, matching the Python TUI (bison/razor/sheep/skull).
-fn status_emoji(s: Status) -> &'static str {
-    match s {
-        Status::Hairy => "\u{1f9ac}",
-        Status::Shaving => "\u{1fa92}",
-        Status::Shorn => "\u{1f411}",
-        Status::Dead => "\u{1f480}",
-    }
-}
-
 /// Displayed count, capped like Python's format_count (unbounded views).
 fn format_count(n: usize) -> String {
     if n <= 999 {
@@ -2545,7 +2535,7 @@ fn list_item<'a>(
     let left_fixed = 1 + disp_width(&body_padded) + disp_width(&pri_s) + disp_width(&type_s);
     let title_avail = width.saturating_sub(left_fixed + rw + 1);
     let title = truncate_disp(
-        &format!("{} {}", status_emoji(r.task.status), r.task.title),
+        &format!("{} {}", r.task.status.emoji(), r.task.title),
         title_avail,
     );
     let used = left_fixed + disp_width(&title);

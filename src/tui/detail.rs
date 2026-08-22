@@ -135,8 +135,11 @@ fn humanize_date(iso: &str) -> String {
     }
 }
 
-/// A "glyph id  title" reference line whose id is a link target.
-fn ref_line(prefix: String, glyph: char, id: &str, title: &str, exists: bool) -> DLine {
+/// A "glyph id  title" reference line whose id is a link target. `glyph` is a
+/// status emoji (display width 2 but a single `char`); link offsets below are
+/// char indices, which `render_dline` styles as relative span flow, so the
+/// wide emoji doesn't skew the id highlight.
+fn ref_line(prefix: String, glyph: &str, id: &str, title: &str, exists: bool) -> DLine {
     let head = format!("{prefix}{glyph} ");
     let col = head.chars().count();
     let text = format!("{head}{id}  {title}");
@@ -178,8 +181,8 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
         out.push(section("Depends on:"));
         for d in &task.depends_on {
             let (glyph, title, exists) = match by_id.get(d.as_str()) {
-                Some(t) => (t.status.glyph(), t.title.clone(), true),
-                None => (' ', "(missing)".into(), false),
+                Some(t) => (t.status.emoji(), t.title.clone(), true),
+                None => (" ", "(missing)".into(), false),
             };
             out.push(ref_line("  ".into(), glyph, d, &title, exists));
         }
@@ -197,7 +200,7 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
         for b in blocks {
             out.push(ref_line(
                 "  ".into(),
-                b.status.glyph(),
+                b.status.emoji(),
                 &b.id,
                 &b.title,
                 true,
@@ -207,8 +210,8 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
 
     if let Some(p) = &task.parent {
         let (glyph, title, exists) = match by_id.get(p.as_str()) {
-            Some(t) => (t.status.glyph(), t.title.as_str(), true),
-            None => (' ', "(missing)", false),
+            Some(t) => (t.status.emoji(), t.title.as_str(), true),
+            None => (" ", "(missing)", false),
         };
         out.push(empty());
         out.push(section("Parent:"));
@@ -226,7 +229,7 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
         for c in kids {
             out.push(ref_line(
                 "  ".into(),
-                c.status.glyph(),
+                c.status.emoji(),
                 &c.id,
                 &c.title,
                 true,

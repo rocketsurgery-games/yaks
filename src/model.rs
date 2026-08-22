@@ -35,6 +35,16 @@ impl Status {
         }
     }
 
+    /// Status emoji (bison/razor/sheep/skull), matching the TUI list + tab bar.
+    pub fn emoji(self) -> &'static str {
+        match self {
+            Status::Hairy => "\u{1f9ac}",
+            Status::Shaving => "\u{1fa92}",
+            Status::Shorn => "\u{1f411}",
+            Status::Dead => "\u{1f480}",
+        }
+    }
+
     /// A dependency counts as "resolved" once it is shorn or dead.
     pub fn is_resolved(self) -> bool {
         matches!(self, Status::Shorn | Status::Dead)
@@ -61,4 +71,3 @@ pub struct Task {
     pub source: Option<String>,
     pub body: String,
 }
-

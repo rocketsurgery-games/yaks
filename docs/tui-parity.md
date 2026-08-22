@@ -89,8 +89,10 @@ relocated to their Python homes — tracked with those overlays.)
 `Task: {id}` header; blank; capitalized 13-wide `Title:/Status:/Type:/Priority:/
 Created:/Updated:/Labels:` (humanized dates via `humanize_date`); then conditional
 `Depends on:` / `Blocks:` (reverse deps) / `Parent:` / `Children:` sections.
-Known nit: deps/children still use letter glyphs (H/N/S) vs the list's emoji
-(yaksrs- follow-up).
+The deps/blocks/parent/children ref lines use the same status **emoji**
+(🦬/🪒/🐑/💀, via `Status::emoji()`) as the list + tab bar (yaksrs-f2cf); link
+offsets stay char-indexed and `render_dline` styles them as relative span flow,
+so the width-2 emoji doesn't skew the id highlight.
 
 - **Python:** `Task: {id}` header; blank; `Title:` `Status:` `Type:` `Priority:`
   `Created:` `Updated:` `Labels:` (labels ~13-wide, capitalized); blank; then

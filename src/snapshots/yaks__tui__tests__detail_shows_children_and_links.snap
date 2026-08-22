@@ -15,6 +15,6 @@ expression: "draw(&app, 72, 16)"
                         │ Labels:      -
                         │
                         │ Children:
-                        │   H a1  Child A1
-                        │   H a2  Child A2
+                        │   🦬  a1  Child A1
+                        │   🦬  a2  Child A2
 h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S
