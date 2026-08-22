@@ -4,15 +4,15 @@ expression: "draw(&app, 72, 14)"
 ---
  🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starr
 
- a0   p2 task     🦬  Ro Add dependency to a0  (3 matches)
-   a1 p3 task     🦬  Ch [S] b0 Root B shaving
-   a2 p3 task     🐑  Ch [H] a1 Child A1
-                        [N] a2 Child A2 done
-
-
-
-
-
-
-
+ a0   p2 task     🦬  Ro │ Add dependency to a0  (3 matches)
+   a1 p3 task     🦬  Ch │ [S] b0 Root B shaving
+   a2 p3 task     🐑  Ch │ [H] a1 Child A1
+                        │ [N] a2 Child A2 done
+                        │
+                        │
+                        │
+                        │
+                        │
+                        │
+                        │
 search:

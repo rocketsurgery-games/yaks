@@ -112,7 +112,14 @@ Known nit: deps/children still use letter glyphs (H/N/S) vs the list's emoji
   single-key type picker.
 - Action: build the create form.
 
-## 9. Filter drawer (f) — [match]
+## 9. Filter drawer (f) — [divergence: right-side drawer + delimiter] (yaksrs-d416)
+
+Intentional divergence from Python: the filter drawer (and the fuzzy/view
+pickers + multiline editor) stay in the RIGHT pane rather than a top drawer,
+because a wide/short terminal has rows to spare but a top drawer steals them.
+Every right-pane surface now shares the detail pane's left-divider rule (via
+`right_divider`) so it no longer blends into the list. Original Python note kept
+for reference:
 
 - **Python:** a **top drawer above the list** (list stays visible below);
   `[x]`/`[ ]` **checkbox** chips for status/type/priority/deps; `labels`/`search`

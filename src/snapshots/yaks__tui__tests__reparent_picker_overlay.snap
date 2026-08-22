@@ -4,15 +4,15 @@ expression: "draw(&app, 72, 14)"
 ---
  🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starr
 
- a0   p2 task     🦬  Ro Reparent a1  (2 matches)
-   a1 p3 task     🦬  Ch (clear parent — make top-level)
-   a2 p3 task     🐑  Ch [S] b0 Root B shaving
-                        [N] a2 Child A2 done
-
-
-
-
-
-
-
+ a0   p2 task     🦬  Ro │ Reparent a1  (2 matches)
+   a1 p3 task     🦬  Ch │ (clear parent — make top-level)
+   a2 p3 task     🐑  Ch │ [S] b0 Root B shaving
+                        │ [N] a2 Child A2 done
+                        │
+                        │
+                        │
+                        │
+                        │
+                        │
+                        │
 search:

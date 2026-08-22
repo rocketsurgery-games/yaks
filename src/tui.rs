@@ -1757,9 +1757,11 @@ fn render(app: &App, frame: &mut Frame) {
     ])
     .areas(frame.area());
     render_tabs(app, frame, top);
-    // Python model: the list is full-width until you focus the detail pane.
-    // (Interim: right-pane overlays still borrow a split until they're
-    // relocated to their Python homes — top drawer, full-screen pickers.)
+    // The list is full-width until the detail pane or a right-pane overlay is
+    // shown. We intentionally keep the filter drawer / fuzzy picker / view
+    // picker on the RIGHT (diverging from Python's top drawer): in a wide, short
+    // terminal a right-side drawer wastes no rows. Every right-pane surface gets
+    // the same left divider (via right_divider) so it doesn't bleed into the list.
     let right_overlay = matches!(&app.overlay, Overlay::Edit(ed) if !ed.single_line)
         || matches!(
             app.overlay,
@@ -1769,17 +1771,35 @@ fn render(app: &App, frame: &mut Frame) {
         let [left, right] =
             Layout::horizontal([Constraint::Percentage(34), Constraint::Percentage(66)]).areas(mid);
         render_list(app, frame, left);
+        let inner = right_divider(frame, right, true);
         match &app.overlay {
-            Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, right),
-            Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, right),
-            Overlay::Drawer(d) => render_drawer(d, frame, right),
-            Overlay::ViewPicker(sel) => render_view_picker(app, *sel, frame, right),
-            _ => render_detail(app, frame, right),
+            Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, inner),
+            Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, inner),
+            Overlay::Drawer(d) => render_drawer(d, frame, inner),
+            Overlay::ViewPicker(sel) => render_view_picker(app, *sel, frame, inner),
+            _ => render_detail(app, frame, inner),
         }
     } else {
         render_list(app, frame, mid);
     }
     render_status(app, frame, bot);
+}
+
+/// Draw the shared left-divider rule (as the detail pane has) on a right-pane
+/// area and return the inset content region. Applied to detail AND every
+/// right-pane overlay so drawers don't bleed into the list.
+fn right_divider(frame: &mut Frame, area: Rect, focused: bool) -> Rect {
+    let block = Block::new()
+        .borders(Borders::LEFT)
+        .border_style(if focused {
+            Style::new().fg(Color::Cyan)
+        } else {
+            Style::new().fg(Color::DarkGray)
+        })
+        .padding(Padding::horizontal(1));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    inner
 }
 
 fn render_view_picker(app: &App, sel: usize, frame: &mut Frame, area: Rect) {
@@ -2284,18 +2304,10 @@ fn list_item<'a>(
 
 fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::Detail;
-    // Sparse chrome: a single left divider rule, no surrounding box.
-    let block = Block::new()
-        .borders(Borders::LEFT)
-        .border_style(if focused {
-            Style::new().fg(Color::Cyan)
-        } else {
-            Style::new().fg(Color::DarkGray)
-        })
-        .padding(Padding::horizontal(1));
+    // The left divider is drawn by render() via right_divider(); we render the
+    // content into the already-inset area.
     let Some(t) = app.selected() else {
-        let p = Paragraph::new(Span::styled("(no task)", Style::new().fg(Color::DarkGray)))
-            .block(block);
+        let p = Paragraph::new(Span::styled("(no task)", Style::new().fg(Color::DarkGray)));
         frame.render_widget(p, area);
         return;
     };
@@ -2325,9 +2337,7 @@ fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
         })
         .collect();
     // No wrap: link/match highlight columns must stay valid.
-    let p = Paragraph::new(rendered)
-        .block(block)
-        .scroll((app.detail_scroll, 0));
+    let p = Paragraph::new(rendered).scroll((app.detail_scroll, 0));
     frame.render_widget(p, area);
 }
 
@@ -2345,8 +2355,8 @@ fn render_dline<'a>(
         return Line::from(String::new());
     }
     // Base per-char style: dim label prefix on plain fields; section headers cyan.
-    let label_end = if dl.links.is_empty() && dl.kind == detail::Kind::Field && n > 9 {
-        9
+    let label_end = if dl.links.is_empty() && dl.kind == detail::Kind::Field && n > 13 {
+        13
     } else {
         0
     };
