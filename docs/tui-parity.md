@@ -55,7 +55,7 @@ relocated to their Python homes — tracked with those overlays.)
 - Action: adopt the emoji glyphs. Note width-2 emoji have real layout cost
   (drives the 72-col tab-bar wrap).
 
-## 4. List row format — [done] (yaksrs-dd68); tree still [investigate] (#5)
+## 4. List row format — [done] (yaksrs-dd68); tree [done] (#5)
 
 - **Python:** ` {id}   p{pri} {type-word}   {glyph} {title}{…}{[labels]}` — id
   shown, spelled-out type (`task`/`bug`/`feature`/`idea`), glyph before the
@@ -67,15 +67,38 @@ relocated to their Python homes — tracked with those overlays.)
 - [investigate]: the magenta `*` marks blocked/tangled tasks (fixture `fix-0004`
   has an unresolved dep on shaving `fix-0002`). Confirm the exact rule.
 
-## 5. Tree / ghost family — [investigate]
+## 5. Tree / ghost family — [done: verified at parity] (yaksrs-0807)
 
-- **Rust:** explicit tree — chevron `▾`, indentation; the shorn ghost `Gamma`
-  is pulled in with its child `Delta` indented beneath it.
-- **Python:** appears flat for this data (no chevron/indent), shorn `Gamma`
-  shown as an ordinary row.
-- Action: compare on a herd with clear hairy parent/child chains to see whether
-  Python indents + shows chevrons and how it renders ghosts/collapse — Rust may
-  be over- or under-showing family here.
+Investigated head-to-head on a purpose-built fixture (clear hairy parent/child
+chains + a shorn ghost ancestor + a shaving ghost descendant), driving both TUIs
+through the shared headless protocol. **They match.** Both `tree.rs::build` and
+Python `tree.build_tree` implement the identical algorithm (universe = anchors +
+ancestors + descendants; `ghost = not in focus`; shaving-first child ordering),
+and render identically:
+
+```
+ tf-alpha p2 task     🦬 Alpha root
+   tf-ab  p3 task     🪒 Alpha child B (shaving)   ← ghost (shaving descendant)
+   tf-aa  p3 task     🦬 Alpha child A
+ tf-gamma p2 task     🐑 Gamma root (shorn)        ← ghost (shorn ancestor)
+   tf-ga  p3 task     🦬 Gamma child (hairy)
+```
+
+Same rooting, same 2-space-per-depth indentation, same ghost pulls (shorn
+ancestor `gamma` and shaving descendant `ab`), same child order, on both the
+Hairy and Shorn tabs. The original "Python looked flat" observation did not
+reproduce — it was against data whose parent/child links weren't established.
+
+Chevrons appear only on **collapsed** parents (as `▶ N`); Rust collapse hides
+the subtree and shows `▶ N` correctly. Python's collapse could not be verified
+through the pyte capture harness (a redraw/timing artifact leaves the children
+on screen next to the chevron and then drops the chevron on the next redraw),
+but Python's `apply_collapse` implements the same hide+count logic. No Rust
+change needed.
+
+Known non-divergence: the one-space difference after the status emoji in the two
+captures (`🦬  Alpha` vs `🦬 Alpha`) is the wide-emoji continuation-cell capture
+artifact (Rust `TestBackend` grid vs pyte), not a real rendering difference.
 
 ## 6. Cursor / selection — [match]
 
