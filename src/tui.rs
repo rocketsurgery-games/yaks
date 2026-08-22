@@ -823,16 +823,32 @@ impl App {
     }
 
     /// One-line summary of internal state for the headless snapshot header.
+    /// This is the optional, developer-fillable debug facility (Encoding "B"):
+    /// it surfaces app-state facts that colour/layout alone can hide, so
+    /// internal-state bugs show up directly in a snapshot. Keep it one line.
     fn state_header(&self) -> String {
         let focus = match self.focus {
             Focus::List => "list",
             Focus::Detail => "detail",
         };
         let sel = self.selected_id().unwrap_or_else(|| "-".into());
+        let mut blocked: Vec<String> = self.blocked_ids().into_iter().collect();
+        blocked.sort();
+        let blocked = if blocked.is_empty() {
+            "-".to_string()
+        } else {
+            format!("[{}]", blocked.join(","))
+        };
+        let filter = {
+            let s = filter_summary(&self.filter);
+            if s.is_empty() { "-".to_string() } else { s }
+        };
         format!(
-            "focus={focus} · view={} · cursor={} · sel={sel} · overlay={}",
+            "focus={focus} · view={} · cursor={} · rows={} · sel={sel} · blocked={blocked} · collapsed={} · filter={filter} · overlay={}",
             self.active_view().name,
             self.cursor,
+            self.rows().len(),
+            self.collapsed.len(),
             overlay_name(&self.overlay),
         )
     }

@@ -2,7 +2,7 @@
 source: tests/cli.rs
 expression: out
 ---
-=== frame 0 · 72x12 · focus=list · view=🦬 Hairy · cursor=0 · sel=fix-0001 · overlay=none ===
+=== frame 0 · 72x12 · focus=list · view=🦬 Hairy · cursor=0 · rows=4 · sel=fix-0001 · blocked=[fix-0004] · collapsed=0 · filter=(all) · overlay=none ===
  🦬  Hairy (3)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (5)   ⭐  Starr
 
  fix-0001   p2 task     🦬  Alpha task                             [core]
@@ -16,7 +16,7 @@ expression: out
 
 Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state
 === end ===
-=== frame 1 · 72x12 · focus=list · view=🦬 Hairy · cursor=1 · sel=fix-0003 · overlay=none ===
+=== frame 1 · 72x12 · focus=list · view=🦬 Hairy · cursor=1 · rows=4 · sel=fix-0003 · blocked=[fix-0004] · collapsed=0 · filter=(all) · overlay=none ===
  🦬  Hairy (3)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (5)   ⭐  Starr
 
  fix-0001   p2 task     🦬  Alpha task                             [core]

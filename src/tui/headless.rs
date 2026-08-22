@@ -19,6 +19,7 @@
 //!   resize <w> <h> change the terminal size.
 //!   quit           exit.
 
+use std::collections::BTreeSet;
 use std::io::{self, BufRead, Write};
 
 use anyhow::Result;
@@ -75,6 +76,7 @@ pub fn run_headless(app: App, opts: HeadlessOpts) -> Result<()> {
         style: opts.style,
         diff: opts.diff,
         prev_body: None,
+        reg: StyleRegistry::new(),
         frame: 0,
     };
     d.emit(&mut out)?; // initial frame
@@ -96,6 +98,8 @@ struct Driver {
     diff: bool,
     /// Serialized body of the previous frame, for line-level diffing.
     prev_body: Option<Vec<String>>,
+    /// Persistent style-id map so ids stay stable across frames (compact diffs).
+    reg: StyleRegistry,
     frame: usize,
 }
 
@@ -149,7 +153,7 @@ impl Driver {
 
     fn emit(&mut self, out: &mut impl Write) -> Result<()> {
         let buf = render_to_buffer(&self.app, self.w, self.h);
-        let body = encode_body(&buf, self.style);
+        let body = encode_body(&buf, self.style, &mut self.reg);
         // In diff mode, emit only changed lines against the previous frame once
         // we have one to compare with the same shape; otherwise emit the whole
         // body (first frame, or geometry/line-count changed).
@@ -218,15 +222,45 @@ fn plain_grid(buf: &Buffer) -> Vec<String> {
         .collect()
 }
 
+/// Append-only registry mapping a cell style to a stable base36 id, persisted
+/// across frames so ids don't renumber between snapshots -- which keeps frame
+/// diffs compact when the selection moves (yaksrs-6f87).
+struct StyleRegistry {
+    keys: Vec<StyleKey>,
+}
+
+impl StyleRegistry {
+    fn new() -> Self {
+        StyleRegistry { keys: Vec::new() }
+    }
+
+    fn id_of(&mut self, key: StyleKey) -> usize {
+        match self.keys.iter().position(|k| *k == key) {
+            Some(i) => i,
+            None => {
+                self.keys.push(key);
+                self.keys.len() - 1
+            }
+        }
+    }
+
+    /// Legend entries for exactly the ids used in the current frame, in id order.
+    fn legend(&self, used: &BTreeSet<usize>) -> Vec<String> {
+        used.iter()
+            .map(|&i| format!("{}={}", base36(i), self.keys[i].describe()))
+            .collect()
+    }
+}
+
 /// Assemble the snapshot body (between the frame header and `=== end ===`) for
 /// the chosen style encoding. `None` emits just the plain grid; the others add
 /// or interleave style information. See `StyleEncoding` and docs/tui-style-eval.md.
-fn encode_body(buf: &Buffer, enc: Option<StyleEncoding>) -> Vec<String> {
+fn encode_body(buf: &Buffer, enc: Option<StyleEncoding>, reg: &mut StyleRegistry) -> Vec<String> {
     let plain = plain_grid(buf);
     match enc {
         None => plain,
         Some(StyleEncoding::Parallel) => {
-            let (rows, legend) = style_layer(buf);
+            let (rows, legend) = style_layer(buf, reg);
             let mut out = plain;
             out.push("--- styles ---".into());
             out.extend(rows);
@@ -234,7 +268,7 @@ fn encode_body(buf: &Buffer, enc: Option<StyleEncoding>) -> Vec<String> {
             out
         }
         Some(StyleEncoding::Interleaved) => {
-            let (rows, legend) = style_layer(buf);
+            let (rows, legend) = style_layer(buf, reg);
             let mut out = Vec::with_capacity(plain.len() * 2 + 1);
             for (text, ids) in plain.iter().zip(rows.iter()) {
                 out.push(text.clone());
@@ -244,7 +278,7 @@ fn encode_body(buf: &Buffer, enc: Option<StyleEncoding>) -> Vec<String> {
             out
         }
         Some(StyleEncoding::Spans) => {
-            let (rows, legend) = spans_layer(buf);
+            let (rows, legend) = spans_layer(buf, reg);
             let mut out = rows;
             out.push(format!("legend: {}", legend.join("  ")));
             out
@@ -254,9 +288,9 @@ fn encode_body(buf: &Buffer, enc: Option<StyleEncoding>) -> Vec<String> {
 
 /// Inline spans: default-styled cells are emitted literally (whitespace
 /// preserved -- load-bearing for column arithmetic); each run of one non-default
-/// style becomes `id[run text]`. Returns (rows, legend).
-fn spans_layer(buf: &Buffer) -> (Vec<String>, Vec<String>) {
-    let mut keys: Vec<StyleKey> = Vec::new();
+/// style becomes `id[run text]`, keyed via the persistent registry (stable ids).
+fn spans_layer(buf: &Buffer, reg: &mut StyleRegistry) -> (Vec<String>, Vec<String>) {
+    let mut used = BTreeSet::new();
     let mut rows = Vec::new();
     for y in 0..buf.area.height {
         let w = row_width(buf, y);
@@ -273,53 +307,32 @@ fn spans_layer(buf: &Buffer) -> (Vec<String>, Vec<String>) {
             while x < w && StyleKey::of(&buf[(x, y)]) == key {
                 x += 1;
             }
-            let id = match keys.iter().position(|k| *k == key) {
-                Some(i) => i,
-                None => {
-                    keys.push(key);
-                    keys.len() - 1
-                }
-            };
+            let id = reg.id_of(key);
+            used.insert(id);
             let text: String = (start..x).map(|c| buf[(c, y)].symbol()).collect();
             line.push_str(&format!("{}[{text}]", base36(id)));
         }
         rows.push(line.trim_end().to_string());
     }
-    let legend = keys
-        .iter()
-        .enumerate()
-        .map(|(i, k)| format!("{}={}", base36(i), k.describe()))
-        .collect();
-    (rows, legend)
+    (rows, reg.legend(&used))
 }
 
-/// (aligned style-id rows, legend entries). Style ids are base36, assigned in
-/// first-appearance order; the legend maps each to a semantic description.
-fn style_layer(buf: &Buffer) -> (Vec<String>, Vec<String>) {
-    let mut keys: Vec<StyleKey> = Vec::new();
+/// Aligned style-id rows + legend, keyed via the persistent registry so ids are
+/// stable across frames. The legend lists only the ids present this frame.
+fn style_layer(buf: &Buffer, reg: &mut StyleRegistry) -> (Vec<String>, Vec<String>) {
+    let mut used = BTreeSet::new();
     let mut rows = Vec::new();
     for y in 0..buf.area.height {
         let w = row_width(buf, y);
         let mut row = String::new();
         for x in 0..w {
-            let key = StyleKey::of(&buf[(x, y)]);
-            let id = match keys.iter().position(|k| *k == key) {
-                Some(i) => i,
-                None => {
-                    keys.push(key);
-                    keys.len() - 1
-                }
-            };
+            let id = reg.id_of(StyleKey::of(&buf[(x, y)]));
+            used.insert(id);
             row.push(base36(id));
         }
         rows.push(row);
     }
-    let legend = keys
-        .iter()
-        .enumerate()
-        .map(|(i, k)| format!("{}={}", base36(i), k.describe()))
-        .collect();
-    (rows, legend)
+    (rows, reg.legend(&used))
 }
 
 #[derive(PartialEq)]
@@ -446,6 +459,7 @@ mod tests {
             style,
             diff: false,
             prev_body: None,
+            reg: StyleRegistry::new(),
             frame: 0,
         };
         let mut out: Vec<u8> = Vec::new();
@@ -519,6 +533,7 @@ mod tests {
             style: None,
             diff: true,
             prev_body: None,
+            reg: StyleRegistry::new(),
             frame: 0,
         };
         let mut out: Vec<u8> = Vec::new();
@@ -528,6 +543,56 @@ mod tests {
         assert!(s.contains(" · full · "));
         assert!(s.contains(" · diff · "));
         assert!(s.contains("\nL")); // at least one changed-line label
+    }
+
+    #[test]
+    fn style_registry_ids_are_stable() {
+        let mut reg = StyleRegistry::new();
+        let a = StyleKey {
+            fg: Color::Cyan,
+            bg: Color::Reset,
+            mods: Modifier::empty(),
+        };
+        let b = StyleKey {
+            fg: Color::Red,
+            bg: Color::Reset,
+            mods: Modifier::empty(),
+        };
+        let ia = reg.id_of(a);
+        let ib = reg.id_of(b);
+        assert_ne!(ia, ib);
+        let a2 = StyleKey {
+            fg: Color::Cyan,
+            bg: Color::Reset,
+            mods: Modifier::empty(),
+        };
+        assert_eq!(reg.id_of(a2), ia); // same style -> same id across calls/frames
+    }
+
+    #[test]
+    fn spans_diff_keeps_legend_stable_on_cursor_move() {
+        let app = App::new(vec![
+            sample_task("a0", "Alpha"),
+            sample_task("a1", "Beta"),
+            sample_task("a2", "Gamma"),
+        ]);
+        let mut d = Driver {
+            app,
+            w: 44,
+            h: 8,
+            style: Some(StyleEncoding::Spans),
+            diff: true,
+            prev_body: None,
+            reg: StyleRegistry::new(),
+            frame: 0,
+        };
+        let mut out: Vec<u8> = Vec::new();
+        d.emit(&mut out).unwrap(); // full
+        d.step("key j", &mut out).unwrap(); // diff after moving the cursor
+        let s = String::from_utf8(out).unwrap();
+        let diff_frame = s.split("· diff ·").nth(1).unwrap();
+        // stable ids keep the legend identical, so it must not re-appear in the diff
+        assert!(!diff_frame.contains("legend:"));
     }
 
     #[test]
@@ -562,6 +627,7 @@ mod tests {
             style: None,
             diff: false,
             prev_body: None,
+            reg: StyleRegistry::new(),
             frame: 0,
         };
         let mut out: Vec<u8> = Vec::new();
