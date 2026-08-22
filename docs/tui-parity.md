@@ -212,3 +212,17 @@ Captured head-to-head on the fixture herd. Summary:
   panes — matching Python's "E reopens the whole form". The old body-only
   editor (`EditAction::Body`) is removed; the form's multi-line description zone
   supersedes it.
+
+## 13. Auto-refresh (Rust) — [done] (yaksrs-d2df)
+
+The live TUI watches the herd's `.yaks/` tree with a recursive `notify`
+watcher (a background thread). The event loop blocks on input with a 250 ms
+poll timeout; content-changing fs events (create/remove/data-modify — access &
+metadata events are filtered so our own reads can't loop) set a pending-refresh
+flag that is applied via `reload_preserving_selection` **only while idle** (no
+overlay open), so an external edit never yanks data out from under an open
+editor/picker. The cursor is kept on the same task by id across the reload, and
+the refresh is silent (it must not clobber a mutation's own notification). This
+keeps the UI from drifting relative to disk when the herd is edited from another
+process (CLI, `$EDITOR`, git, a second TUI). Best-effort: if the watcher can't
+be created the TUI still runs, just without auto-refresh.

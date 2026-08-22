@@ -17,9 +17,14 @@ pub use headless::{HeadlessOpts, StyleEncoding, run_headless};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{self, Stdout};
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
 
 use anyhow::Result;
 use edtui::{EditorEventHandler, EditorMode, EditorState, EditorTheme, EditorView, Lines};
+use notify::event::{EventKind, ModifyKind};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
@@ -672,6 +677,22 @@ impl App {
         } else {
             self.cursor.min(len - 1)
         };
+    }
+
+    /// Re-read the herd from disk (external change) while keeping the cursor on
+    /// the same task by id. Silent: it must not clobber a mutation's own
+    /// notification, and the event loop only calls it while idle (no overlay).
+    fn reload_preserving_selection(&mut self) {
+        let sel = self.selected_id();
+        if let Some(h) = &self.herd {
+            if let Ok(all) = h.list(FilterSpec::default(), false) {
+                self.all = all;
+            }
+        }
+        match sel.and_then(|id| self.rows().iter().position(|r| r.task.id == id)) {
+            Some(pos) => self.cursor = pos,
+            None => self.clamp_cursor(),
+        }
     }
 
     fn active_view(&self) -> &view::View {
@@ -1999,15 +2020,36 @@ pub fn run(mut app: App) -> Result<()> {
 }
 
 fn event_loop(term: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
+    // Best-effort filesystem watch on the herd's `.yaks/` tree so external edits
+    // (including the user's own, from another process) refresh the UI. Kept
+    // alive for the loop's duration; `_watcher` must not be dropped early.
+    let watch_path = app.herd.as_ref().map(|h| h.root().to_path_buf());
+    let (_watcher, rx) = setup_watcher(watch_path);
+    let mut dirty = false;
     loop {
+        // Apply external changes only while idle (no overlay), so we never yank
+        // data out from under an open editor/picker mid-interaction.
+        if dirty && matches!(app.overlay, Overlay::None) {
+            app.reload_preserving_selection();
+            dirty = false;
+        }
         term.draw(|f| render(app, f))?;
         // Record the main-area height (minus tab + help lines) for paging.
         let h = term.size()?.height;
         app.page = h.saturating_sub(2).max(1);
         app.detail_page = h.saturating_sub(3).max(1);
-        if let Event::Key(k) = event::read()? {
-            if k.kind == KeyEventKind::Press {
-                handle_key(app, k);
+        // Block for input, but wake periodically to service filesystem events.
+        if event::poll(Duration::from_millis(250))? {
+            if let Event::Key(k) = event::read()? {
+                if k.kind == KeyEventKind::Press {
+                    handle_key(app, k);
+                }
+            }
+        }
+        // Coalesce any pending fs notifications into one deferred refresh.
+        if let Some(rx) = &rx {
+            while rx.try_recv().is_ok() {
+                dirty = true;
             }
         }
         if app.quit {
@@ -2015,6 +2057,39 @@ fn event_loop(term: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> R
         }
     }
     Ok(())
+}
+
+/// Set up a recursive watcher on `path`, returning the watcher (which the caller
+/// must keep alive) and a receiver that yields once per content-changing event.
+/// Best-effort: any failure yields `(None, None)` and the TUI just won't
+/// auto-refresh. Access/metadata-only events are filtered out so that our own
+/// reads can't trigger a reload feedback loop.
+fn setup_watcher(path: Option<PathBuf>) -> (Option<RecommendedWatcher>, Option<Receiver<()>>) {
+    let Some(path) = path else {
+        return (None, None);
+    };
+    let (tx, rx) = mpsc::channel();
+    let handler = move |res: notify::Result<notify::Event>| {
+        if let Ok(ev) = res {
+            let interesting = match ev.kind {
+                EventKind::Create(_) | EventKind::Remove(_) => true,
+                EventKind::Modify(ModifyKind::Metadata(_)) => false,
+                EventKind::Modify(_) => true,
+                _ => false, // Access / Any / Other
+            };
+            if interesting {
+                let _ = tx.send(());
+            }
+        }
+    };
+    let mut watcher = match notify::recommended_watcher(handler) {
+        Ok(w) => w,
+        Err(_) => return (None, None),
+    };
+    if watcher.watch(&path, RecursiveMode::Recursive).is_err() {
+        return (None, None);
+    }
+    (Some(watcher), Some(rx))
 }
 
 fn handle_key(app: &mut App, k: KeyEvent) {
@@ -4011,6 +4086,36 @@ mod tests {
                 .expect("created");
             assert_eq!(created.priority, 2);
             assert_eq!(created.labels, vec!["rust".to_string(), "tui".to_string()]);
+        }
+
+        #[test]
+        fn reload_preserving_selection_picks_up_external_add() {
+            let (_dir, herd) = temp_herd(&[
+                task("t0", "first", Status::Hairy, 3, None),
+                task("t1", "second", Status::Hairy, 3, None),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "j"); // cursor -> t1
+            assert_eq!(app.selected_id().as_deref(), Some("t1"));
+            // Simulate an external write to the herd (as the file watcher would
+            // observe), then refresh from disk.
+            app.herd
+                .as_ref()
+                .unwrap()
+                .create(NewTask {
+                    title: "third".into(),
+                    kind: Some("task".into()),
+                    priority: Some(3),
+                    parent: None,
+                    labels: vec![],
+                    depends_on: vec![],
+                    source: None,
+                    description: None,
+                })
+                .unwrap();
+            app.reload_preserving_selection();
+            assert!(app.all.iter().any(|t| t.title == "third"), "picked up add");
+            assert_eq!(app.selected_id().as_deref(), Some("t1"), "cursor kept");
         }
 
         #[test]
