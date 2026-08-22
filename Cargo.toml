@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/toque"]
+# The root `yaks` package is implicitly a workspace member alongside crates/*.
+
 [package]
 name = "yaks"
 version = "0.0.1"
@@ -18,6 +22,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 ratatui = "0.30"
 edtui = { version = "0.11.7", default-features = false }
+toque = { path = "crates/toque" }
 notify = "6"
 arboard = "3"
 png = "0.17"

@@ -16,15 +16,26 @@ making architectural decisions.
 
 ## Layout
 
+A Cargo workspace: the root is the `yaks` binary package *and* the workspace
+root; reusable pieces live under `crates/`.
+
 - `src/model.rs` — `Status`, `Task`.
 - `src/store.rs` — `.yaks/` discovery + frontmatter parsing (hand-rolled fast path).
 - `src/main.rs` — clap CLI + command dispatch.
+- `src/tui.rs` (+ `src/tui/`) — the interactive TUI; `src/tui/headless.rs` is a
+  thin adapter implementing `toque::HeadlessApp` for `App`.
+- `crates/toque/` — publishable library: drive any ratatui app headlessly
+  (inject keys, capture LLM-/test-legible text snapshots with per-cell style).
+  yaks is its first consumer. See `crates/toque/README.md` for the style-encoding
+  evaluation; the full research report is in the Python repo's
+  `docs/tui-style-eval.md`.
 
 ## Build
 
 ```sh
 cargo build --release
-cargo test
+cargo test --workspace   # --workspace is required: `cargo test` alone only
+                         # tests the root `yaks` package, not crates/toque
 ```
 
 ## Task tracking

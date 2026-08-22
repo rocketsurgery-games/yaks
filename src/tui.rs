@@ -12,7 +12,8 @@ mod tree;
 mod view;
 mod views_store;
 
-pub use headless::{HeadlessOpts, StyleEncoding, run_headless};
+// `headless` holds the `toque::HeadlessApp` impl for `App`; nothing to re-export
+// (the headless driver lives in the `toque` crate, invoked from `main`).
 
 use std::cell::RefCell;
 use std::collections::HashSet;

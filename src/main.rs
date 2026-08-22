@@ -468,18 +468,18 @@ fn main() -> Result<()> {
             if headless {
                 let (w, h) = parse_size(size.as_deref());
                 let encoding = match style_encoding.as_deref() {
-                    Some(name) => match tui::StyleEncoding::parse(name) {
+                    Some(name) => match toque::StyleEncoding::parse(name) {
                         Some(e) => Some(e),
                         None => anyhow::bail!(
                             "unknown --style-encoding '{name}' (expected parallel|interleaved|spans)"
                         ),
                     },
-                    None if style => Some(tui::StyleEncoding::Parallel),
+                    None if style => Some(toque::StyleEncoding::Parallel),
                     None => None,
                 };
-                tui::run_headless(
+                toque::run(
                     app,
-                    tui::HeadlessOpts {
+                    toque::DriverOpts {
                         width: w,
                         height: h,
                         style: encoding,

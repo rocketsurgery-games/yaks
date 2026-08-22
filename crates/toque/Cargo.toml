@@ -1,0 +1,13 @@
+[package]
+name = "toque"
+version = "0.1.0"
+edition = "2024"
+description = "Drive a ratatui app headlessly from under the hat: inject keys, capture LLM- and test-legible text snapshots (with per-cell style)."
+license = "Apache-2.0"
+repository = "https://github.com/joelgwebber/yaks-rs"
+keywords = ["ratatui", "tui", "testing", "snapshot", "headless"]
+categories = ["development-tools::testing", "command-line-interface"]
+readme = "README.md"
+
+[dependencies]
+ratatui = "0.30"
