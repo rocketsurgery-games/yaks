@@ -583,8 +583,11 @@ pub struct App {
     cursor: usize,
     focus: Focus,
     detail_scroll: u16,
-    /// Index into the current detail's jumplist (Tab-cycled link targets).
-    detail_link: usize,
+    /// The detail pane's per-line cursor (index into the built detail lines).
+    /// j/k move it, Tab snaps it to link lines, Enter follows a link on it.
+    detail_line: usize,
+    /// Visual-selection anchor (Some when a v/Shift-arrow selection is active).
+    detail_anchor: Option<usize>,
     /// Active detail-pane find query + which match is current (n/N cycle).
     detail_find: Option<String>,
     detail_match: usize,
@@ -623,7 +626,8 @@ impl App {
             cursor: 0,
             focus: Focus::List,
             detail_scroll: 0,
-            detail_link: 0,
+            detail_line: 0,
+            detail_anchor: None,
             detail_find: None,
             detail_match: 0,
             nav_back: Vec::new(),
@@ -1519,17 +1523,103 @@ impl App {
         }
     }
 
+    fn detail_line_count(&self) -> usize {
+        match self.selected() {
+            Some(t) => detail::build(t, &self.all).len(),
+            None => 0,
+        }
+    }
+
+    /// Move the detail line cursor by `delta`, clamped, keeping it in view.
+    fn move_detail_line(&mut self, delta: i32) {
+        let n = self.detail_line_count();
+        if n == 0 {
+            return;
+        }
+        self.detail_line = (self.detail_line as i32 + delta).clamp(0, n as i32 - 1) as usize;
+        self.scroll_line_into_view(self.detail_line as u16);
+    }
+
+    /// g / G — jump the line cursor to the top / bottom.
+    fn detail_line_to(&mut self, end: bool) {
+        let n = self.detail_line_count();
+        self.detail_line = if end { n.saturating_sub(1) } else { 0 };
+        self.scroll_line_into_view(self.detail_line as u16);
+    }
+
+    /// Tab / Shift-Tab — snap the line cursor to the next / prev line holding a
+    /// link (wrapping), so Enter can follow it.
     fn jump_link(&mut self, delta: i32) {
         let jumps = self.detail_jumps();
         if jumps.is_empty() {
             return;
         }
-        let n = jumps.len() as i32;
-        self.detail_link = (self.detail_link as i32 + delta).rem_euclid(n) as usize;
-        // Bring the target line into view without disturbing the scroll when it
-        // is already visible (so cycling links doesn't jump the viewport).
-        let line = jumps[self.detail_link].line as u16;
-        self.scroll_line_into_view(line);
+        let mut lines: Vec<usize> = jumps.iter().map(|j| j.line).collect();
+        lines.dedup();
+        let target = if delta >= 0 {
+            lines
+                .iter()
+                .find(|&&l| l > self.detail_line)
+                .copied()
+                .unwrap_or(lines[0])
+        } else {
+            lines
+                .iter()
+                .rev()
+                .find(|&&l| l < self.detail_line)
+                .copied()
+                .unwrap_or_else(|| *lines.last().unwrap())
+        };
+        self.detail_line = target;
+        self.scroll_line_into_view(self.detail_line as u16);
+    }
+
+    /// v — toggle visual selection anchored at the current line.
+    fn toggle_visual(&mut self) {
+        self.detail_anchor = if self.detail_anchor.is_some() {
+            None
+        } else {
+            Some(self.detail_line)
+        };
+    }
+
+    /// Shift-↑↓ — start (if needed) and extend the visual selection.
+    fn extend_selection(&mut self, delta: i32) {
+        if self.detail_anchor.is_none() {
+            self.detail_anchor = Some(self.detail_line);
+        }
+        self.move_detail_line(delta);
+    }
+
+    /// The inclusive [lo, hi] line range currently selected, if any.
+    fn selection_range(&self) -> Option<(usize, usize)> {
+        self.detail_anchor
+            .map(|a| (a.min(self.detail_line), a.max(self.detail_line)))
+    }
+
+    /// y / Enter (in visual mode) — copy the selected line block (dedented) to
+    /// the clipboard and clear the selection.
+    fn yank_selection(&mut self) {
+        let Some((lo, hi)) = self.selection_range() else {
+            return;
+        };
+        let text = match self.selected() {
+            Some(t) => {
+                let lines = detail::build(t, &self.all);
+                let hi = hi.min(lines.len().saturating_sub(1));
+                let raw: Vec<String> = lines[lo..=hi].iter().map(|l| l.text.clone()).collect();
+                dedent(&raw).join("\n")
+            }
+            None => return,
+        };
+        let ok = crate::clipboard::copy_text(&text);
+        self.detail_anchor = None;
+        let n = hi - lo + 1;
+        self.notification = Some(if ok {
+            format!("copied {n} line(s)")
+        } else {
+            "clipboard unavailable".into()
+        });
     }
 
     /// Move `detail_scroll` the minimum needed so `line` sits inside the detail
@@ -1575,14 +1665,15 @@ impl App {
         self.select_task(id); // drops focus to the list; we re-raise it below
         self.focus = Focus::Detail;
         self.detail_scroll = 0;
-        self.detail_link = 0;
+        self.detail_line = 0;
+        self.detail_anchor = None;
         self.detail_find = None;
         self.detail_match = 0;
     }
 
     fn follow_link(&mut self) {
         let jumps = self.detail_jumps();
-        let Some(j) = jumps.into_iter().nth(self.detail_link) else {
+        let Some(j) = jumps.into_iter().find(|j| j.line == self.detail_line) else {
             return;
         };
         match j.target {
@@ -1625,17 +1716,10 @@ impl App {
         if next != self.cursor {
             self.cursor = next;
             self.detail_scroll = 0;
-            self.detail_link = 0;
+            self.detail_line = 0;
+            self.detail_anchor = None;
             self.detail_find = None;
             self.detail_match = 0;
-        }
-    }
-
-    /// G — scroll the detail pane so its last line rests at the viewport bottom.
-    fn detail_scroll_bottom(&mut self) {
-        if let Some(t) = self.selected() {
-            let n = detail::build(t, &self.all).len() as u16;
-            self.detail_scroll = n.saturating_sub(self.detail_page.max(1));
         }
     }
 
@@ -2212,55 +2296,88 @@ fn handle_key(app: &mut App, k: KeyEvent) {
                 if app.selected().is_some() {
                     app.focus = Focus::Detail;
                     app.detail_scroll = 0;
-                    app.detail_link = 0;
+                    app.detail_line = 0;
+                    app.detail_anchor = None;
                     app.detail_find = None;
                     app.detail_match = 0;
                 }
             }
             _ => {}
         },
-        Focus::Detail => match k.code {
-            KeyCode::Char('q') => app.quit = true,
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => app.focus = Focus::List,
-            KeyCode::Tab | KeyCode::Char(']') => app.jump_link(1),
-            KeyCode::BackTab | KeyCode::Char('[') => app.jump_link(-1),
-            KeyCode::Char('o') => app.nav_back(),
-            KeyCode::Char('i') => app.nav_forward(),
-            KeyCode::Char('/') => app.open_detail_find(),
-            KeyCode::Char('n') => app.detail_find_jump(1),
-            KeyCode::Char('N') => app.detail_find_jump(-1),
-            KeyCode::Char('?') => app.open_help(),
-            KeyCode::Enter => app.follow_link(),
-            // Mutating ops mirrored from the list pane (all act on selected()).
-            KeyCode::Char('S') => app.open_state_picker(),
-            KeyCode::Char('P') => app.open_priority_picker(),
-            KeyCode::Char('T') => app.open_type_picker(),
-            KeyCode::Char('L') => app.open_labels(),
-            KeyCode::Char('X') => app.open_slaughter_confirm(),
-            KeyCode::Char('E') => app.open_edit(),
-            KeyCode::Char('D') => app.open_dep_picker(),
-            KeyCode::Char('R') => app.open_reparent_picker(),
-            KeyCode::Char('c') => app.open_create(false),
-            KeyCode::Char('C') => app.open_create(true),
-            KeyCode::Char('f') => app.open_drawer(),
-            KeyCode::Char('*') => app.toggle_star(),
-            // Move between tasks without leaving the detail pane.
-            KeyCode::Char('J') => app.detail_next_task(1),
-            KeyCode::Char('K') => app.detail_next_task(-1),
-            KeyCode::Char('y') => app.copy_selected_id(),
-            KeyCode::Char('M') => app.open_comment(),
-            KeyCode::Char('j') | KeyCode::Down => {
-                app.detail_scroll = app.detail_scroll.saturating_add(1)
+        Focus::Detail => {
+            // Shift-↑↓ extend a visual selection (checked before the code match
+            // so the modifier isn't lost).
+            if k.modifiers.contains(KeyModifiers::SHIFT)
+                && matches!(k.code, KeyCode::Up | KeyCode::Down)
+            {
+                app.extend_selection(if k.code == KeyCode::Down { 1 } else { -1 });
+                return;
             }
-            KeyCode::Char('k') | KeyCode::Up => {
-                app.detail_scroll = app.detail_scroll.saturating_sub(1)
+            match k.code {
+                KeyCode::Char('q') => app.quit = true,
+                KeyCode::Char('h') | KeyCode::Left => app.focus = Focus::List,
+                // Esc peels back: selection → find → back to list (Python layering).
+                KeyCode::Esc => {
+                    if app.detail_anchor.is_some() {
+                        app.detail_anchor = None;
+                    } else if app.detail_find.is_some() {
+                        app.detail_find = None;
+                    } else {
+                        app.focus = Focus::List;
+                    }
+                }
+                KeyCode::Tab | KeyCode::Char(']') => app.jump_link(1),
+                KeyCode::BackTab | KeyCode::Char('[') => app.jump_link(-1),
+                KeyCode::Char('o') => app.nav_back(),
+                KeyCode::Char('i') => app.nav_forward(),
+                KeyCode::Char('/') => app.open_detail_find(),
+                KeyCode::Char('n') => app.detail_find_jump(1),
+                KeyCode::Char('N') => app.detail_find_jump(-1),
+                KeyCode::Char('?') => app.open_help(),
+                KeyCode::Char('v') => app.toggle_visual(),
+                // Enter yanks an active selection, else follows the link on the line.
+                KeyCode::Enter => {
+                    if app.detail_anchor.is_some() {
+                        app.yank_selection();
+                    } else {
+                        app.follow_link();
+                    }
+                }
+                // Mutating ops mirrored from the list pane (all act on selected()).
+                KeyCode::Char('S') => app.open_state_picker(),
+                KeyCode::Char('P') => app.open_priority_picker(),
+                KeyCode::Char('T') => app.open_type_picker(),
+                KeyCode::Char('L') => app.open_labels(),
+                KeyCode::Char('X') => app.open_slaughter_confirm(),
+                KeyCode::Char('E') => app.open_edit(),
+                KeyCode::Char('D') => app.open_dep_picker(),
+                KeyCode::Char('R') => app.open_reparent_picker(),
+                KeyCode::Char('c') => app.open_create(false),
+                KeyCode::Char('C') => app.open_create(true),
+                KeyCode::Char('f') => app.open_drawer(),
+                KeyCode::Char('*') => app.toggle_star(),
+                // y yanks an active selection, else copies the task id.
+                KeyCode::Char('y') => {
+                    if app.detail_anchor.is_some() {
+                        app.yank_selection();
+                    } else {
+                        app.copy_selected_id();
+                    }
+                }
+                KeyCode::Char('M') => app.open_comment(),
+                // Move between tasks without leaving the detail pane.
+                KeyCode::Char('J') => app.detail_next_task(1),
+                KeyCode::Char('K') => app.detail_next_task(-1),
+                // The line cursor (j/k/d/u/g/G); it auto-scrolls to stay in view.
+                KeyCode::Char('j') | KeyCode::Down => app.move_detail_line(1),
+                KeyCode::Char('k') | KeyCode::Up => app.move_detail_line(-1),
+                KeyCode::Char('d') => app.move_detail_line(half),
+                KeyCode::Char('u') => app.move_detail_line(-half),
+                KeyCode::Char('g') => app.detail_line_to(false),
+                KeyCode::Char('G') => app.detail_line_to(true),
+                _ => {}
             }
-            KeyCode::Char('d') => app.detail_scroll = app.detail_scroll.saturating_add(half as u16),
-            KeyCode::Char('u') => app.detail_scroll = app.detail_scroll.saturating_sub(half as u16),
-            KeyCode::Char('g') => app.detail_scroll = 0,
-            KeyCode::Char('G') => app.detail_scroll_bottom(),
-            _ => {}
-        },
+        }
     }
 }
 
@@ -2405,6 +2522,8 @@ fn help_content() -> Vec<Line<'static>> {
         entry("Enter", "Follow link"),
         entry("i / o", "Nav forward / back"),
         entry("J / K", "Next / prev task (stay in detail)"),
+        entry("v , Shift-↑↓", "Visual select lines"),
+        entry("y / Enter", "Copy selection / follow link"),
         entry("/ , n / N", "Find, next / prev match"),
         blank(),
         section("Edit"),
@@ -3116,11 +3235,13 @@ fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
     };
     let lines = detail::build(t, &app.all);
     let jumps = detail::jumplist(&lines);
+    // The "current" link is whichever link sits on the line cursor.
     let cur = if focused {
-        jumps.get(app.detail_link)
+        jumps.iter().find(|j| j.line == app.detail_line)
     } else {
         None
     };
+    let sel = if focused { app.selection_range() } else { None };
     let matches = if focused {
         app.detail_find_matches()
     } else {
@@ -3136,7 +3257,14 @@ fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
                 .filter(|(_, (ln, _, _))| *ln == i)
                 .map(|(mi, (_, col, len))| (*col, *len, mi == app.detail_match))
                 .collect();
-            render_dline(dl, cur, i, &lm)
+            // Subtle background for the line cursor and any visual selection.
+            let in_sel = sel.is_some_and(|(lo, hi)| i >= lo && i <= hi);
+            let line_bg = if focused && (i == app.detail_line || in_sel) {
+                Some(Color::Indexed(237))
+            } else {
+                None
+            };
+            render_dline(dl, cur, i, &lm, line_bg)
         })
         .collect();
     // No wrap: link/match highlight columns must stay valid.
@@ -3151,10 +3279,15 @@ fn render_dline<'a>(
     cur: Option<&detail::Jump>,
     line_idx: usize,
     matches: &[(usize, usize, bool)],
+    line_bg: Option<Color>,
 ) -> Line<'a> {
     let chars: Vec<char> = dl.text.chars().collect();
     let n = chars.len();
     if n == 0 {
+        // Still paint the cursor/selection background across an empty line.
+        if let Some(bg) = line_bg {
+            return Line::from(Span::styled(" ", Style::new().bg(bg)));
+        }
         return Line::from(String::new());
     }
     // Base per-char style: dim label prefix on plain fields; section headers cyan.
@@ -3165,18 +3298,22 @@ fn render_dline<'a>(
     };
     let mut styles: Vec<Style> = (0..n)
         .map(|i| {
-            if i < label_end {
+            let base = if i < label_end {
                 Style::new().fg(Color::DarkGray)
             } else if dl.kind == detail::Kind::Section {
                 Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
             } else {
                 Style::new()
+            };
+            match line_bg {
+                Some(bg) => base.bg(bg),
+                None => base,
             }
         })
         .collect();
     for (col, len, _) in &dl.links {
         let is_current = cur.is_some_and(|j| j.line == line_idx && j.col == *col);
-        let st = if is_current {
+        let mut st = if is_current {
             // Python C_LINK_SEL: blue on the subtle 237 background, emphasised.
             Style::new()
                 .fg(Color::Blue)
@@ -3187,6 +3324,12 @@ fn render_dline<'a>(
                 .fg(Color::Blue)
                 .add_modifier(Modifier::UNDERLINED)
         };
+        // Preserve the line's cursor/selection background on non-current links.
+        if !is_current {
+            if let Some(bg) = line_bg {
+                st = st.bg(bg);
+            }
+        }
         for s in styles.iter_mut().take((col + len).min(n)).skip(*col) {
             *s = st;
         }
@@ -3215,6 +3358,30 @@ fn render_dline<'a>(
         spans.push(Span::styled(chars[start..i].iter().collect::<String>(), st));
     }
     Line::from(spans)
+}
+
+/// Strip the common leading-space prefix across non-empty lines (Python's
+/// `dedent_block`), so a copied detail block isn't indented by the pane layout.
+fn dedent(lines: &[String]) -> Vec<String> {
+    let strip = lines
+        .iter()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.len() - s.trim_start_matches(' ').len())
+        .min()
+        .unwrap_or(0);
+    if strip == 0 {
+        return lines.to_vec();
+    }
+    lines
+        .iter()
+        .map(|s| {
+            if s.len() >= strip {
+                s[strip..].to_string()
+            } else {
+                s.clone()
+            }
+        })
+        .collect()
 }
 
 /// (line, col, len) of every case-insensitive occurrence of `q` in the lines.
@@ -3762,7 +3929,8 @@ mod tests {
         assert_eq!(app.focus, Focus::Detail);
         // Jumplist order for a0: child a1, child a2, body a1, body a2.
         assert!(app.detail_jumps().len() >= 2);
-        enter_key(&mut app); // follow link 0 -> a1
+        tab_key(&mut app); // line cursor -> first link line (a1)
+        enter_key(&mut app); // follow it -> a1
         // We stay in the detail pane, now showing the followed task (yaksrs-3f19).
         assert_eq!(app.focus, Focus::Detail);
         assert_eq!(app.selected_id().as_deref(), Some("a1"));
@@ -3777,7 +3945,8 @@ mod tests {
         app.collapsed.insert("a0".to_string());
         assert!(app.rows().iter().all(|r| r.task.id != "a1"), "a1 hidden");
         enter_key(&mut app); // focus detail on a0
-        enter_key(&mut app); // follow link 0 -> a1
+        tab_key(&mut app); // -> first link line (a1)
+        enter_key(&mut app); // follow it -> a1
         assert_eq!(app.focus, Focus::Detail);
         assert_eq!(app.selected_id().as_deref(), Some("a1"));
         assert!(!app.collapsed.contains("a0"), "ancestor expanded");
@@ -3788,7 +3957,8 @@ mod tests {
         // o/i retrace the link-follow chain (yaksrs-5d63).
         let mut app = linked();
         enter_key(&mut app); // detail on a0
-        enter_key(&mut app); // follow link 0 -> a1
+        tab_key(&mut app); // -> first link line (a1)
+        enter_key(&mut app); // follow it -> a1
         assert_eq!(app.selected_id().as_deref(), Some("a1"));
         handle_key(&mut app, key('o')); // back -> a0
         assert_eq!(app.selected_id().as_deref(), Some("a0"));
@@ -3809,17 +3979,40 @@ mod tests {
     }
 
     #[test]
-    fn detail_tab_cycles_links() {
+    fn detail_tab_cycles_link_lines() {
+        // Tab snaps the line cursor onto successive link lines; Shift-Tab back.
         let mut app = linked();
         enter_key(&mut app);
-        assert_eq!(app.detail_link, 0);
+        assert_eq!(app.detail_line, 0);
         tab_key(&mut app);
-        assert_eq!(app.detail_link, 1);
+        let first = app.detail_line;
+        assert!(first > 0, "moved onto a link line");
+        tab_key(&mut app);
+        assert!(app.detail_line > first, "advanced to the next link line");
         handle_key(
             &mut app,
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
         );
-        assert_eq!(app.detail_link, 0);
+        assert_eq!(app.detail_line, first, "back to the first link line");
+    }
+
+    #[test]
+    fn detail_visual_selection_and_esc_clears() {
+        let mut app = linked();
+        enter_key(&mut app);
+        assert_eq!(app.detail_anchor, None);
+        handle_key(&mut app, key('v')); // anchor at the current line (0)
+        assert_eq!(app.detail_anchor, Some(0));
+        handle_key(&mut app, key('j')); // cursor -> 1
+        handle_key(&mut app, key('j')); // cursor -> 2
+        assert_eq!(app.selection_range(), Some((0, 2)));
+        esc_key(&mut app); // Esc peels back the selection first
+        assert_eq!(app.detail_anchor, None);
+        assert_eq!(
+            app.focus,
+            Focus::Detail,
+            "still in detail after clearing sel"
+        );
     }
 
     #[test]
