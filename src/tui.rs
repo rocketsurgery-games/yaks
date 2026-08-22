@@ -113,6 +113,7 @@ struct Editor {
 
 enum EditAction {
     Labels(String),
+    Comment(String),
     SaveView,
     RenameView { index: usize },
 }
@@ -1335,6 +1336,19 @@ impl App {
         self.overlay = Overlay::Help(0);
     }
 
+    /// M — append a timestamped comment/note to the selected task (multi-line).
+    fn open_comment(&mut self) {
+        if let Some(id) = self.selected_id() {
+            self.overlay = Overlay::Edit(Editor::new(
+                self.editor_vim,
+                false,
+                format!("Comment on {id} — Ctrl-S save · Ctrl-C cancel"),
+                "",
+                EditAction::Comment(id),
+            ));
+        }
+    }
+
     fn handle_help_key(&mut self, k: KeyEvent) {
         // Any of Esc/q/? dismisses the reference.
         if matches!(
@@ -1884,6 +1898,20 @@ impl App {
                     format!("{id} labels: {shown}"),
                 );
             }
+            EditAction::Comment(id) => {
+                if text.trim().is_empty() {
+                    self.notification = Some("comment cancelled".into());
+                    return;
+                }
+                self.apply_edit(
+                    &id,
+                    TaskEdit {
+                        note: Some(text),
+                        ..Default::default()
+                    },
+                    format!("comment added to {id}"),
+                );
+            }
             EditAction::SaveView => self.save_current_view(text),
             EditAction::RenameView { index } => {
                 let name = text.trim().to_string();
@@ -2170,6 +2198,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('f') => app.open_drawer(),
             KeyCode::Char('*') => app.toggle_star(),
             KeyCode::Char('y') => app.copy_selected_id(),
+            KeyCode::Char('M') => app.open_comment(),
             KeyCode::Char('v') => app.open_view_picker(),
             KeyCode::Char('V') => app.open_save_view(),
             KeyCode::Char('?') => app.open_help(),
@@ -2219,6 +2248,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('J') => app.detail_next_task(1),
             KeyCode::Char('K') => app.detail_next_task(-1),
             KeyCode::Char('y') => app.copy_selected_id(),
+            KeyCode::Char('M') => app.open_comment(),
             KeyCode::Char('j') | KeyCode::Down => {
                 app.detail_scroll = app.detail_scroll.saturating_add(1)
             }
@@ -2382,6 +2412,7 @@ fn help_content() -> Vec<Line<'static>> {
         entry("E", "Edit description"),
         entry("P / T / L / S", "Priority / type / labels / state"),
         entry("D / R", "Add dependency / reparent"),
+        entry("M", "Add a comment (note)"),
         entry("X", "Slaughter (delete, confirm)"),
         blank(),
         section("Search & filter"),
@@ -4282,6 +4313,19 @@ mod tests {
             assert!(matches!(app.overlay, Overlay::None));
             assert_eq!(app.task("t0").unwrap().body, "hello");
             assert_eq!(app.task("t0").unwrap().title, "solo"); // untouched
+        }
+
+        #[test]
+        fn comment_appends_timestamped_note() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "M"); // open the multi-line comment editor
+            press(&mut app, "a helpful note");
+            ctrl_s(&mut app);
+            assert!(matches!(app.overlay, Overlay::None));
+            let body = &app.task("t0").unwrap().body;
+            assert!(body.contains("a helpful note"), "note text present");
+            assert!(body.contains('\u{25b8}'), "timestamp sigil present");
         }
 
         #[test]
