@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::model::Task;
+use crate::model::{Status, Task};
 
 /// Where a link points.
 #[derive(Clone, PartialEq, Debug)]
@@ -89,9 +89,49 @@ fn scan_body_links(line: &str, known: &HashSet<&str>) -> Vec<(usize, usize, Targ
 
 fn field(label: &str, value: &str) -> DLine {
     DLine {
-        text: format!("{label:<9}{value}"),
+        text: format!("{label:<13}{value}"),
         kind: Kind::Field,
         links: vec![],
+    }
+}
+
+fn section(text: &str) -> DLine {
+    DLine {
+        text: text.into(),
+        kind: Kind::Section,
+        links: vec![],
+    }
+}
+
+fn empty() -> DLine {
+    DLine {
+        text: String::new(),
+        kind: Kind::Empty,
+        links: vec![],
+    }
+}
+
+fn status_word(s: Status) -> &'static str {
+    match s {
+        Status::Hairy => "hairy",
+        Status::Shaving => "shaving",
+        Status::Shorn => "shorn",
+        Status::Dead => "dead",
+    }
+}
+
+fn opt_date(o: &Option<String>) -> String {
+    match o {
+        Some(s) => humanize_date(s),
+        None => "-".to_string(),
+    }
+}
+
+/// "2025-12-31T19:00:00Z" -> "Dec 31, 2025 19:00" (falls back to the raw string).
+fn humanize_date(iso: &str) -> String {
+    match chrono::DateTime::parse_from_rfc3339(iso) {
+        Ok(dt) => dt.format("%b %-d, %Y %H:%M").to_string(),
+        Err(_) => iso.to_string(),
     }
 }
 
@@ -116,36 +156,26 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
     let by_id: HashMap<&str, &Task> = all.iter().map(|t| (t.id.as_str(), t)).collect();
     let known: HashSet<&str> = by_id.keys().copied().collect();
 
+    let labels = if task.labels.is_empty() {
+        "-".to_string()
+    } else {
+        task.labels.join(", ")
+    };
     let mut out = vec![
-        field("id", &task.id),
-        field("title", &task.title),
-        field("type", &task.kind),
-        field("priority", &format!("p{}", task.priority)),
+        section(&format!("Task: {}", task.id)),
+        empty(),
+        field("Title:", &task.title),
+        field("Status:", status_word(task.status)),
+        field("Type:", &task.kind),
+        field("Priority:", &format!("p{}", task.priority)),
+        field("Created:", &opt_date(&task.created)),
+        field("Updated:", &opt_date(&task.updated)),
+        field("Labels:", &labels),
     ];
 
-    if let Some(p) = &task.parent {
-        let (glyph, title, exists) = match by_id.get(p.as_str()) {
-            Some(t) => (t.status.glyph(), t.title.as_str(), true),
-            None => (' ', "(missing)", false),
-        };
-        out.push(ref_line(
-            format!("{:<9}", "parent"),
-            glyph,
-            p,
-            title,
-            exists,
-        ));
-    }
-    if !task.labels.is_empty() {
-        out.push(field("labels", &task.labels.join(", ")));
-    }
-
     if !task.depends_on.is_empty() {
-        out.push(DLine {
-            text: "depends on".into(),
-            kind: Kind::Section,
-            links: vec![],
-        });
+        out.push(empty());
+        out.push(section("Depends on:"));
         for d in &task.depends_on {
             let (glyph, title, exists) = match by_id.get(d.as_str()) {
                 Some(t) => (t.status.glyph(), t.title.clone(), true),
@@ -155,17 +185,44 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
         }
     }
 
+    // Blocks: reverse dependencies -- tasks that depend on this one.
+    let mut blocks: Vec<&Task> = all
+        .iter()
+        .filter(|t| t.depends_on.iter().any(|d| d.as_str() == task.id.as_str()))
+        .collect();
+    blocks.sort_by(|a, b| a.id.cmp(&b.id));
+    if !blocks.is_empty() {
+        out.push(empty());
+        out.push(section("Blocks:"));
+        for b in blocks {
+            out.push(ref_line(
+                "  ".into(),
+                b.status.glyph(),
+                &b.id,
+                &b.title,
+                true,
+            ));
+        }
+    }
+
+    if let Some(p) = &task.parent {
+        let (glyph, title, exists) = match by_id.get(p.as_str()) {
+            Some(t) => (t.status.glyph(), t.title.as_str(), true),
+            None => (' ', "(missing)", false),
+        };
+        out.push(empty());
+        out.push(section("Parent:"));
+        out.push(ref_line("  ".into(), glyph, p, title, exists));
+    }
+
     let mut kids: Vec<&Task> = all
         .iter()
         .filter(|c| c.parent.as_deref() == Some(task.id.as_str()))
         .collect();
     kids.sort_by(|a, b| a.id.cmp(&b.id));
     if !kids.is_empty() {
-        out.push(DLine {
-            text: "children".into(),
-            kind: Kind::Section,
-            links: vec![],
-        });
+        out.push(empty());
+        out.push(section("Children:"));
         for c in kids {
             out.push(ref_line(
                 "  ".into(),
@@ -178,13 +235,14 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
     }
 
     if let Some(s) = &task.source {
-        let head = format!("{:<9}", "source");
+        let head = format!("{:<13}", "Source:");
         let col = head.chars().count();
         let links = if is_url(s) {
             vec![(col, s.chars().count(), Target::Url(s.clone()))]
         } else {
             vec![]
         };
+        out.push(empty());
         out.push(DLine {
             text: format!("{head}{s}"),
             kind: Kind::Field,
@@ -210,6 +268,57 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod parity_tests {
+    use super::*;
+
+    fn t(id: &str, parent: Option<&str>, deps: &[&str]) -> Task {
+        Task {
+            id: id.into(),
+            title: format!("title {id}"),
+            kind: "task".into(),
+            priority: 3,
+            status: Status::Hairy,
+            created: Some("2025-12-31T19:00:00Z".into()),
+            updated: None,
+            parent: parent.map(String::from),
+            labels: vec![],
+            depends_on: deps.iter().map(|s| s.to_string()).collect(),
+            source: None,
+            body: String::new(),
+        }
+    }
+
+    #[test]
+    fn header_fields_and_reverse_deps() {
+        let all = vec![
+            t("yak-0001", None, &[]),
+            t("yak-0002", None, &["yak-0001"]), // 0002 depends on 0001
+        ];
+        let lines = build(&all[0], &all);
+        let text: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(text[0], "Task: yak-0001");
+        assert!(text.iter().any(|l| l.starts_with("Status:")));
+        assert!(
+            text.iter()
+                .any(|l| l.starts_with("Created:") && l.contains("Dec 31, 2025 19:00"))
+        );
+        assert!(text.iter().any(|l| *l == "Blocks:"));
+        let jumps = jumplist(&lines);
+        assert!(
+            jumps
+                .iter()
+                .any(|j| j.target == Target::Task("yak-0002".into()))
+        );
+    }
+
+    #[test]
+    fn humanize_date_formats_iso() {
+        assert_eq!(humanize_date("2025-12-31T19:00:00Z"), "Dec 31, 2025 19:00");
+        assert_eq!(humanize_date("not-a-date"), "not-a-date");
+    }
 }
 
 /// Flatten every link across the lines, in reading order.

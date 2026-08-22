@@ -84,7 +84,13 @@ relocated to their Python homes — tracked with those overlays.)
 - **Rust:** cursor = cyan/reverse highlight; no blocked marker.
 - Action: add the blocked marker; verify selection styling parity.
 
-## 7. Detail pane — [match]
+## 7. Detail pane — [done] (yaksrs-425c)
+
+`Task: {id}` header; blank; capitalized 13-wide `Title:/Status:/Type:/Priority:/
+Created:/Updated:/Labels:` (humanized dates via `humanize_date`); then conditional
+`Depends on:` / `Blocks:` (reverse deps) / `Parent:` / `Children:` sections.
+Known nit: deps/children still use letter glyphs (H/N/S) vs the list's emoji
+(yaksrs- follow-up).
 
 - **Python:** `Task: {id}` header; blank; `Title:` `Status:` `Type:` `Priority:`
   `Created:` `Updated:` `Labels:` (labels ~13-wide, capitalized); blank; then

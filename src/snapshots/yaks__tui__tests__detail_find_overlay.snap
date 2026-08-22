@@ -4,7 +4,7 @@ expression: "draw(&app, 72, 16)"
 ---
  🦬  Hairy (3)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (3)   ⭐  Starr
 
- a0   p2 task     🦬  Ro │ children
+ a0   p2 task     🦬  Ro │ Children:
    a1 p3 task     🦬  Ch │   H a1  Child A1
    a2 p3 task     🦬  Ch │   H a2  Child A2
                         │
