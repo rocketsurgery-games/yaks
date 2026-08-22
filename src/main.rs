@@ -188,9 +188,13 @@ enum Command {
         /// Terminal size for headless mode, e.g. "100x30" (default 80x24).
         #[arg(long)]
         size: Option<String>,
-        /// In headless mode, also emit an aligned style grid + legend.
+        /// In headless mode, also emit style information after the char grid.
         #[arg(long)]
         style: bool,
+        /// Headless style encoding: parallel | interleaved | spans. Implies
+        /// --style; defaults to parallel when only --style is given.
+        #[arg(long)]
+        style_encoding: Option<String>,
     },
 }
 
@@ -453,16 +457,27 @@ fn main() -> Result<()> {
             headless,
             size,
             style,
+            style_encoding,
         } => {
             let app = tui::App::with_herd(herd)?;
             if headless {
                 let (w, h) = parse_size(size.as_deref());
+                let encoding = match style_encoding.as_deref() {
+                    Some(name) => match tui::StyleEncoding::parse(name) {
+                        Some(e) => Some(e),
+                        None => anyhow::bail!(
+                            "unknown --style-encoding '{name}' (expected parallel|interleaved|spans)"
+                        ),
+                    },
+                    None if style => Some(tui::StyleEncoding::Parallel),
+                    None => None,
+                };
                 tui::run_headless(
                     app,
                     tui::HeadlessOpts {
                         width: w,
                         height: h,
-                        style,
+                        style: encoding,
                     },
                 )?;
             } else {

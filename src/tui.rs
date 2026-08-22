@@ -12,7 +12,7 @@ mod tree;
 mod view;
 mod views_store;
 
-pub use headless::{HeadlessOpts, run_headless};
+pub use headless::{HeadlessOpts, StyleEncoding, run_headless};
 
 use std::cell::RefCell;
 use std::collections::HashSet;

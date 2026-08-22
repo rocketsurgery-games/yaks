@@ -30,10 +30,36 @@ use ratatui::style::{Color, Modifier};
 
 use super::{App, handle_key, render};
 
+/// Which style representation the headless snapshot emits for each frame.
+/// `Parallel` keeps the char grid then adds an aligned style-id grid; the others
+/// were validated as cheaper/robust alternatives (see docs/tui-style-eval.md).
+/// `Spans` is the default recommendation for LLM consumers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StyleEncoding {
+    /// Plain grid, then an aligned grid of style-ids + legend.
+    Parallel,
+    /// Each text row immediately followed by its style-id row + legend.
+    Interleaved,
+    /// Each row inline as `id[run text]`; default-styled cells left literal.
+    Spans,
+}
+
+impl StyleEncoding {
+    pub fn parse(s: &str) -> Option<StyleEncoding> {
+        match s {
+            "parallel" => Some(StyleEncoding::Parallel),
+            "interleaved" => Some(StyleEncoding::Interleaved),
+            "spans" => Some(StyleEncoding::Spans),
+            _ => None,
+        }
+    }
+}
+
 pub struct HeadlessOpts {
     pub width: u16,
     pub height: u16,
-    pub style: bool,
+    /// `None` emits just the char grid; `Some(enc)` appends style information.
+    pub style: Option<StyleEncoding>,
 }
 
 pub fn run_headless(app: App, opts: HeadlessOpts) -> Result<()> {
@@ -61,7 +87,7 @@ struct Driver {
     app: App,
     w: u16,
     h: u16,
-    style: bool,
+    style: Option<StyleEncoding>,
     frame: usize,
 }
 
@@ -123,16 +149,8 @@ impl Driver {
             self.h,
             self.app.state_header()
         )?;
-        for row in plain_grid(&buf) {
-            writeln!(out, "{row}")?;
-        }
-        if self.style {
-            let (rows, legend) = style_layer(&buf);
-            writeln!(out, "--- styles ---")?;
-            for row in rows {
-                writeln!(out, "{row}")?;
-            }
-            writeln!(out, "legend: {}", legend.join("  "))?;
+        for line in encode_body(&buf, self.style) {
+            writeln!(out, "{line}")?;
         }
         writeln!(out, "=== end ===")?;
         out.flush()?;
@@ -165,6 +183,81 @@ fn plain_grid(buf: &Buffer) -> Vec<String> {
             (0..w).map(|x| buf[(x, y)].symbol()).collect()
         })
         .collect()
+}
+
+/// Assemble the snapshot body (between the frame header and `=== end ===`) for
+/// the chosen style encoding. `None` emits just the plain grid; the others add
+/// or interleave style information. See `StyleEncoding` and docs/tui-style-eval.md.
+fn encode_body(buf: &Buffer, enc: Option<StyleEncoding>) -> Vec<String> {
+    let plain = plain_grid(buf);
+    match enc {
+        None => plain,
+        Some(StyleEncoding::Parallel) => {
+            let (rows, legend) = style_layer(buf);
+            let mut out = plain;
+            out.push("--- styles ---".into());
+            out.extend(rows);
+            out.push(format!("legend: {}", legend.join("  ")));
+            out
+        }
+        Some(StyleEncoding::Interleaved) => {
+            let (rows, legend) = style_layer(buf);
+            let mut out = Vec::with_capacity(plain.len() * 2 + 1);
+            for (text, ids) in plain.iter().zip(rows.iter()) {
+                out.push(text.clone());
+                out.push(ids.clone());
+            }
+            out.push(format!("legend: {}", legend.join("  ")));
+            out
+        }
+        Some(StyleEncoding::Spans) => {
+            let (rows, legend) = spans_layer(buf);
+            let mut out = rows;
+            out.push(format!("legend: {}", legend.join("  ")));
+            out
+        }
+    }
+}
+
+/// Inline spans: default-styled cells are emitted literally (whitespace
+/// preserved -- load-bearing for column arithmetic); each run of one non-default
+/// style becomes `id[run text]`. Returns (rows, legend).
+fn spans_layer(buf: &Buffer) -> (Vec<String>, Vec<String>) {
+    let mut keys: Vec<StyleKey> = Vec::new();
+    let mut rows = Vec::new();
+    for y in 0..buf.area.height {
+        let w = row_width(buf, y);
+        let mut line = String::new();
+        let mut x = 0u16;
+        while x < w {
+            let key = StyleKey::of(&buf[(x, y)]);
+            if key.is_default() {
+                line.push_str(buf[(x, y)].symbol());
+                x += 1;
+                continue;
+            }
+            let start = x;
+            while x < w && StyleKey::of(&buf[(x, y)]) == key {
+                x += 1;
+            }
+            let id = match keys.iter().position(|k| *k == key) {
+                Some(i) => i,
+                None => {
+                    keys.push(key);
+                    keys.len() - 1
+                }
+            };
+            let text: String = (start..x).map(|c| buf[(c, y)].symbol()).collect();
+            line.push_str(&format!("{}[{text}]", base36(id)));
+        }
+        rows.push(line.trim_end().to_string());
+    }
+    let legend = keys
+        .iter()
+        .enumerate()
+        .map(|(i, k)| format!("{}={}", base36(i), k.describe()))
+        .collect();
+    (rows, legend)
 }
 
 /// (aligned style-id rows, legend entries). Style ids are base36, assigned in
@@ -211,6 +304,10 @@ impl StyleKey {
             bg: s.bg.unwrap_or(Color::Reset),
             mods: s.add_modifier,
         }
+    }
+
+    fn is_default(&self) -> bool {
+        self.fg == Color::Reset && self.bg == Color::Reset && self.mods.is_empty()
     }
 
     fn describe(&self) -> String {
@@ -302,7 +399,7 @@ fn parse_key(spec: &str) -> KeyEvent {
 mod tests {
     use super::*;
 
-    fn drive(script: &[&str], style: bool) -> String {
+    fn drive(script: &[&str], style: Option<StyleEncoding>) -> String {
         // A herd-less App renders the default sample-free tree (empty), which is
         // still enough to exercise the protocol + serializer deterministically.
         let app = App::new(vec![
@@ -343,7 +440,7 @@ mod tests {
 
     #[test]
     fn snapshot_has_header_and_grid() {
-        let out = drive(&["key j"], false);
+        let out = drive(&["key j"], None);
         // Two frames (initial + after j); each framed with a state header.
         assert_eq!(out.matches("=== frame ").count(), 2);
         assert!(out.contains("focus=list"));
@@ -354,10 +451,38 @@ mod tests {
 
     #[test]
     fn style_layer_emitted_and_aligned() {
-        let out = drive(&[], true);
+        let out = drive(&[], Some(StyleEncoding::Parallel));
         assert!(out.contains("--- styles ---"));
         assert!(out.contains("legend:"));
         assert!(out.contains("default"));
+    }
+
+    #[test]
+    fn spans_encoding_has_legend_and_no_style_grid() {
+        let out = drive(&[], Some(StyleEncoding::Spans));
+        assert!(out.contains("legend:"));
+        assert!(!out.contains("--- styles ---"));
+    }
+
+    #[test]
+    fn interleaved_encoding_has_legend_and_no_style_grid() {
+        let out = drive(&[], Some(StyleEncoding::Interleaved));
+        assert!(out.contains("legend:"));
+        assert!(!out.contains("--- styles ---"));
+    }
+
+    #[test]
+    fn parse_encoding_names() {
+        assert_eq!(StyleEncoding::parse("spans"), Some(StyleEncoding::Spans));
+        assert_eq!(
+            StyleEncoding::parse("interleaved"),
+            Some(StyleEncoding::Interleaved)
+        );
+        assert_eq!(
+            StyleEncoding::parse("parallel"),
+            Some(StyleEncoding::Parallel)
+        );
+        assert!(StyleEncoding::parse("nope").is_none());
     }
 
     #[test]
@@ -375,7 +500,7 @@ mod tests {
             app: App::new(vec![]),
             w: 40,
             h: 8,
-            style: false,
+            style: None,
             frame: 0,
         };
         let mut out: Vec<u8> = Vec::new();
