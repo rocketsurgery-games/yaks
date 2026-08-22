@@ -8,6 +8,8 @@
 mod cache;
 mod detail;
 mod tree;
+mod view;
+mod views_store;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -104,6 +106,7 @@ enum EditAction {
     Labels(String),
     Body(String),
     CreateTitle { parent: Option<String> },
+    SaveView,
 }
 
 fn make_handler(vim: bool) -> EditorEventHandler {
@@ -306,19 +309,37 @@ impl Drawer {
     }
 }
 
-/// FilterSpec isn't Clone; rebuild it field-by-field (used for the drawer's
-/// revert snapshot).
-fn clone_spec(f: &FilterSpec) -> FilterSpec {
-    FilterSpec {
-        statuses: f.statuses.clone(),
-        types: f.types.clone(),
-        priorities: f.priorities.clone(),
-        labels: f.labels.clone(),
-        search: f.search.clone(),
-        ready_only: f.ready_only,
-        tangled_only: f.tangled_only,
-        parent: f.parent.clone(),
+/// Sort key for a flat view field (ISO timestamps sort lexically; priority is
+/// zero-padded so it orders numerically as a string).
+fn sort_key(t: &Task, f: view::SortField) -> String {
+    match f {
+        view::SortField::Priority => format!("{:03}", t.priority),
+        view::SortField::Title => t.title.to_lowercase(),
+        view::SortField::Updated => t.updated.clone().unwrap_or_default(),
+        view::SortField::Created => t.created.clone().unwrap_or_default(),
+        view::SortField::Id => t.id.clone(),
     }
+}
+
+fn same_set<T: PartialEq>(a: &[T], b: &[T]) -> bool {
+    a.len() == b.len() && a.iter().all(|x| b.contains(x)) && b.iter().all(|x| a.contains(x))
+}
+
+/// Order-insensitive FilterSpec equality (for the view-modified marker).
+fn spec_eq(a: &FilterSpec, b: &FilterSpec) -> bool {
+    same_set(&a.statuses, &b.statuses)
+        && same_set(&a.types, &b.types)
+        && same_set(&a.priorities, &b.priorities)
+        && same_set(&a.labels, &b.labels)
+        && a.search == b.search
+        && a.ready_only == b.ready_only
+        && a.tangled_only == b.tangled_only
+        && a.parent == b.parent
+}
+
+/// Snapshot a spec (thin alias for `.clone()`; kept for call-site clarity).
+fn clone_spec(f: &FilterSpec) -> FilterSpec {
+    f.clone()
 }
 
 impl SearchBox {
@@ -412,8 +433,12 @@ pub struct App {
     /// `None` in read-only snapshot tests; `Some` in live use (`with_herd`).
     herd: Option<Herd>,
     all: Vec<Task>,
-    tabs: Vec<Status>,
-    tab: usize,
+    /// Ordered views; pinned ones form the tab strip. Replaces fixed tabs.
+    views: Vec<view::View>,
+    /// Index into `views` of the active view.
+    view: usize,
+    /// Ordered starred ids backing the built-in Starred (working-set) view.
+    working_set: Vec<String>,
     cursor: usize,
     focus: Focus,
     detail_scroll: u16,
@@ -439,11 +464,14 @@ impl App {
     /// Read-only constructor: renders `all` with no herd behind it. Mutating
     /// keys become no-ops. Used by snapshot tests and any preview caller.
     pub fn new(all: Vec<Task>) -> Self {
+        let views = view::default_views();
+        let filter = clone_spec(&views[0].spec);
         App {
             herd: None,
             all,
-            tabs: vec![Status::Hairy, Status::Shaving, Status::Shorn],
-            tab: 0,
+            views,
+            view: 0,
+            working_set: Vec::new(),
             cursor: 0,
             focus: Focus::List,
             detail_scroll: 0,
@@ -451,7 +479,7 @@ impl App {
             detail_find: None,
             detail_match: 0,
             collapsed: HashSet::new(),
-            filter: FilterSpec::default(),
+            filter,
             page: 10,
             overlay: Overlay::None,
             notification: None,
@@ -466,9 +494,14 @@ impl App {
         let all = herd.list(FilterSpec::default(), false)?;
         let vim = herd.config().vim_mode;
         let collapsed = cache::load_collapsed(herd.root());
+        let views = views_store::load_views(herd.root());
+        let working_set = views_store::load_working_set(herd.root());
         let mut app = App::new(all);
         app.editor_vim = vim;
         app.collapsed = collapsed;
+        app.filter = clone_spec(&views[0].spec);
+        app.views = views;
+        app.working_set = working_set;
         app.herd = Some(herd);
         app.clamp_cursor();
         Ok(app)
@@ -496,17 +529,72 @@ impl App {
         };
     }
 
-    fn tab_status(&self) -> Status {
-        self.tabs[self.tab]
+    fn active_view(&self) -> &view::View {
+        &self.views[self.view]
     }
 
-    fn count(&self, s: Status) -> usize {
-        self.all.iter().filter(|t| t.status == s).count()
+    /// Count for a view: non-ghost tree rows of its own spec, or working-set
+    /// membership. Independent of the live filter (a stable per-view size).
+    fn view_count(&self, v: &view::View) -> usize {
+        if v.key == "working-set" {
+            return self
+                .working_set
+                .iter()
+                .filter(|id| self.task(id).is_some())
+                .count();
+        }
+        tree::build(&self.all, &v.spec)
+            .iter()
+            .filter(|r| !r.ghost)
+            .count()
     }
 
-    /// Visible rows for the current tab (tree built + collapse applied).
+    /// Indices of pinned views — exactly the tab strip, in order.
+    fn pinned_indices(&self) -> Vec<usize> {
+        (0..self.views.len())
+            .filter(|&i| self.views[i].pinned)
+            .collect()
+    }
+
+    /// Rows the starred working set resolves to, in star order (flat).
+    fn working_set_rows(&self) -> Vec<tree::Row<'_>> {
+        self.working_set
+            .iter()
+            .filter_map(|id| self.task(id))
+            .map(tree::Row::leaf)
+            .collect()
+    }
+
+    /// Flat, sorted rows for a sorted view (Recent / custom sorted).
+    fn flat_rows(&self) -> Vec<tree::Row<'_>> {
+        let v = self.active_view();
+        let resolved = filter::resolved_ids(&self.all);
+        let mut matched: Vec<&Task> = self
+            .all
+            .iter()
+            .filter(|t| self.filter.matches(t, &resolved))
+            .collect();
+        let sort_by = v.sort_by.unwrap_or(view::SortField::Updated);
+        matched.sort_by(|a, b| sort_key(a, sort_by).cmp(&sort_key(b, sort_by)));
+        if v.sort_dir == view::SortDir::Desc {
+            matched.reverse();
+        }
+        if let Some(lim) = v.limit {
+            matched.truncate(lim);
+        }
+        matched.into_iter().map(tree::Row::leaf).collect()
+    }
+
+    /// Visible rows for the active view (dispatch: working-set / flat / tree).
     fn rows(&self) -> Vec<tree::Row<'_>> {
-        let flat = tree::build(&self.all, self.tab_status(), &self.filter);
+        let v = self.active_view();
+        if v.key == "working-set" {
+            return self.working_set_rows();
+        }
+        if v.is_flat() {
+            return self.flat_rows();
+        }
+        let flat = tree::build(&self.all, &self.filter);
         tree::apply_collapse(flat, &self.collapsed)
     }
 
@@ -532,12 +620,84 @@ impl App {
         self.all.iter().find(|t| t.id == id)
     }
 
-    fn switch_tab(&mut self, delta: i32) {
-        let n = self.tabs.len() as i32;
-        self.tab = (((self.tab as i32 + delta) % n + n) % n) as usize;
+    /// Activate view `i`: load its saved spec into the live filter and reset.
+    fn set_view(&mut self, i: usize) {
+        self.view = i;
+        self.filter = clone_spec(&self.views[i].spec);
         self.cursor = 0;
         self.detail_scroll = 0;
         self.focus = Focus::List;
+        self.clamp_cursor();
+    }
+
+    /// Cycle through the pinned views (the visible tabs) only.
+    fn switch_tab(&mut self, delta: i32) {
+        let pinned = self.pinned_indices();
+        if pinned.is_empty() {
+            return;
+        }
+        let cur = pinned.iter().position(|&i| i == self.view).unwrap_or(0);
+        let n = pinned.len() as i32;
+        let next = pinned[(((cur as i32 + delta) % n + n) % n) as usize];
+        self.set_view(next);
+    }
+
+    /// True when the live filter has been edited away from the active view spec.
+    fn is_view_modified(&self) -> bool {
+        !spec_eq(&self.filter, &self.active_view().spec)
+    }
+
+    /// Esc: revert the live filter to the active view's saved spec.
+    fn revert_filter_to_view(&mut self) {
+        if self.is_view_modified() {
+            let i = self.view;
+            self.set_view(i);
+        }
+    }
+
+    fn toggle_star(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        let was = self.working_set.iter().any(|i| *i == id);
+        self.working_set = views_store::toggle_working_set(&self.working_set, &id);
+        if let Some(h) = &self.herd {
+            views_store::save_working_set(h.root(), &self.working_set);
+        }
+        if self.active_view().key == "working-set" {
+            self.clamp_cursor();
+        }
+        self.notification = Some(if was {
+            format!("unstarred {id}")
+        } else {
+            format!("starred {id}")
+        });
+    }
+
+    fn is_starred(&self, id: &str) -> bool {
+        self.working_set.iter().any(|i| i == id)
+    }
+
+    fn save_current_view(&mut self, name: String) {
+        if name.trim().is_empty() {
+            self.notification = Some("save view cancelled".into());
+            return;
+        }
+        let active = self.active_view();
+        let (sort_by, sort_dir, limit) = (active.sort_by, active.sort_dir, active.limit);
+        let seed = views_store::custom_key_seed(&name, &self.views);
+        let v = view::custom_view(
+            name.clone(),
+            clone_spec(&self.filter),
+            sort_by,
+            sort_dir,
+            limit,
+            &seed,
+        );
+        self.views.push(v);
+        if let Some(h) = &self.herd {
+            views_store::save_views(h.root(), &self.views);
+        }
+        self.set_view(self.views.len() - 1);
+        self.notification = Some(format!("saved view: {name}"));
     }
 
     fn move_cursor(&mut self, delta: i32) {
@@ -717,6 +877,16 @@ impl App {
         self.overlay = Overlay::Drawer(Drawer::from_filter(self.editor_vim, &self.filter));
     }
 
+    fn open_save_view(&mut self) {
+        self.overlay = Overlay::Edit(Editor::new(
+            self.editor_vim,
+            true,
+            "Save view as: ".into(),
+            "",
+            EditAction::SaveView,
+        ));
+    }
+
     fn drawer_live_preview(&mut self) {
         let spec = match &self.overlay {
             Overlay::Drawer(d) => Some(d.build_spec()),
@@ -809,12 +979,12 @@ impl App {
         }
     }
 
-    /// Select an existing task wherever it lives: switch to its status tab (if
-    /// one is shown) and place the cursor on it, then focus the list.
+    /// Select an existing task wherever it lives: switch to its status view (if
+    /// one is pinned) and place the cursor on it, then focus the list.
     fn select_task(&mut self, id: &str) {
         if let Some(st) = self.task(id).map(|t| t.status) {
-            if let Some(i) = self.tabs.iter().position(|&s| s == st) {
-                self.tab = i;
+            if let Some(i) = self.views.iter().position(|v| v.status == Some(st)) {
+                self.set_view(i);
             }
         }
         if let Some(pos) = self.rows().iter().position(|r| r.task.id == id) {
@@ -884,10 +1054,14 @@ impl App {
         }
     }
 
-    /// Jump to the Hairy tab (where new tasks land) and place the cursor on `id`.
+    /// Jump to the Hairy view (where new tasks land) and select `id`.
     fn select_id(&mut self, id: &str) {
-        if let Some(i) = self.tabs.iter().position(|&s| s == Status::Hairy) {
-            self.tab = i;
+        if let Some(i) = self
+            .views
+            .iter()
+            .position(|v| v.status == Some(Status::Hairy))
+        {
+            self.set_view(i);
         }
         if let Some(pos) = self.rows().iter().position(|r| r.task.id == id) {
             self.cursor = pos;
@@ -1108,6 +1282,7 @@ impl App {
                     format!("{id} description updated"),
                 );
             }
+            EditAction::SaveView => self.save_current_view(text),
             EditAction::CreateTitle { parent } => {
                 let title = text.trim().to_string();
                 if title.is_empty() {
@@ -1371,11 +1546,12 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('R') => app.open_reparent_picker(),
             KeyCode::Char('/') => app.open_search(),
             KeyCode::Char('f') => app.open_drawer(),
+            KeyCode::Char('*') => app.toggle_star(),
+            KeyCode::Char('V') => app.open_save_view(),
             KeyCode::Esc => {
-                if app.filter.content_active() {
-                    app.filter = FilterSpec::default();
-                    app.clamp_cursor();
-                    app.notification = Some("filter cleared".into());
+                if app.is_view_modified() {
+                    app.revert_filter_to_view();
+                    app.notification = Some("reverted to view".into());
                 }
             }
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
@@ -1641,15 +1817,6 @@ fn render_fuzzy_results(app: &App, fp: &FuzzyPick, frame: &mut Frame, area: Rect
     );
 }
 
-fn status_name(s: Status) -> &'static str {
-    match s {
-        Status::Hairy => "Hairy",
-        Status::Shaving => "Shaving",
-        Status::Shorn => "Shorn",
-        Status::Dead => "Dead",
-    }
-}
-
 fn status_word(s: Status) -> &'static str {
     match s {
         Status::Hairy => "hairy",
@@ -1660,13 +1827,22 @@ fn status_word(s: Status) -> &'static str {
 }
 
 fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
-    let titles: Vec<Line> = app
-        .tabs
+    let pinned = app.pinned_indices();
+    let titles: Vec<Line> = pinned
         .iter()
-        .map(|&s| Line::from(format!("{} {}", status_name(s), app.count(s))))
+        .map(|&i| {
+            let v = &app.views[i];
+            let marker = if i == app.view && app.is_view_modified() {
+                "*"
+            } else {
+                ""
+            };
+            Line::from(format!("{} {}{}", v.name, app.view_count(v), marker))
+        })
         .collect();
+    let sel = pinned.iter().position(|&i| i == app.view).unwrap_or(0);
     let tabs = Tabs::new(titles)
-        .select(app.tab)
+        .select(sel)
         .highlight_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .divider(Span::styled("·", Style::new().fg(Color::DarkGray)));
     frame.render_widget(tabs, area);
@@ -1675,7 +1851,10 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
 fn render_list(app: &App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::List;
     let rows = app.rows();
-    let items: Vec<ListItem> = rows.iter().map(|r| list_item(r)).collect();
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|r| list_item(r, app.is_starred(&r.task.id)))
+        .collect();
     let mut state = ListState::default();
     if !rows.is_empty() {
         state.select(Some(app.cursor.min(rows.len() - 1)));
@@ -1689,7 +1868,7 @@ fn render_list(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn list_item<'a>(r: &tree::Row<'a>) -> ListItem<'a> {
+fn list_item<'a>(r: &tree::Row<'a>, starred: bool) -> ListItem<'a> {
     let indent = "  ".repeat(r.depth as usize);
     let chevron = if r.has_children {
         if r.collapsed { "▸ " } else { "▾ " }
@@ -1719,8 +1898,11 @@ fn list_item<'a>(r: &tree::Row<'a>) -> ListItem<'a> {
             format!("p{} ", r.task.priority),
             Style::new().fg(Color::DarkGray),
         ),
-        Span::styled(r.task.title.clone(), base),
     ];
+    if starred {
+        spans.push(Span::styled("★ ", Style::new().fg(Color::Yellow)));
+    }
+    spans.push(Span::styled(r.task.title.clone(), base));
     if r.collapsed && r.hidden > 0 {
         spans.push(Span::styled(
             format!("  (+{})", r.hidden),
@@ -1915,8 +2097,8 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         ),
         _ => match &app.notification {
             Some(n) => (n.clone(), Style::new().fg(Color::Yellow)),
-            None if app.filter.content_active() => (
-                format!("filter: {}  (Esc clears)", filter_summary(&app.filter)),
+            None if app.is_view_modified() => (
+                format!("filter: {}  (Esc reverts)", filter_summary(&app.filter)),
                 Style::new().fg(Color::Yellow),
             ),
             None => (help_hint(app).to_string(), Style::new().fg(Color::DarkGray)),
@@ -1962,7 +2144,7 @@ fn filter_summary(f: &FilterSpec) -> String {
 fn help_hint(app: &App) -> &'static str {
     match app.focus {
         Focus::List => {
-            "j/k move · c new · E edit · S/P/T/L/X · D/R link · / find · Tab tab · q quit"
+            "j/k · c new · E edit · S/P/T/L/X · D/R · / find · f filter · * star · V save · Tab view · q"
         }
         Focus::Detail => "j/k scroll · h back · q quit",
     }
@@ -2326,6 +2508,83 @@ mod tests {
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
         );
         assert_eq!(app.detail_link, 0);
+    }
+
+    // -- view substrate (6b-i) --------------------------------------------
+
+    #[test]
+    fn starred_marker_and_tab_bar() {
+        let mut app = sample();
+        handle_key(&mut app, key('*')); // star a0
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn default_views_and_tab_cycling() {
+        let mut app = sample();
+        assert_eq!(app.views.len(), 5); // 3 status + Recent + Starred
+        assert_eq!(app.view, 0);
+        assert_eq!(app.filter.statuses, vec![Status::Hairy]);
+        tab_key(&mut app); // -> Shaving
+        assert_eq!(app.view, 1);
+        assert_eq!(app.filter.statuses, vec![Status::Shaving]);
+    }
+
+    #[test]
+    fn recent_view_is_flat_over_all_tasks() {
+        let mut app = sample();
+        // Recent is index 3 (after the 3 status views).
+        app.set_view(3);
+        assert_eq!(app.active_view().key, "recent");
+        assert!(app.active_view().is_flat());
+        let rows = app.rows();
+        assert_eq!(rows.len(), 4); // all sample tasks, flat
+        assert!(rows.iter().all(|r| r.depth == 0 && !r.ghost));
+    }
+
+    #[test]
+    fn star_toggles_and_starred_view_lists_it() {
+        let mut app = sample(); // cursor on a0
+        handle_key(&mut app, key('*'));
+        assert!(app.is_starred("a0"));
+        // Starred view (index 4) lists the starred task.
+        app.set_view(4);
+        assert_eq!(app.active_view().key, "working-set");
+        let ids: Vec<&str> = app.rows().iter().map(|r| r.task.id.as_str()).collect();
+        assert_eq!(ids, vec!["a0"]);
+        // Unstar removes it.
+        app.set_view(0);
+        handle_key(&mut app, key('*'));
+        assert!(!app.is_starred("a0"));
+    }
+
+    #[test]
+    fn save_view_creates_and_activates_custom_view() {
+        let mut app = sample();
+        handle_key(&mut app, key('/')); // inline search
+        typ(&mut app, "child");
+        enter_key(&mut app); // keep filter (search=child)
+        handle_key(&mut app, key('V')); // save view
+        typ(&mut app, "kids");
+        enter_key(&mut app); // commit name
+        assert_eq!(app.views.len(), 6);
+        assert_eq!(app.view, 5);
+        let v = app.active_view();
+        assert_eq!(v.name, "kids");
+        assert_eq!(v.spec.search.as_deref(), Some("child"));
+        assert!(!v.builtin && v.pinned);
+    }
+
+    #[test]
+    fn esc_reverts_modified_filter_to_view() {
+        let mut app = sample();
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "zzz");
+        enter_key(&mut app);
+        assert!(app.is_view_modified());
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.is_view_modified());
+        assert_eq!(app.filter.statuses, vec![Status::Hairy]); // back to Hairy view spec
     }
 
     #[test]

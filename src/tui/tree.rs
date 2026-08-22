@@ -25,6 +25,20 @@ pub struct Row<'a> {
     pub hidden: usize,
 }
 
+impl<'a> Row<'a> {
+    /// A depth-0, non-ghost, childless row (for flat / working-set views).
+    pub fn leaf(task: &'a Task) -> Row<'a> {
+        Row {
+            task,
+            depth: 0,
+            ghost: false,
+            has_children: false,
+            collapsed: false,
+            hidden: 0,
+        }
+    }
+}
+
 fn child_rank(s: Status) -> u8 {
     match s {
         Status::Shaving => 0,
@@ -51,7 +65,7 @@ fn cmp_child(a: &Task, b: &Task) -> Ordering {
 /// their family is dimmed context. With a content filter, matches anywhere in
 /// that family become the focus and non-matching ancestors are dimmed to root
 /// them; everything else is pruned. Mirrors Python `tree.build_tree`.
-pub fn build<'a>(all: &'a [Task], tab: Status, spec: &FilterSpec) -> Vec<Row<'a>> {
+pub fn build<'a>(all: &'a [Task], spec: &FilterSpec) -> Vec<Row<'a>> {
     let by_id: HashMap<&str, &Task> = all.iter().map(|t| (t.id.as_str(), t)).collect();
 
     let mut children_of: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -66,9 +80,10 @@ pub fn build<'a>(all: &'a [Task], tab: Status, spec: &FilterSpec) -> Vec<Row<'a>
         }
     }
 
-    // Effective status scope: the spec's statuses override the tab; else the tab.
+    // Effective status scope: the spec's statuses, else all non-dead statuses
+    // (a bare/custom view with no status axis spans the whole herd).
     let eff: Vec<Status> = if spec.statuses.is_empty() {
-        vec![tab]
+        vec![Status::Hairy, Status::Shaving, Status::Shorn]
     } else {
         spec.statuses.clone()
     };
@@ -137,8 +152,8 @@ pub fn build<'a>(all: &'a [Task], tab: Status, spec: &FilterSpec) -> Vec<Row<'a>
             None => true,
         })
         .collect();
-    if tab == Status::Shorn {
-        // Recency-first for the (unbounded) shorn tab.
+    if eff == [Status::Shorn] {
+        // Recency-first for the (unbounded) shorn view.
         roots.sort_by(|&a, &b| {
             by_id[b]
                 .updated
@@ -249,7 +264,11 @@ mod tests {
             t("a1", Status::Hairy, Some("a")),
             t("a2", Status::Hairy, Some("a")),
         ];
-        let flat = build(&all, Status::Hairy, &FilterSpec::default());
+        let spec = FilterSpec {
+            statuses: vec![Status::Hairy],
+            ..Default::default()
+        };
+        let flat = build(&all, &spec);
         assert_eq!(flat.len(), 3);
         let collapsed: HashSet<String> = ["a".to_string()].into_iter().collect();
         let vis = apply_collapse(flat, &collapsed);
@@ -272,10 +291,11 @@ mod tests {
         let all = vec![a, a1, a2, b];
 
         let spec = FilterSpec {
+            statuses: vec![Status::Hairy],
             search: Some("needle".into()),
             ..Default::default()
         };
-        let flat = build(&all, Status::Hairy, &spec);
+        let flat = build(&all, &spec);
         let ids: Vec<&str> = flat.iter().map(|r| r.task.id.as_str()).collect();
         assert_eq!(ids, vec!["a", "a1", "a2"]); // b pruned
         let ghost = |id: &str| flat.iter().find(|r| r.task.id == id).unwrap().ghost;

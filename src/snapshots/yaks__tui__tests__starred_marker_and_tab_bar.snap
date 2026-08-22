@@ -1,9 +1,9 @@
 ---
 source: src/tui.rs
-expression: "draw(&sample(), 72, 14)"
+expression: "draw(&app, 72, 14)"
 ---
- Hairy 2 · Shaving 1 · Shorn 1 · Recent 4 · Starred 0
-▾ [H] p2 Root A                 │ id       a0
+ Hairy 2 · Shaving 1 · Shorn 1 · Recent 4 · Starred 1
+▾ [H] p2 ★ Root A               │ id       a0
     [H] p3 Child A1             │ title    Root A
     [N] p3 Child A2 done        │ type     task
                                 │ priority p2
@@ -15,4 +15,4 @@ expression: "draw(&sample(), 72, 14)"
                                 │
                                 │
                                 │
-j/k · c new · E edit · S/P/T/L/X · D/R · / find · f filter · * star · V
+starred a0

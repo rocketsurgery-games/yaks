@@ -2,7 +2,7 @@
 source: src/tui.rs
 expression: "draw(&app, 72, 14)"
 ---
- Hairy 2 · Shaving 1 · Shorn 1
+ Hairy 2* · Shaving 1 · Shorn 1 · Recent 4 · Starred 0
 ▾ [H] p2 Root A                 │ id       a0
     [H] p3 Child A1             │ title    Root A
     [N] p3 Child A2 done        │ type     task

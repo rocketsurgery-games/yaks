@@ -2,7 +2,7 @@
 source: src/tui.rs
 expression: "draw(&app, 72, 14)"
 ---
- Hairy 1 · Shaving 0 · Shorn 0
+ Hairy 1 · Shaving 0 · Shorn 0 · Recent 1 · Starred 0
   [H] p3 Editable               Edit e0 — Ctrl-S save · Ctrl-C cancel
                                 First line.
                                 Second line.
@@ -15,4 +15,4 @@ expression: "draw(&app, 72, 14)"
 
 
 
-j/k move · c new · E edit · S/P/T/L/X · D/R link · / find · Tab tab · q
+j/k · c new · E edit · S/P/T/L/X · D/R · / find · f filter · * star · V

@@ -11,7 +11,7 @@ use crate::model::{Status, Task};
 
 const NON_DEAD: [Status; 3] = [Status::Hairy, Status::Shaving, Status::Shorn];
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct FilterSpec {
     /// Empty = unconstrained (caller's default scope applies).
     pub statuses: Vec<Status>,
