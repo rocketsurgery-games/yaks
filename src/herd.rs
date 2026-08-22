@@ -71,6 +71,12 @@ pub enum UpdateOutcome {
     NotFound,
 }
 
+/// Result of attaching an artifact to a task.
+pub enum AttachOutcome {
+    Attached(String),
+    NotFound,
+}
+
 pub struct Stats {
     pub total: usize,
     pub hairy: usize,
@@ -282,6 +288,32 @@ impl Herd {
         } else {
             Ok(UpdateOutcome::NoChanges)
         }
+    }
+
+    /// Write `data` to `.yaks/artifacts/{id}/{name}` and append a markdown image
+    /// link to the task body. `name` should be a bare filename. The artifacts
+    /// tree lives inside the herd (committed alongside `.yaks/`, like Python).
+    pub fn attach(&self, id: &str, name: &str, data: &[u8]) -> Result<AttachOutcome> {
+        let Some(mut task) = store::load_task_by_id(&self.root, id)? else {
+            return Ok(AttachOutcome::NotFound);
+        };
+        let dir = self.root.join("artifacts").join(id);
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(dir.join(name), data)?;
+        let stem = Path::new(name)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(name);
+        let link = format!("![{stem}](artifacts/{id}/{name})");
+        let mut body = task.body.trim_end().to_string();
+        if !body.is_empty() {
+            body.push_str("\n\n");
+        }
+        body.push_str(&link);
+        task.body = body;
+        task.updated = Some(store::now_iso());
+        store::write::save(&self.root, &task)?;
+        Ok(AttachOutcome::Attached(name.to_string()))
     }
 
     pub fn transition(&self, id: &str, dest: Status) -> Result<MoveOutcome> {

@@ -13,6 +13,9 @@ use crate::model::{Status, Task};
 pub enum Target {
     Task(String),
     Url(String),
+    /// A markdown image link `![alt](path)` — an attached artifact, opened
+    /// externally (path is relative to the herd's `.yaks/` root).
+    Artifact(String),
 }
 
 /// Styling hint for a detail line.
@@ -53,11 +56,43 @@ fn strip_brackets(s: &str) -> String {
 }
 
 /// Scan a body line for known task ids and URLs, returning (col, len, target).
+/// Parse a markdown image link `![alt](path)` starting at `start` (`chars[start]`
+/// is `!`). Returns `(total_len_in_chars, path)` when well-formed.
+fn parse_image_link(chars: &[char], start: usize) -> Option<(usize, String)> {
+    if chars.get(start) != Some(&'!') || chars.get(start + 1) != Some(&'[') {
+        return None;
+    }
+    let mut i = start + 2;
+    while i < chars.len() && chars[i] != ']' {
+        i += 1;
+    }
+    if chars.get(i + 1) != Some(&'(') {
+        return None;
+    }
+    let path_start = i + 2;
+    let mut j = path_start;
+    while j < chars.len() && chars[j] != ')' {
+        j += 1;
+    }
+    if j >= chars.len() {
+        return None;
+    }
+    let path: String = chars[path_start..j].iter().collect();
+    Some((j + 1 - start, path))
+}
+
 fn scan_body_links(line: &str, known: &HashSet<&str>) -> Vec<(usize, usize, Target)> {
     let chars: Vec<char> = line.chars().collect();
     let mut out = Vec::new();
     let mut i = 0;
     while i < chars.len() {
+        if chars[i] == '!' {
+            if let Some((len, path)) = parse_image_link(&chars, i) {
+                out.push((i, len, Target::Artifact(path)));
+                i += len;
+                continue;
+            }
+        }
         let rest: String = chars[i..].iter().collect();
         if is_url(&rest) {
             let start = i;

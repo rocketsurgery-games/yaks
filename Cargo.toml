@@ -20,6 +20,7 @@ ratatui = "0.30"
 edtui = { version = "0.11.7", default-features = false }
 notify = "6"
 arboard = "3"
+png = "0.17"
 
 # Planned, not yet wired — see README roadmap and the yak-2219 research arc:
 #   ratatui + crossterm   TUI                                  (yak-ef0f)

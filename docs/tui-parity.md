@@ -249,3 +249,26 @@ Brought the Rust palette in line with Python's `colors.py`, verified via the
 
 Note: colour lives only in the `--style` snapshots; the plain-text insta
 snapshots (symbols only) are unaffected, so this pass changed no `*.snap`.
+
+## 15. Detail-pane ops, clipboard, comments, artifacts, selection — [done]
+
+Second parity round, closing the remaining list/detail keymap gaps:
+
+- **Detail mirrors the list ops** (yaksrs-d4f2): `S/P/T/L/D/R/X/E/c/C/f/*` all
+  work in the detail pane (they act on `selected()`), plus `J/K` step to the
+  next/prev task without leaving detail and `G` jumps to the bottom.
+- **Clipboard** (yaksrs-088d): `y` copies the selected yak id via `arboard`
+  (`src/clipboard.rs`, best-effort). PNG read added for artifacts (below).
+- **Comments** (yaksrs-ffae): `M` opens a multi-line editor and appends a
+  `▸ {iso}` note to the body (reusing `TaskEdit.note`).
+- **Line cursor + visual selection** (yaksrs-c9eb): the detail pane now has a
+  per-line cursor (Python's model) — `j/k/d/u/g/G` move it, `Tab`/`Shift-Tab`
+  snap it to link lines, `Enter` follows the link on the line. `v` /
+  `Shift-↑↓` select line ranges; `y`/`Enter` copy the (dedented) block; `Esc`
+  peels back selection → find → list.
+- **Artifacts** (yaksrs-a49c): `A` attaches a file (or the clipboard PNG when
+  the path is blank) into `.yaks/artifacts/{id}/` and appends a
+  `![alt](artifacts/{id}/{name})` link; `O` opens the artifact/URL on the
+  current line in the OS default app. Artifact links are a new `Target::Artifact`
+  parsed from `![…](…)` in the body. Artifacts live under `.yaks/`, committed
+  with the herd (matching Python).

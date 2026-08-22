@@ -43,7 +43,8 @@ use ratatui::{Frame, Terminal};
 
 use crate::filter::{self, FilterSpec};
 use crate::herd::{
-    CreateOutcome, DepOutcome, Herd, MoveOutcome, NewTask, Reparent, TaskEdit, UpdateOutcome,
+    AttachOutcome, CreateOutcome, DepOutcome, Herd, MoveOutcome, NewTask, Reparent, TaskEdit,
+    UpdateOutcome,
 };
 use crate::model::{Status, Task};
 
@@ -114,6 +115,7 @@ struct Editor {
 enum EditAction {
     Labels(String),
     Comment(String),
+    Attach(String),
     SaveView,
     RenameView { index: usize },
 }
@@ -1340,6 +1342,90 @@ impl App {
         self.overlay = Overlay::Help(0);
     }
 
+    /// A — attach an artifact (a file path, or the clipboard PNG when blank).
+    fn open_attach(&mut self) {
+        if let Some(id) = self.selected_id() {
+            self.overlay = Overlay::Edit(Editor::new(
+                self.editor_vim,
+                true,
+                "Attach path (empty = clipboard PNG): ".into(),
+                "",
+                EditAction::Attach(id),
+            ));
+        }
+    }
+
+    fn commit_attach(&mut self, id: String, path_input: String) {
+        let path_input = path_input.trim();
+        let (name, data) = if path_input.is_empty() {
+            match crate::clipboard::read_png() {
+                Some(bytes) => (
+                    format!("paste-{}.png", chrono::Utc::now().format("%Y%m%d-%H%M%S")),
+                    bytes,
+                ),
+                None => {
+                    self.notification = Some("no PNG image on clipboard".into());
+                    return;
+                }
+            }
+        } else {
+            let p = std::path::Path::new(path_input);
+            let Ok(bytes) = std::fs::read(p) else {
+                self.notification = Some(format!("not a file: {path_input}"));
+                return;
+            };
+            let name = p
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("attachment")
+                .to_string();
+            (name, bytes)
+        };
+        let Some(h) = &self.herd else { return };
+        match h.attach(&id, &name, &data) {
+            Ok(AttachOutcome::Attached(n)) => {
+                self.reload();
+                self.notification = Some(format!("attached {n}"));
+            }
+            Ok(AttachOutcome::NotFound) => self.notification = Some(format!("{id} not found")),
+            Err(e) => self.notification = Some(format!("attach failed: {e}")),
+        }
+    }
+
+    /// Open a URL or artifact path in the OS default application (best-effort).
+    fn open_external(&mut self, target: &str) {
+        let arg = if target.starts_with("http") {
+            target.to_string()
+        } else {
+            match &self.herd {
+                Some(h) => h.root().join(target).display().to_string(),
+                None => target.to_string(),
+            }
+        };
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        match std::process::Command::new(opener).arg(&arg).spawn() {
+            Ok(_) => self.notification = Some(format!("opened {target}")),
+            Err(e) => self.notification = Some(format!("open failed: {e}")),
+        }
+    }
+
+    /// O — open the artifact/URL link on the current detail line externally.
+    fn open_current_external(&mut self) {
+        let jumps = self.detail_jumps();
+        match jumps.into_iter().find(|j| j.line == self.detail_line) {
+            Some(j) => match j.target {
+                detail::Target::Artifact(p) => self.open_external(&p),
+                detail::Target::Url(u) => self.open_external(&u),
+                detail::Target::Task(_) => self.notification = Some("not an artifact/link".into()),
+            },
+            None => self.notification = Some("no link on this line".into()),
+        }
+    }
+
     /// M — append a timestamped comment/note to the selected task (multi-line).
     fn open_comment(&mut self) {
         if let Some(id) = self.selected_id() {
@@ -1689,9 +1775,8 @@ impl App {
                 self.open_task_in_detail(&id);
                 self.notification = Some(format!("→ {id}"));
             }
-            detail::Target::Url(u) => {
-                self.notification = Some(format!("link: {u}"));
-            }
+            detail::Target::Url(u) => self.open_external(&u),
+            detail::Target::Artifact(p) => self.open_external(&p),
         }
     }
 
@@ -1996,6 +2081,7 @@ impl App {
                     format!("comment added to {id}"),
                 );
             }
+            EditAction::Attach(id) => self.commit_attach(id, text),
             EditAction::SaveView => self.save_current_view(text),
             EditAction::RenameView { index } => {
                 let name = text.trim().to_string();
@@ -2283,6 +2369,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('*') => app.toggle_star(),
             KeyCode::Char('y') => app.copy_selected_id(),
             KeyCode::Char('M') => app.open_comment(),
+            KeyCode::Char('A') => app.open_attach(),
             KeyCode::Char('v') => app.open_view_picker(),
             KeyCode::Char('V') => app.open_save_view(),
             KeyCode::Char('?') => app.open_help(),
@@ -2365,6 +2452,8 @@ fn handle_key(app: &mut App, k: KeyEvent) {
                     }
                 }
                 KeyCode::Char('M') => app.open_comment(),
+                KeyCode::Char('A') => app.open_attach(),
+                KeyCode::Char('O') => app.open_current_external(),
                 // Move between tasks without leaving the detail pane.
                 KeyCode::Char('J') => app.detail_next_task(1),
                 KeyCode::Char('K') => app.detail_next_task(-1),
@@ -2532,6 +2621,7 @@ fn help_content() -> Vec<Line<'static>> {
         entry("P / T / L / S", "Priority / type / labels / state"),
         entry("D / R", "Add dependency / reparent"),
         entry("M", "Add a comment (note)"),
+        entry("A / O", "Attach artifact / open it"),
         entry("X", "Slaughter (delete, confirm)"),
         blank(),
         section("Search & filter"),
@@ -4519,6 +4609,26 @@ mod tests {
             let body = &app.task("t0").unwrap().body;
             assert!(body.contains("a helpful note"), "note text present");
             assert!(body.contains('\u{25b8}'), "timestamp sigil present");
+        }
+
+        #[test]
+        fn attach_file_writes_artifact_and_links_body() {
+            let (proj, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let src = proj.join("shot.png");
+            fs::write(&src, b"not-really-a-png").unwrap();
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "A"); // attach prompt
+            press(&mut app, src.to_str().unwrap());
+            enter(&mut app); // single-line commit -> attach
+            let body = &app.task("t0").unwrap().body;
+            assert!(
+                body.contains("![shot](artifacts/t0/shot.png)"),
+                "body links artifact: {body}"
+            );
+            assert!(
+                proj.join(".yaks/artifacts/t0/shot.png").is_file(),
+                "artifact copied into the herd"
+            );
         }
 
         #[test]
