@@ -1934,18 +1934,19 @@ fn render_view_picker(app: &App, sel: usize, frame: &mut Frame, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, v)| {
+            // 📌 pinned, 🔒 builtin — emoji glyphs matching the Python view manager.
             let active = if i == app.view { "▸" } else { " " };
-            let pin = if v.pinned { "*" } else { " " };
-            let lock = if v.builtin { "  (builtin)" } else { "" };
+            let pin = if v.pinned { "\u{1f4cc}" } else { "  " };
+            let lock = if v.builtin { "  \u{1f512}" } else { "" };
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{active} "), Style::new().fg(Color::Cyan)),
-                Span::styled(format!("{pin} "), Style::new().fg(Color::Yellow)),
+                Span::raw(format!("{pin} ")),
                 Span::raw(v.name.clone()),
                 Span::styled(
                     format!("  ({})", app.view_count(v)),
                     Style::new().fg(Color::DarkGray),
                 ),
-                Span::styled(lock.to_string(), Style::new().fg(Color::DarkGray)),
+                Span::raw(lock.to_string()),
             ]))
         })
         .collect();
@@ -2299,11 +2300,10 @@ fn render_fuzzy_results(app: &App, fp: &FuzzyPick, frame: &mut Frame, area: Rect
         ))));
     }
     for t in &cands {
+        // Status emoji (matching the list, tab bar and detail pane) rather than
+        // a bracketed letter glyph.
         items.push(ListItem::new(Line::from(vec![
-            Span::styled(
-                format!("[{}] ", t.status.glyph()),
-                Style::new().fg(Color::DarkGray),
-            ),
+            Span::raw(format!("{}  ", t.status.emoji())),
             Span::styled(format!("{} ", t.id), Style::new().fg(Color::DarkGray)),
             Span::raw(t.title.clone()),
         ])));

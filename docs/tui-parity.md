@@ -180,8 +180,33 @@ for reference:
   - Rust list:   `j/k · c new · E edit · S/P/T/L/X · D/R · / find · f filter · * star · V save · Tab view · q`
 - Action: adopt Python's per-state help strings.
 
-## 12. Remaining overlays to review — [investigate]
+## 12. Remaining overlays — [reviewed] (yaksrs-a083)
 
-Not yet captured/compared: edit (`E`), labels (`L`), slaughter confirm (`X`),
-inline search (`/`), fuzzy dep/reparent (`D`/`R`), view picker (`v`). Capture in
-the next pass and extend this catalogue.
+Captured head-to-head on the fixture herd. Summary:
+
+- **Labels (`L`) — [match].** Both a bottom-line single-line editor
+  (`Labels for {id}:`). Python shows a trailing `[I]` vim-mode indicator that
+  edtui doesn't echo; cosmetic.
+- **Inline search (`/`) — [match].** Both open a live-filtering inline search
+  (Python `_open_inline_search`; the tab gains the `*` modified marker as you
+  type). Rust additionally echoes the query on the status line (`/…`); Python
+  reverts the status line to the help hint. Harmless enhancement.
+- **Slaughter confirm (`X`) — [match, reworded].** Same shape
+  `{verb} {id} ({title})? (y/N):`. Rust says **Slaughter** (on-brand yak
+  vocabulary) where Python says *Delete*. Intentional wording keep.
+- **Fuzzy dep/reparent (`D`/`R`) — [match; glyphs fixed].** Candidate rows now
+  use the status **emoji** (🦬/🪒/🐑/💀) like the list/detail (was `[H]`/`[S]`/
+  `[N]` bracketed letters — fixed here for consistency with §7/f2cf). Placement
+  is the intentional right-pane divergence (§9). `R` differs in gesture: Python
+  first prompts `p=pick parent, u=unparent`, then opens the picker; Rust opens
+  the picker directly and offers a synthetic **(clear parent)** row when the
+  task has a parent — fewer steps, same outcome. Acceptable divergence.
+- **View picker (`v`) — [match; glyphs fixed].** Rows now use 📌 (pinned) and 🔒
+  (builtin) like Python (was `*` / `(builtin)` text). Right-pane placement +
+  status-line help hint are the intentional divergence (§9).
+- **Edit (`E`) — [divergence: body-only vs full form].** Python's `E` reopens
+  the **whole task form** (title/type/priority/labels + description), i.e. the
+  create form in edit mode. Rust's `E` edits only the **description body**
+  (other fields go through `L`/`P`/`T`/`S`). Now that the create form exists
+  (d13b), the natural fix is a shared create/edit form; filed as a follow-up
+  (see §8's form + the new edit-form yak). Not changed under a083.
