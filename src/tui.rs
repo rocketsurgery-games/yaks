@@ -78,6 +78,8 @@ enum Overlay {
     DetailFind(SearchBox),
     /// The view manager (`v`): carries the picker's selection index.
     ViewPicker(usize),
+    /// The keyboard-help reference (`?`): carries the scroll offset.
+    Help(u16),
 }
 
 /// What a resolved single-key pick should do (carries the target task id).
@@ -1188,6 +1190,37 @@ impl App {
         self.overlay = Overlay::Drawer(Drawer::from_filter(self.editor_vim, &self.filter));
     }
 
+    fn open_help(&mut self) {
+        self.overlay = Overlay::Help(0);
+    }
+
+    fn handle_help_key(&mut self, k: KeyEvent) {
+        // Any of Esc/q/? dismisses the reference.
+        if matches!(
+            k.code,
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?')
+        ) {
+            self.overlay = Overlay::None;
+            return;
+        }
+        let vh = self.detail_page.max(1);
+        let max_scroll = (help_content().len() as u16).saturating_sub(vh);
+        let half = (vh / 2).max(1);
+        if let Overlay::Help(scroll) = &mut self.overlay {
+            match k.code {
+                KeyCode::Char('j') | KeyCode::Down => *scroll = (*scroll + 1).min(max_scroll),
+                KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                KeyCode::Char('d') | KeyCode::PageDown => {
+                    *scroll = (*scroll + half).min(max_scroll)
+                }
+                KeyCode::Char('u') | KeyCode::PageUp => *scroll = scroll.saturating_sub(half),
+                KeyCode::Char('g') => *scroll = 0,
+                KeyCode::Char('G') => *scroll = max_scroll,
+                _ => {}
+            }
+        }
+    }
+
     fn open_save_view(&mut self) {
         self.overlay = Overlay::Edit(Editor::new(
             self.editor_vim,
@@ -1468,6 +1501,10 @@ impl App {
             self.handle_create_key(k);
             return;
         }
+        if matches!(self.overlay, Overlay::Help(_)) {
+            self.handle_help_key(k);
+            return;
+        }
         if matches!(self.overlay, Overlay::ViewPicker(_)) {
             self.handle_view_picker_key(k);
             return;
@@ -1611,7 +1648,8 @@ impl App {
             | Overlay::Drawer(_)
             | Overlay::Create(_)
             | Overlay::DetailFind(_)
-            | Overlay::ViewPicker(_) => {}
+            | Overlay::ViewPicker(_)
+            | Overlay::Help(_) => {}
             Overlay::Pick {
                 prompt,
                 keys,
@@ -1913,6 +1951,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('*') => app.toggle_star(),
             KeyCode::Char('v') => app.open_view_picker(),
             KeyCode::Char('V') => app.open_save_view(),
+            KeyCode::Char('?') => app.open_help(),
             KeyCode::Esc => {
                 if app.is_view_modified() {
                     app.revert_filter_to_view();
@@ -1940,6 +1979,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('/') => app.open_detail_find(),
             KeyCode::Char('n') => app.detail_find_jump(1),
             KeyCode::Char('N') => app.detail_find_jump(-1),
+            KeyCode::Char('?') => app.open_help(),
             KeyCode::Enter => app.follow_link(),
             KeyCode::Char('j') | KeyCode::Down => {
                 app.detail_scroll = app.detail_scroll.saturating_add(1)
@@ -1973,7 +2013,11 @@ fn render(app: &App, frame: &mut Frame) {
     let right_overlay = matches!(&app.overlay, Overlay::Edit(ed) if !ed.single_line)
         || matches!(
             app.overlay,
-            Overlay::Fuzzy(_) | Overlay::Drawer(_) | Overlay::Create(_) | Overlay::ViewPicker(_)
+            Overlay::Fuzzy(_)
+                | Overlay::Drawer(_)
+                | Overlay::Create(_)
+                | Overlay::ViewPicker(_)
+                | Overlay::Help(_)
         );
     if app.focus == Focus::Detail || right_overlay {
         let [left, right] =
@@ -1985,6 +2029,7 @@ fn render(app: &App, frame: &mut Frame) {
             Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, inner),
             Overlay::Drawer(d) => render_drawer(d, frame, inner),
             Overlay::Create(f) => render_create(f, frame, inner),
+            Overlay::Help(scroll) => render_help(*scroll, frame, inner),
             Overlay::ViewPicker(sel) => render_view_picker(app, *sel, frame, inner),
             _ => render_detail(app, frame, inner),
         }
@@ -2050,6 +2095,76 @@ fn render_view_picker(app: &App, sel: usize, frame: &mut Frame, area: Rect) {
         body,
         &mut state,
     );
+}
+
+/// The keyboard reference shown by `?`, as styled lines: cyan-bold section
+/// headers, a yellow key column, then the description. Reflects the actual Rust
+/// bindings (not Python's). Rebuilt on demand; also used to clamp help scroll.
+fn help_content() -> Vec<Line<'static>> {
+    fn section(name: &'static str) -> Line<'static> {
+        Line::from(Span::styled(
+            name,
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ))
+    }
+    fn entry(key: &'static str, desc: &'static str) -> Line<'static> {
+        Line::from(vec![
+            Span::styled(format!("  {key:<14}"), Style::new().fg(Color::Yellow)),
+            Span::raw(desc),
+        ])
+    }
+    let blank = || Line::from(String::new());
+    vec![
+        section("Movement"),
+        entry("j / k  ↓ / ↑", "Move cursor"),
+        entry("d / u", "Half-page down / up"),
+        entry("PgDn / PgUp", "Full-page down / up"),
+        entry("g / G", "Top / bottom"),
+        blank(),
+        section("List pane"),
+        entry("Tab / S-Tab", "Next / previous view"),
+        entry("[ / ]", "Previous / next view"),
+        entry("l / → / Enter", "Show detail pane"),
+        entry("Space", "Collapse / expand subtree"),
+        entry("v / V", "View picker / save filter as view"),
+        entry("* ", "Star / unstar (Starred view)"),
+        blank(),
+        section("Detail pane"),
+        entry("h / ← / Esc", "Back to list"),
+        entry("j / k", "Scroll"),
+        entry("Tab / [ / ]", "Cycle links"),
+        entry("Enter", "Follow link"),
+        entry("i / o", "Nav forward / back"),
+        entry("/ , n / N", "Find, next / prev match"),
+        blank(),
+        section("Edit"),
+        entry("c / C", "New root / child yak"),
+        entry("E", "Edit description"),
+        entry("P / T / L / S", "Priority / type / labels / state"),
+        entry("D / R", "Add dependency / reparent"),
+        entry("X", "Slaughter (delete, confirm)"),
+        blank(),
+        section("Search & filter"),
+        entry("/", "Inline search"),
+        entry("f", "Filter drawer"),
+        entry("Esc", "Revert filter to the active view"),
+        blank(),
+        section("General"),
+        entry("?", "Toggle this help"),
+        entry("q / Ctrl-C", "Quit"),
+    ]
+}
+
+fn render_help(scroll: u16, frame: &mut Frame, area: Rect) {
+    let [head, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "Help — keys",
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        head,
+    );
+    frame.render_widget(Paragraph::new(help_content()).scroll((scroll, 0)), body);
 }
 
 fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
@@ -2421,6 +2536,7 @@ fn overlay_name(o: &Overlay) -> &'static str {
         Overlay::Search(_) => "search",
         Overlay::Drawer(_) => "drawer",
         Overlay::Create(_) => "create",
+        Overlay::Help(_) => "help",
         Overlay::DetailFind(_) => "detail-find",
         Overlay::ViewPicker(_) => "view-picker",
     }
@@ -2829,6 +2945,17 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         );
         return;
     }
+    // Help reference hint.
+    if matches!(&app.overlay, Overlay::Help(_)) {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "j/k scroll · d/u page · g/G top/bottom · ?/q/Esc close",
+                Style::new().fg(Color::DarkGray),
+            )),
+            area,
+        );
+        return;
+    }
     // Create-form help hint. The `(need title)` marker mirrors Python's guard.
     if let Overlay::Create(f) = &app.overlay {
         let commit = if f.title_text().is_empty() {
@@ -3105,6 +3232,25 @@ mod tests {
         handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)); // -> type
         handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)); // -> priority
         insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn help_overlay() {
+        let mut app = sample();
+        handle_key(&mut app, key('?'));
+        insta::assert_snapshot!(draw(&app, 72, 16));
+    }
+
+    #[test]
+    fn help_opens_and_closes() {
+        let mut app = sample();
+        handle_key(&mut app, key('?'));
+        assert!(matches!(app.overlay, Overlay::Help(_)));
+        // Scroll down, then Esc closes.
+        handle_key(&mut app, key('j'));
+        assert!(matches!(app.overlay, Overlay::Help(s) if s == 1));
+        esc_key(&mut app);
+        assert!(matches!(app.overlay, Overlay::None));
     }
 
     #[test]
