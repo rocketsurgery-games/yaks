@@ -1292,10 +1292,29 @@ impl App {
                 self.set_view(i);
             }
         }
+        // Expand any collapsed ancestors so the target row is actually visible;
+        // otherwise the cursor can't land on it and the jump silently no-ops.
+        self.expand_ancestors(id);
         if let Some(pos) = self.rows().iter().position(|r| r.task.id == id) {
             self.cursor = pos;
         }
         self.focus = Focus::List;
+    }
+
+    /// Remove every ancestor of `id` from the collapsed set (walking the parent
+    /// chain), persisting the change so a jumped-to task is never hidden.
+    fn expand_ancestors(&mut self, id: &str) {
+        let mut changed = false;
+        let mut cur = self.task(id).and_then(|t| t.parent.clone());
+        while let Some(pid) = cur {
+            if self.collapsed.remove(&pid) {
+                changed = true;
+            }
+            cur = self.task(&pid).and_then(|t| t.parent.clone());
+        }
+        if changed {
+            self.save_collapsed();
+        }
     }
 
     /// Detail jumplist for the current selection (empty when nothing selected).
@@ -1364,6 +1383,13 @@ impl App {
         match j.target {
             detail::Target::Task(id) => {
                 self.select_task(&id);
+                // Stay in the detail pane on the followed task (select_task drops
+                // us to the list); reset the per-task detail view state.
+                self.focus = Focus::Detail;
+                self.detail_scroll = 0;
+                self.detail_link = 0;
+                self.detail_find = None;
+                self.detail_match = 0;
                 self.notification = Some(format!("→ {id}"));
             }
             detail::Target::Url(u) => {
@@ -3185,9 +3211,24 @@ mod tests {
         // Jumplist order for a0: child a1, child a2, body a1, body a2.
         assert!(app.detail_jumps().len() >= 2);
         enter_key(&mut app); // follow link 0 -> a1
-        assert_eq!(app.focus, Focus::List);
+        // We stay in the detail pane, now showing the followed task (yaksrs-3f19).
+        assert_eq!(app.focus, Focus::Detail);
         assert_eq!(app.selected_id().as_deref(), Some("a1"));
         assert_eq!(app.notification.as_deref(), Some("→ a1"));
+    }
+
+    #[test]
+    fn follow_link_reveals_collapsed_target() {
+        // a1 is hidden under a collapsed a0; following the link must expand a0,
+        // select a1, and stay in the detail pane (yaksrs-3f19).
+        let mut app = linked();
+        app.collapsed.insert("a0".to_string());
+        assert!(app.rows().iter().all(|r| r.task.id != "a1"), "a1 hidden");
+        enter_key(&mut app); // focus detail on a0
+        enter_key(&mut app); // follow link 0 -> a1
+        assert_eq!(app.focus, Focus::Detail);
+        assert_eq!(app.selected_id().as_deref(), Some("a1"));
+        assert!(!app.collapsed.contains("a0"), "ancestor expanded");
     }
 
     #[test]
