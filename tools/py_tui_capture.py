@@ -65,6 +65,34 @@ _KEYS = {
 }
 
 
+def base36(i: int) -> str:
+    if i < 10:
+        return chr(ord("0") + i)
+    if i < 36:
+        return chr(ord("a") + i - 10)
+    return "#"
+
+
+def _describe(key: tuple) -> str:
+    fg, bg, bold, reverse, underscore, italics = key
+    if fg == "default" and bg == "default" and not (bold or reverse or underscore or italics):
+        return "default"
+    parts = []
+    if fg != "default":
+        parts.append(f"fg={fg}")
+    if bg != "default":
+        parts.append(f"bg={bg}")
+    if bold:
+        parts.append("bold")
+    if reverse:
+        parts.append("reversed")
+    if underscore:
+        parts.append("underline")
+    if italics:
+        parts.append("italic")
+    return "+".join(parts)
+
+
 def key_bytes(spec: str) -> bytes:
     ctrl = spec.startswith("C-")
     name = spec[2:] if ctrl else spec
@@ -81,8 +109,9 @@ def key_bytes(spec: str) -> bytes:
 
 
 class PyTui:
-    def __init__(self, yak: str, herd: str, cols: int, rows: int, launch: list[str]):
+    def __init__(self, yak: str, herd: str, cols: int, rows: int, launch: list[str], style: bool):
         self.cols, self.rows = cols, rows
+        self.style = style
         self.screen = pyte.Screen(cols, rows)
         self.stream = pyte.ByteStream(self.screen)
         self.master, slave = os.openpty()
@@ -148,10 +177,46 @@ class PyTui:
             if self.proc.poll() is not None:
                 return
 
+    def _row_width(self, y: int) -> int:
+        row = self.screen.buffer[y]
+        w = 0
+        for x in range(self.cols):
+            if row[x].data != " ":
+                w = x + 1
+        return w
+
+    def _style_layer(self) -> tuple[list[str], list[str]]:
+        """Aligned base36 style grid + legend, mirroring the Rust --style output.
+        Selection/focus/links are attribute-encoded (reverse video etc.), so this
+        is what makes them visible in the diff."""
+        keys: list[tuple] = []
+        rows_out = []
+        for y in range(self.rows):
+            row = self.screen.buffer[y]
+            w = self._row_width(y)
+            line = ""
+            for x in range(w):
+                c = row[x]
+                key = (c.fg, c.bg, c.bold, c.reverse, c.underscore, c.italics)
+                if key in keys:
+                    idx = keys.index(key)
+                else:
+                    idx = len(keys)
+                    keys.append(key)
+                line += base36(idx)
+            rows_out.append(line)
+        legend = [f"{base36(i)}={_describe(k)}" for i, k in enumerate(keys)]
+        return rows_out, legend
+
     def dump(self, n: int) -> str:
         out = [f"=== frame {n} · {self.cols}x{self.rows} · (python) ==="]
         for line in self.screen.display:
             out.append(line.rstrip())
+        if self.style:
+            rows_out, legend = self._style_layer()
+            out.append("--- styles ---")
+            out.extend(rows_out)
+            out.append("legend: " + "  ".join(legend))
         out.append("=== end ===")
         return "\n".join(out)
 
@@ -180,13 +245,15 @@ def main() -> None:
     ap.add_argument("--yak", required=True, help="path to the Python yaks scripts/yak.py")
     ap.add_argument("--herd", default=".", help="working dir containing .yaks/ (default: cwd)")
     ap.add_argument("--size", default="80x24", help="WxH terminal size")
+    ap.add_argument("--style", action="store_true",
+                    help="also emit an aligned base36 style grid + legend")
     ap.add_argument("--launch", default="uv run",
                     help="command prefix to run the Python TUI (default: 'uv run', "
                          "which resolves yak.py's pyyaml via its PEP 723 header)")
     args = ap.parse_args()
 
     cols, rows = (int(v) for v in args.size.lower().split("x"))
-    tui = PyTui(args.yak, os.path.abspath(args.herd), cols, rows, args.launch.split())
+    tui = PyTui(args.yak, os.path.abspath(args.herd), cols, rows, args.launch.split(), args.style)
     n = 0
     frames: list[str] = []
     try:
