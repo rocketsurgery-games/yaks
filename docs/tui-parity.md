@@ -127,29 +127,32 @@ so the width-2 emoji doesn't skew the id highlight.
 - Action: header, capitalized padded labels, `Status`, humanized
   `Created`/`Updated`, `Blocks:` (reverse deps), `Parent:`/`Children:`.
 
-## 8. Create (c / C) — [done: right-pane form] (yaksrs-d13b)
+## 8. Create (c / C) + Edit (E) — [done: shared right-pane form] (yaksrs-d13b, yaksrs-3b22)
 
-Done. Rust now has a real create **form** (`Overlay::Create`), modeled on the
-filter drawer and placed in the **right pane** (same intentional divergence as
-the drawer, §9 — a wide/short terminal has columns to spare, not rows). It
-shares the drawer's `right_divider` rule and the generalized
-`render_chip_row`/`render_text_row` helpers.
+Done. Rust has one shared **create/edit form** (`Overlay::Create` /
+`CreateForm`), modeled on the filter drawer and placed in the **right pane**
+(same intentional divergence as the drawer, §9 — a wide/short terminal has
+columns to spare, not rows). It shares the drawer's `right_divider` rule and the
+generalized `render_chip_row`/`render_text_row` helpers. `c`/`C` open it empty
+(create); `E` opens it seeded from the selected task (edit) — from either pane.
 
 - **Python:** full-screen modal **form** — `title` / `type` / `priority` /
-  `labels` fields + a `description` section; `Tab`/`j`/`k` move between rows,
-  `←→` pick chips, `Enter` edits a field; shows a `(need title)` hint; `Esc`
-  cancels.
-- **Rust:** right-pane form — rows `title` / `type` / `priority` / `labels` /
-  `description`; `Tab`/`↑↓` (and `j`/`k` on chip rows) move rows; `←→` (and
-  `h`/`l`) pick chips as **single-select** (the cursor *is* the value, unlike
-  the drawer's Space-toggle multi-select); text rows edit in place. `Enter`
-  **creates** (guarded on a non-empty title — the status hint flips between
-  `(need title)` and `Enter create`); `Esc` cancels.
-- **Intentional divergences:** right-pane placement (matches §9); `Enter` =
-  create rather than Python's per-field `Enter:edit` submit gesture (which is
-  ambiguous in a single-modal form); header reads `New yak` / `New task (child
-  of …)` (semantic, not byte-parity). Type/priority/labels/description all feed
-  `NewTask` (priority defaults to p3).
+  `labels` fields + a `description` content zone (Enter on it opens `$EDITOR`);
+  `Tab`/`j`/`k` move between rows, `←→` pick chips; `(need title)` hint;
+  `Ctrl-S` saves, `Esc` cancels.
+- **Rust:** right-pane form — meta rows `title` / `type` / `priority` /
+  `labels`, then a multi-line **description content zone** (edtui, Enter =
+  newline). `Tab`/`Shift-Tab`/`Ctrl-N`/`Ctrl-P` move rows (plus `↑↓` on
+  single-line rows, `j`/`k`+`↑↓` on chip rows); `←→`/`h`/`l` pick chips as
+  **single-select** (cursor *is* the value). **`Ctrl-S`** commits (create →
+  `Herd::create`; edit → `Herd::update`, diffed so unchanged fields don't
+  rewrite the file); **`Esc`/`Ctrl-C`** cancel (inside the description zone Esc
+  belongs to the editor, so `Ctrl-C` cancels there). `(need title)` guards the
+  commit.
+- **Intentional divergences:** right-pane placement (matches §9); header reads
+  `New yak` / `New task (child of …)` / `Edit {id}` (semantic, not byte-parity);
+  the description is edited inline via edtui rather than shelling out to
+  `$EDITOR`. The multi-line content zone is reusable (comments later).
 
 ## 9. Filter drawer (f) — [divergence: right-side drawer + delimiter] (yaksrs-d416)
 
@@ -204,9 +207,8 @@ Captured head-to-head on the fixture herd. Summary:
 - **View picker (`v`) — [match; glyphs fixed].** Rows now use 📌 (pinned) and 🔒
   (builtin) like Python (was `*` / `(builtin)` text). Right-pane placement +
   status-line help hint are the intentional divergence (§9).
-- **Edit (`E`) — [divergence: body-only vs full form].** Python's `E` reopens
-  the **whole task form** (title/type/priority/labels + description), i.e. the
-  create form in edit mode. Rust's `E` edits only the **description body**
-  (other fields go through `L`/`P`/`T`/`S`). Now that the create form exists
-  (d13b), the natural fix is a shared create/edit form; filed as a follow-up
-  (see §8's form + the new edit-form yak). Not changed under a083.
+- **Edit (`E`) — [done: shared form] (yaksrs-3b22).** `E` now opens the shared
+  create/edit form seeded from the task (see §8), from both the list and detail
+  panes — matching Python's "E reopens the whole form". The old body-only
+  editor (`EditAction::Body`) is removed; the form's multi-line description zone
+  supersedes it.

@@ -108,7 +108,6 @@ struct Editor {
 
 enum EditAction {
     Labels(String),
-    Body(String),
     SaveView,
     RenameView { index: usize },
 }
@@ -198,6 +197,15 @@ struct Drawer {
 fn text_field(seed: &str, vim: bool) -> RefCell<EditorState> {
     let mut st = EditorState::new(Lines::from(seed));
     st.set_single_line(true);
+    st.mode = EditorMode::Insert;
+    let _ = vim;
+    RefCell::new(st)
+}
+
+/// A multi-line edtui field (content zone for descriptions, and later comments).
+fn multiline_field(seed: &str, vim: bool) -> RefCell<EditorState> {
+    let mut st = EditorState::new(Lines::from(seed));
+    st.set_single_line(false);
     st.mode = EditorMode::Insert;
     let _ = vim;
     RefCell::new(st)
@@ -313,14 +321,17 @@ impl Drawer {
     }
 }
 
-// Create-form layout: 5 rows (title, type, priority, labels, description).
+// Task-form layout: title, type, priority, labels, description (a multi-line
+// content zone). The last row index is the description.
 const CREATE_ROWS: usize = 5;
+const DESC_ROW: usize = 4;
 
-/// The create-task form: a small right-pane form modeled on `Drawer`. Two chip
-/// rows (type/priority) are **single-select** — the cursor *is* the value
-/// (unlike the drawer's Space-toggle multi-select) — plus three text rows
-/// (title/labels/description). `Enter` creates, `Esc` cancels. Reproduces the
-/// Python `task_form` create flow as a thin form over `Herd::create`.
+/// The create/edit task form: a right-pane form modeled on `Drawer`. Two chip
+/// rows (type/priority) are **single-select** — the cursor *is* the value —
+/// plus single-line title/labels rows and a multi-line **description** content
+/// zone. `Ctrl-S` commits (create or update), `Esc`/`Ctrl-C` cancels. Shared by
+/// `c`/`C` (create) and `E` (edit); the reusable multi-line zone will also back
+/// comment editing later.
 struct CreateForm {
     title: RefCell<EditorState>,
     labels: RefCell<EditorState>,
@@ -330,8 +341,20 @@ struct CreateForm {
     /// Index into `PRI_CHOICES` (single-select cursor==value; default → p3).
     pri_idx: usize,
     row: usize,
+    /// Create: the (optional) parent for the new task. Edit: unused (reparent
+    /// is a separate action); shown in the header for context.
     parent: Option<String>,
+    /// `Some(id)` when editing an existing task; `None` when creating.
+    edit_id: Option<String>,
     handler: EditorEventHandler,
+}
+
+fn kind_index(kind: &str) -> usize {
+    TYPE_CHOICES.iter().position(|&k| k == kind).unwrap_or(0)
+}
+
+fn pri_index(p: u8) -> usize {
+    PRI_CHOICES.iter().position(|&x| x == p).unwrap_or(2)
 }
 
 impl CreateForm {
@@ -339,17 +362,43 @@ impl CreateForm {
         CreateForm {
             title: text_field("", vim),
             labels: text_field("", vim),
-            description: text_field("", vim),
-            kind_idx: 0,                                                    // task
-            pri_idx: PRI_CHOICES.iter().position(|&p| p == 3).unwrap_or(2), // p3
+            description: multiline_field("", vim),
+            kind_idx: 0,           // task
+            pri_idx: pri_index(3), // p3
             row: 0,
             parent,
+            edit_id: None,
             handler: make_handler(vim),
         }
     }
 
-    fn is_text_row(&self) -> bool {
-        matches!(self.row, 0 | 3 | 4)
+    /// Seed the form from an existing task for editing.
+    fn for_edit(vim: bool, task: &Task) -> Self {
+        CreateForm {
+            title: text_field(&task.title, vim),
+            labels: text_field(&task.labels.join(", "), vim),
+            description: multiline_field(&task.body, vim),
+            kind_idx: kind_index(&task.kind),
+            pri_idx: pri_index(task.priority),
+            row: 0,
+            parent: task.parent.clone(),
+            edit_id: Some(task.id.clone()),
+            handler: make_handler(vim),
+        }
+    }
+
+    fn is_editing(&self) -> bool {
+        self.edit_id.is_some()
+    }
+
+    fn is_description_row(&self) -> bool {
+        self.row == DESC_ROW
+    }
+
+    /// Single-line text rows (title, labels); the description is multi-line and
+    /// handled separately.
+    fn is_line_text_row(&self) -> bool {
+        matches!(self.row, 0 | 3)
     }
 
     /// Move the single-select chip cursor on a chip row (wrapping).
@@ -383,8 +432,14 @@ impl CreateForm {
             .collect()
     }
 
+    /// The raw description text (preserving newlines/formatting).
+    fn description_text(&self) -> String {
+        self.description.borrow().lines.to_string()
+    }
+
+    /// Description for a *create* (empty → no body).
     fn description_opt(&self) -> Option<String> {
-        let d = self.description.borrow().lines.to_string();
+        let d = self.description_text();
         if d.trim().is_empty() { None } else { Some(d) }
     }
 }
@@ -1032,38 +1087,51 @@ impl App {
         self.overlay = Overlay::Create(CreateForm::new(self.editor_vim, parent));
     }
 
+    /// Open the shared form seeded from the selected task, for editing (E).
+    fn open_edit(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        let Some(task) = self.task(&id) else { return };
+        self.overlay = Overlay::Create(CreateForm::for_edit(self.editor_vim, task));
+    }
+
     fn handle_create_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        let (row, is_text) = match &self.overlay {
-            Overlay::Create(f) => (f.row, f.is_text_row()),
+        let (is_desc, is_line_text) = match &self.overlay {
+            Overlay::Create(f) => (f.is_description_row(), f.is_line_text_row()),
             _ => return,
         };
-        // Global commit / cancel. Enter creates (guarded on a non-empty title,
-        // mirroring Python's `(need title)` — an empty title keeps the form open).
-        match k.code {
-            KeyCode::Enter => {
-                let has_title =
-                    matches!(&self.overlay, Overlay::Create(f) if !f.title_text().is_empty());
-                if has_title {
-                    self.commit_create();
-                }
-                return;
+        // Commit (Ctrl-S) / cancel (Ctrl-C, or Esc outside the description zone —
+        // inside it Esc belongs to the editor, e.g. vim normal mode).
+        if ctrl && k.code == KeyCode::Char('s') {
+            let has_title =
+                matches!(&self.overlay, Overlay::Create(f) if !f.title_text().is_empty());
+            if has_title {
+                self.commit_form();
             }
-            KeyCode::Esc => {
-                self.overlay = Overlay::None;
-                self.notification = Some("create cancelled".into());
-                return;
-            }
-            _ => {}
+            return;
         }
-        // Row navigation. On text rows only Tab/arrows/Ctrl move rows (so j/k
-        // stay typeable); on chip rows j/k also navigate.
-        let nav_down = matches!(k.code, KeyCode::Down | KeyCode::Tab)
+        if (ctrl && k.code == KeyCode::Char('c')) || (k.code == KeyCode::Esc && !is_desc) {
+            let editing = matches!(&self.overlay, Overlay::Create(f) if f.is_editing());
+            self.overlay = Overlay::None;
+            self.notification = Some(if editing {
+                "edit cancelled".into()
+            } else {
+                "create cancelled".into()
+            });
+            return;
+        }
+        // Row navigation: Tab / Shift-Tab / Ctrl-N / Ctrl-P always move rows.
+        // On chip rows j/k also navigate; on single-line text rows Up/Down do;
+        // the description zone keeps Up/Down for its own cursor.
+        let is_chip = !is_desc && !is_line_text;
+        let nav_down = matches!(k.code, KeyCode::Tab)
             || (ctrl && k.code == KeyCode::Char('n'))
-            || (!is_text && k.code == KeyCode::Char('j'));
-        let nav_up = matches!(k.code, KeyCode::Up | KeyCode::BackTab)
+            || (is_line_text && k.code == KeyCode::Down)
+            || (is_chip && matches!(k.code, KeyCode::Down | KeyCode::Char('j')));
+        let nav_up = matches!(k.code, KeyCode::BackTab)
             || (ctrl && k.code == KeyCode::Char('p'))
-            || (!is_text && k.code == KeyCode::Char('k'));
+            || (is_line_text && k.code == KeyCode::Up)
+            || (is_chip && matches!(k.code, KeyCode::Up | KeyCode::Char('k')));
         if nav_down || nav_up {
             if let Overlay::Create(f) = &mut self.overlay {
                 f.row = if nav_down {
@@ -1074,12 +1142,25 @@ impl App {
             }
             return;
         }
-        if is_text {
+        // Enter on a single-line/chip row advances to the next row; in the
+        // description zone it inserts a newline (handled by the editor below).
+        if k.code == KeyCode::Enter && !is_desc {
             if let Overlay::Create(f) = &mut self.overlay {
-                match row {
+                f.row = (f.row + 1) % CREATE_ROWS;
+            }
+            return;
+        }
+        if is_desc {
+            if let Overlay::Create(f) = &mut self.overlay {
+                f.handler.on_key_event(k, &mut f.description.borrow_mut());
+            }
+            return;
+        }
+        if is_line_text {
+            if let Overlay::Create(f) = &mut self.overlay {
+                match f.row {
                     0 => f.handler.on_key_event(k, &mut f.title.borrow_mut()),
                     3 => f.handler.on_key_event(k, &mut f.labels.borrow_mut()),
-                    4 => f.handler.on_key_event(k, &mut f.description.borrow_mut()),
                     _ => {}
                 }
             }
@@ -1092,6 +1173,15 @@ impl App {
                 KeyCode::Right | KeyCode::Char('l') => f.move_chip(1),
                 _ => {}
             }
+        }
+    }
+
+    fn commit_form(&mut self) {
+        let editing = matches!(&self.overlay, Overlay::Create(f) if f.is_editing());
+        if editing {
+            self.commit_edit_form();
+        } else {
+            self.commit_create();
         }
     }
 
@@ -1127,17 +1217,47 @@ impl App {
         }
     }
 
-    fn open_body_edit(&mut self) {
-        if let Some(id) = self.selected_id() {
-            let initial = self.task(&id).map(|t| t.body.clone()).unwrap_or_default();
-            self.overlay = Overlay::Edit(Editor::new(
-                self.editor_vim,
-                false,
-                format!("Edit {id} — Ctrl-S save · Ctrl-C cancel"),
-                &initial,
-                EditAction::Body(id),
-            ));
+    /// Commit an edit: diff the form against the current task so unchanged
+    /// fields don't rewrite the file or bump `updated`.
+    fn commit_edit_form(&mut self) {
+        let Overlay::Create(f) = std::mem::replace(&mut self.overlay, Overlay::None) else {
+            return;
+        };
+        let Some(id) = f.edit_id.clone() else { return };
+        let Some(cur) = self.task(&id).cloned() else {
+            self.notification = Some(format!("{id} not found"));
+            return;
+        };
+        let title = f.title_text();
+        let kind = TYPE_CHOICES[f.kind_idx].to_string();
+        let priority = PRI_CHOICES[f.pri_idx];
+        let desc = f.description_text();
+        let new_labels = f.labels_vec();
+        let mut edit = TaskEdit::default();
+        if title != cur.title {
+            edit.title = Some(title);
         }
+        if kind != cur.kind {
+            edit.kind = Some(kind);
+        }
+        if priority != cur.priority {
+            edit.priority = Some(priority);
+        }
+        if desc != cur.body {
+            edit.description = Some(desc);
+        }
+        edit.add_labels = new_labels
+            .iter()
+            .filter(|l| !cur.labels.contains(l))
+            .cloned()
+            .collect();
+        edit.remove_labels = cur
+            .labels
+            .iter()
+            .filter(|l| !new_labels.contains(l))
+            .cloned()
+            .collect();
+        self.apply_edit(&id, edit, format!("{id} updated"));
     }
 
     fn open_dep_picker(&mut self) {
@@ -1708,16 +1828,6 @@ impl App {
                     format!("{id} labels: {shown}"),
                 );
             }
-            EditAction::Body(id) => {
-                self.apply_edit(
-                    &id,
-                    TaskEdit {
-                        description: Some(text),
-                        ..Default::default()
-                    },
-                    format!("{id} description updated"),
-                );
-            }
             EditAction::SaveView => self.save_current_view(text),
             EditAction::RenameView { index } => {
                 let name = text.trim().to_string();
@@ -1943,7 +2053,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('L') => app.open_labels(),
             KeyCode::Char('c') => app.open_create(false),
             KeyCode::Char('C') => app.open_create(true),
-            KeyCode::Char('E') => app.open_body_edit(),
+            KeyCode::Char('E') => app.open_edit(),
             KeyCode::Char('D') => app.open_dep_picker(),
             KeyCode::Char('R') => app.open_reparent_picker(),
             KeyCode::Char('/') => app.open_search(),
@@ -1976,6 +2086,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::BackTab | KeyCode::Char('[') => app.jump_link(-1),
             KeyCode::Char('o') => app.nav_back(),
             KeyCode::Char('i') => app.nav_forward(),
+            KeyCode::Char('E') => app.open_edit(),
             KeyCode::Char('/') => app.open_detail_find(),
             KeyCode::Char('n') => app.detail_find_jump(1),
             KeyCode::Char('N') => app.detail_find_jump(-1),
@@ -2265,8 +2376,9 @@ fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
     );
 }
 
-/// The create-task form: header + title / type / priority / labels /
-/// description rows, laid out like `render_drawer` and inset by `right_divider`.
+/// The create/edit task form: header + title / type / priority / labels meta
+/// rows, a `─ description ─` separator, then a multi-line description content
+/// zone filling the rest. Laid out like `render_drawer`, inset by `right_divider`.
 fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
     let rows = Layout::vertical([
         Constraint::Length(1), // header
@@ -2274,13 +2386,14 @@ fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
         Constraint::Length(1), // type chips
         Constraint::Length(1), // priority chips
         Constraint::Length(1), // labels
-        Constraint::Length(1), // description
-        Constraint::Min(0),
+        Constraint::Length(1), // description separator
+        Constraint::Min(0),    // description content zone
     ])
     .split(area);
-    let header = match &f.parent {
-        Some(p) => format!("New task (child of {p})"),
-        None => "New yak".to_string(),
+    let header = match (&f.edit_id, &f.parent) {
+        (Some(id), _) => format!("Edit {id}"),
+        (None, Some(p)) => format!("New task (child of {p})"),
+        (None, None) => "New yak".to_string(),
     };
     frame.render_widget(
         Paragraph::new(Span::styled(
@@ -2335,15 +2448,44 @@ fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
         frame,
         rows[4],
     );
-    render_text_row(
-        f.row == 4,
-        CREATE_LABEL_W,
-        "description",
-        &f.description,
-        "",
-        frame,
+    // Description separator: `▸ description ───` (marker cyan when focused).
+    let desc_focused = f.row == DESC_ROW;
+    let sep_w = rows[5].width as usize;
+    let head = if desc_focused {
+        "▸ description "
+    } else {
+        "  description "
+    };
+    let dashes = sep_w.saturating_sub(disp_width(head));
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                head.to_string(),
+                if desc_focused {
+                    Style::new().fg(Color::Cyan)
+                } else {
+                    Style::new().fg(Color::DarkGray)
+                },
+            ),
+            Span::styled("─".repeat(dashes), Style::new().fg(Color::DarkGray)),
+        ])),
         rows[5],
     );
+    if desc_focused {
+        let mut st = f.description.borrow_mut();
+        frame.render_widget(EditorView::new(&mut st).theme(editor_theme()), rows[6]);
+    } else {
+        let text = f.description.borrow().lines.to_string();
+        let shown = if text.trim().is_empty() {
+            "(no description)".to_string()
+        } else {
+            text
+        };
+        frame.render_widget(
+            Paragraph::new(shown).style(Style::new().fg(Color::DarkGray)),
+            rows[6],
+        );
+    }
 }
 
 /// Label-column widths (gutter marker excluded): the drawer's longest label is
@@ -2956,16 +3098,18 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         );
         return;
     }
-    // Create-form help hint. The `(need title)` marker mirrors Python's guard.
+    // Create/edit-form help hint. The `(need title)` marker mirrors Python's guard.
     if let Overlay::Create(f) = &app.overlay {
         let commit = if f.title_text().is_empty() {
             "(need title)"
+        } else if f.is_editing() {
+            "Ctrl-S save"
         } else {
-            "Enter create"
+            "Ctrl-S create"
         };
         frame.render_widget(
             Paragraph::new(Span::styled(
-                format!("↑↓/Tab rows · ←→ chips · {commit} · Esc cancel"),
+                format!("Tab/↑↓ rows · ←→ chips · {commit} · Esc cancel"),
                 Style::new().fg(Color::DarkGray),
             )),
             area,
@@ -3254,10 +3398,18 @@ mod tests {
     }
 
     #[test]
-    fn body_editor_panel() {
-        // E takes over the detail pane with a header + multi-line body.
+    fn edit_form_panel() {
+        // E opens the shared form seeded from the task, with the description
+        // content zone focused (Tab past the meta rows).
         let mut app = editable();
         handle_key(&mut app, key('E'));
+        match &app.overlay {
+            Overlay::Create(f) => assert!(f.is_editing()),
+            _ => panic!("expected edit form"),
+        }
+        for _ in 0..4 {
+            handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        }
         insta::assert_snapshot!(draw(&app, 72, 14));
     }
 
@@ -3830,7 +3982,7 @@ mod tests {
             press(&mut app, "foo"); // type the title
             tab(&mut app); // -> type row
             arrow_right(&mut app); // task -> bug (single-select cursor)
-            enter(&mut app); // create
+            ctrl_s(&mut app); // create
             assert!(matches!(app.overlay, Overlay::None));
             let created = app.all.iter().find(|t| t.title == "foo").expect("created");
             assert_eq!(created.kind, "bug");
@@ -3851,7 +4003,7 @@ mod tests {
             arrow_left(&mut app); // p3 -> p2
             tab(&mut app); // -> labels
             press(&mut app, "rust, tui");
-            enter(&mut app); // create
+            ctrl_s(&mut app); // create
             let created = app
                 .all
                 .iter()
@@ -3867,19 +4019,19 @@ mod tests {
             let mut app = App::with_herd(herd).unwrap();
             press(&mut app, "C"); // create child of the selected task
             press(&mut app, "kid");
-            enter(&mut app); // create (defaults: task, p3)
+            ctrl_s(&mut app); // create (defaults: task, p3)
             let created = app.all.iter().find(|t| t.title == "kid").expect("child");
             assert_eq!(created.parent.as_deref(), Some("p0"));
             assert_eq!(created.kind, "task");
         }
 
         #[test]
-        fn create_empty_title_enter_is_noop() {
-            // Enter with an empty title keeps the form open (Python's `(need title)`).
+        fn create_empty_title_ctrl_s_is_noop() {
+            // Ctrl-S with an empty title keeps the form open (`(need title)`).
             let (_dir, herd) = temp_herd(&[]);
             let mut app = App::with_herd(herd).unwrap();
             press(&mut app, "c");
-            enter(&mut app);
+            ctrl_s(&mut app);
             assert!(matches!(app.overlay, Overlay::Create(_)));
             assert!(app.all.is_empty());
         }
@@ -3910,14 +4062,47 @@ mod tests {
         }
 
         #[test]
-        fn body_edit_commits_with_ctrl_s() {
+        fn edit_form_updates_description() {
             let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
             let mut app = App::with_herd(herd).unwrap();
-            press(&mut app, "E"); // multi-line body editor (empty body)
+            press(&mut app, "E"); // open the edit form seeded from t0
+            tab(&mut app); // title -> type
+            tab(&mut app); // -> priority
+            tab(&mut app); // -> labels
+            tab(&mut app); // -> description content zone
             press(&mut app, "hello");
             ctrl_s(&mut app);
             assert!(matches!(app.overlay, Overlay::None));
             assert_eq!(app.task("t0").unwrap().body, "hello");
+            assert_eq!(app.task("t0").unwrap().title, "solo"); // untouched
+        }
+
+        #[test]
+        fn edit_form_changes_type_and_priority() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "E");
+            tab(&mut app); // -> type
+            arrow_right(&mut app); // task -> bug
+            tab(&mut app); // -> priority (p3 == idx 2)
+            arrow_left(&mut app); // p3 -> p2
+            arrow_left(&mut app); // p2 -> p1
+            ctrl_s(&mut app);
+            let t = app.task("t0").unwrap();
+            assert_eq!(t.kind, "bug");
+            assert_eq!(t.priority, 1);
+        }
+
+        #[test]
+        fn edit_form_cancel_leaves_task_unchanged() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "E");
+            press(&mut app, "zzz"); // edits the title field in place
+            esc(&mut app); // cancel (title row, not description)
+            assert!(matches!(app.overlay, Overlay::None));
+            assert_eq!(app.task("t0").unwrap().title, "solo");
+            assert_eq!(app.notification.as_deref(), Some("edit cancelled"));
         }
 
         fn with_deps(id: &str, status: Status, deps: &[&str]) -> Task {

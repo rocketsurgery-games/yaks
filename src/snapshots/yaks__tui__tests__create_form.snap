@@ -9,10 +9,10 @@ expression: "draw(&app, 72, 14)"
                         │   type         task bug feature idea
                         │ ▸ priority     p1 p2 p3 p4 p5
                         │   labels
-                        │   description
+                        │   description ───────────────────────────────
+                        │ (no description)
                         │
                         │
                         │
                         │
-                        │
-↑↓/Tab rows · ←→ chips · Enter create · Esc cancel
+Tab/↑↓ rows · ←→ chips · Ctrl-S create · Esc cancel
