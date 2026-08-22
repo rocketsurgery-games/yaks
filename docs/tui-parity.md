@@ -226,3 +226,26 @@ the refresh is silent (it must not clobber a mutation's own notification). This
 keeps the UI from drifting relative to disk when the herd is edited from another
 process (CLI, `$EDITOR`, git, a second TUI). Best-effort: if the watcher can't
 be created the TUI still runs, just without auto-refresh.
+
+## 14. Colour palette — [done] (yaksrs-bce4)
+
+Brought the Rust palette in line with Python's `colors.py`, verified via the
+`--style` snapshots:
+
+- **Priority** (`priority_style`, was a flat gray): P1 red+bold, P2 magenta,
+  P3 yellow, P4 green, P5 blue+dim — matching Python's `_PRIORITY_PAIRS`.
+- **Type** cyan (was an olive `Rgb(181,137,0)`); **labels** magenta+dim (was
+  gray); **id** blue and the blocked `*` magenta+bold were already right.
+- **Selection highlight** (list, fuzzy/view pickers): a subtle dark-gray
+  background (`Indexed(237)`, Python's C_SELECTED) with the foreground reset to
+  default — replacing the obtrusive black-on-cyan reverse. Resetting fg keeps
+  the row legible on the dark bg (blue/blue-dim would be low-contrast). The
+  unfocused list uses `Indexed(236)` for a faint focus cue.
+- **Detail links**: non-current blue+underline; current blue on `Indexed(237)`
+  bold+underline (Python C_LINK / C_LINK_SEL). Find matches stay black-on-yellow
+  (C_MATCH).
+- **Chip cursor** (drawer/form): the active chip now sits on the `Indexed(237)`
+  background + bold (keeping its green "selected" fg) instead of a hard reverse.
+
+Note: colour lives only in the `--style` snapshots; the plain-text insta
+snapshots (symbols only) are unaffected, so this pass changed no `*.snap`.

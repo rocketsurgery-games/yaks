@@ -2277,7 +2277,7 @@ fn render_view_picker(app: &App, sel: usize, frame: &mut Frame, area: Rect) {
         state.select(Some(sel.min(app.views.len() - 1)));
     }
     frame.render_stateful_widget(
-        List::new(items).highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
+        List::new(items).highlight_style(Style::new().bg(Color::Indexed(237))),
         body,
         &mut state,
     );
@@ -2599,7 +2599,7 @@ fn render_chip_row(
             Style::new().fg(Color::DarkGray)
         };
         if current_row && cursor_idx == j {
-            style = style.add_modifier(Modifier::REVERSED);
+            style = style.bg(Color::Indexed(237)).add_modifier(Modifier::BOLD);
         }
         spans.push(Span::raw(" "));
         spans.push(Span::styled(disp.clone(), style));
@@ -2737,7 +2737,7 @@ fn render_fuzzy_results(app: &App, fp: &FuzzyPick, frame: &mut Frame, area: Rect
         state.select(Some(fp.sel.min(total - 1)));
     }
     frame.render_stateful_widget(
-        List::new(items).highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
+        List::new(items).highlight_style(Style::new().bg(Color::Indexed(237))),
         body,
         &mut state,
     );
@@ -2780,6 +2780,19 @@ fn disp_width(s: &str) -> usize {
             }
         })
         .sum()
+}
+
+/// Per-priority colour, matching Python's `_PRIORITY_PAIRS`:
+/// P1 urgent red+bold, P2 high magenta, P3 medium yellow, P4 low green,
+/// P5 lowest blue+dim.
+fn priority_style(p: u8) -> Style {
+    match p {
+        1 => Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+        2 => Style::new().fg(Color::Magenta),
+        4 => Style::new().fg(Color::Green),
+        5 => Style::new().fg(Color::Blue).add_modifier(Modifier::DIM),
+        _ => Style::new().fg(Color::Yellow), // 3 (and any fallback)
+    }
 }
 
 fn status_word(s: Status) -> &'static str {
@@ -2878,10 +2891,15 @@ fn render_list(app: &App, frame: &mut Frame, area: Rect) {
         .collect();
     let mut state = ListState::default();
     state.select(Some(app.cursor.min(rows.len() - 1)));
+    // Subtle selection (Python's C_SELECTED): a dark-gray background with the
+    // foreground reset to the terminal default, rather than an obtrusive
+    // black-on-cyan reverse. Resetting fg keeps the row legible on the dark bg
+    // (per-field colours like blue/blue-dim would be low-contrast on 237). The
+    // unfocused list uses a slightly darker bg so focus is still clear.
     let hl = if focused {
-        Style::new().fg(Color::Black).bg(Color::Cyan)
+        Style::new().fg(Color::Reset).bg(Color::Indexed(237))
     } else {
-        Style::new().add_modifier(Modifier::REVERSED)
+        Style::new().fg(Color::Reset).bg(Color::Indexed(236))
     };
     frame.render_stateful_widget(List::new(items).highlight_style(hl), area, &mut state);
 }
@@ -2943,18 +2961,33 @@ fn list_item<'a>(
     } else {
         String::new()
     };
-    let mut right = String::new();
+    // Right side, as separately-styled spans (labels magenta-dim like Python's
+    // C_LABEL, star its own glyph, collapse badge dim).
+    let mut right_spans: Vec<Span> = Vec::new();
+    let mut right_plain = String::new();
     if !label_str.is_empty() {
-        right.push_str(&label_str);
+        right_plain.push_str(&label_str);
+        right_spans.push(Span::styled(
+            label_str.clone(),
+            dim(Style::new().fg(Color::Magenta).add_modifier(Modifier::DIM)),
+        ));
     }
     if starred {
-        if !right.is_empty() {
-            right.push(' ');
+        if !right_plain.is_empty() {
+            right_plain.push(' ');
+            right_spans.push(Span::raw(" "));
         }
-        right.push('\u{2b50}');
+        right_plain.push('\u{2b50}');
+        right_spans.push(Span::raw("\u{2b50}"));
     }
-    right.push_str(&badge);
-    let rw = disp_width(&right);
+    if !badge.is_empty() {
+        right_plain.push_str(&badge);
+        right_spans.push(Span::styled(
+            badge.clone(),
+            dim(Style::new().fg(Color::DarkGray)),
+        ));
+    }
+    let rw = disp_width(&right_plain);
 
     let left_fixed = 1 + disp_width(&body_padded) + disp_width(&pri_s) + disp_width(&type_s);
     let title_avail = width.saturating_sub(left_fixed + rw + 1);
@@ -2975,16 +3008,14 @@ fn list_item<'a>(
             },
         ),
         Span::styled(body_padded, dim(Style::new().fg(Color::Blue))),
-        Span::styled(pri_s, dim(Style::new().fg(Color::DarkGray))),
-        Span::styled(type_s, dim(Style::new().fg(Color::Rgb(181, 137, 0)))),
+        Span::styled(pri_s, dim(priority_style(r.task.priority))),
+        Span::styled(type_s, dim(Style::new().fg(Color::Cyan))),
         Span::styled(title, dim(Style::new())),
     ];
     if pad > 0 {
         spans.push(Span::raw(" ".repeat(pad)));
     }
-    if !right.is_empty() {
-        spans.push(Span::styled(right, dim(Style::new().fg(Color::DarkGray))));
-    }
+    spans.extend(right_spans);
     ListItem::new(Line::from(spans))
 }
 
@@ -3060,7 +3091,11 @@ fn render_dline<'a>(
     for (col, len, _) in &dl.links {
         let is_current = cur.is_some_and(|j| j.line == line_idx && j.col == *col);
         let st = if is_current {
-            Style::new().fg(Color::Black).bg(Color::Cyan)
+            // Python C_LINK_SEL: blue on the subtle 237 background, emphasised.
+            Style::new()
+                .fg(Color::Blue)
+                .bg(Color::Indexed(237))
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
         } else {
             Style::new()
                 .fg(Color::Blue)
@@ -3458,6 +3493,18 @@ mod tests {
         let mut app = sample();
         handle_key(&mut app, key('?'));
         insta::assert_snapshot!(draw(&app, 72, 16));
+    }
+
+    #[test]
+    fn priority_palette_matches_python() {
+        // P1 red+bold, P2 magenta, P3 yellow, P4 green, P5 blue+dim (yaksrs-bce4).
+        assert_eq!(priority_style(1).fg, Some(Color::Red));
+        assert!(priority_style(1).add_modifier.contains(Modifier::BOLD));
+        assert_eq!(priority_style(2).fg, Some(Color::Magenta));
+        assert_eq!(priority_style(3).fg, Some(Color::Yellow));
+        assert_eq!(priority_style(4).fg, Some(Color::Green));
+        assert_eq!(priority_style(5).fg, Some(Color::Blue));
+        assert!(priority_style(5).add_modifier.contains(Modifier::DIM));
     }
 
     #[test]
