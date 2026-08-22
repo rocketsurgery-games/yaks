@@ -60,6 +60,9 @@ pub struct HeadlessOpts {
     pub height: u16,
     /// `None` emits just the char grid; `Some(enc)` appends style information.
     pub style: Option<StyleEncoding>,
+    /// When true, after the first (full) frame emit only changed body lines as
+    /// `L<i>: <line>` -- large token savings across a multi-step session.
+    pub diff: bool,
 }
 
 pub fn run_headless(app: App, opts: HeadlessOpts) -> Result<()> {
@@ -70,6 +73,8 @@ pub fn run_headless(app: App, opts: HeadlessOpts) -> Result<()> {
         w: opts.width.max(1),
         h: opts.height.max(1),
         style: opts.style,
+        diff: opts.diff,
+        prev_body: None,
         frame: 0,
     };
     d.emit(&mut out)?; // initial frame
@@ -88,6 +93,9 @@ struct Driver {
     w: u16,
     h: u16,
     style: Option<StyleEncoding>,
+    diff: bool,
+    /// Serialized body of the previous frame, for line-level diffing.
+    prev_body: Option<Vec<String>>,
     frame: usize,
 }
 
@@ -141,19 +149,44 @@ impl Driver {
 
     fn emit(&mut self, out: &mut impl Write) -> Result<()> {
         let buf = render_to_buffer(&self.app, self.w, self.h);
+        let body = encode_body(&buf, self.style);
+        // In diff mode, emit only changed lines against the previous frame once
+        // we have one to compare with the same shape; otherwise emit the whole
+        // body (first frame, or geometry/line-count changed).
+        let (tag, lines) = if self.diff {
+            match self.prev_body.take() {
+                Some(prev) if prev.len() == body.len() => {
+                    let changed = prev
+                        .iter()
+                        .zip(body.iter())
+                        .enumerate()
+                        .filter(|(_, (a, b))| a != b)
+                        .map(|(i, (_, b))| format!("L{i}: {b}"))
+                        .collect::<Vec<_>>();
+                    (" · diff", changed)
+                }
+                _ => (" · full", body.clone()),
+            }
+        } else {
+            ("", body.clone())
+        };
         writeln!(
             out,
-            "=== frame {} · {}x{} · {} ===",
+            "=== frame {} · {}x{}{} · {} ===",
             self.frame,
             self.w,
             self.h,
+            tag,
             self.app.state_header()
         )?;
-        for line in encode_body(&buf, self.style) {
+        for line in &lines {
             writeln!(out, "{line}")?;
         }
         writeln!(out, "=== end ===")?;
         out.flush()?;
+        if self.diff {
+            self.prev_body = Some(body);
+        }
         self.frame += 1;
         Ok(())
     }
@@ -411,6 +444,8 @@ mod tests {
             w: 60,
             h: 10,
             style,
+            diff: false,
+            prev_body: None,
             frame: 0,
         };
         let mut out: Vec<u8> = Vec::new();
@@ -472,6 +507,30 @@ mod tests {
     }
 
     #[test]
+    fn diff_mode_full_then_delta() {
+        let app = App::new(vec![
+            sample_task("a0", "Root A"),
+            sample_task("a1", "Child A1"),
+        ]);
+        let mut d = Driver {
+            app,
+            w: 50,
+            h: 8,
+            style: None,
+            diff: true,
+            prev_body: None,
+            frame: 0,
+        };
+        let mut out: Vec<u8> = Vec::new();
+        d.emit(&mut out).unwrap(); // frame 0: full
+        d.step("key S", &mut out).unwrap(); // opens the state picker -> bottom line changes
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains(" · full · "));
+        assert!(s.contains(" · diff · "));
+        assert!(s.contains("\nL")); // at least one changed-line label
+    }
+
+    #[test]
     fn parse_encoding_names() {
         assert_eq!(StyleEncoding::parse("spans"), Some(StyleEncoding::Spans));
         assert_eq!(
@@ -501,6 +560,8 @@ mod tests {
             w: 40,
             h: 8,
             style: None,
+            diff: false,
+            prev_body: None,
             frame: 0,
         };
         let mut out: Vec<u8> = Vec::new();

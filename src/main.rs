@@ -195,6 +195,9 @@ enum Command {
         /// --style; defaults to parallel when only --style is given.
         #[arg(long)]
         style_encoding: Option<String>,
+        /// Headless: after the first frame, emit only changed body lines.
+        #[arg(long)]
+        diff: bool,
     },
 }
 
@@ -458,6 +461,7 @@ fn main() -> Result<()> {
             size,
             style,
             style_encoding,
+            diff,
         } => {
             let app = tui::App::with_herd(herd)?;
             if headless {
@@ -478,6 +482,7 @@ fn main() -> Result<()> {
                         width: w,
                         height: h,
                         style: encoding,
+                        diff,
                     },
                 )?;
             } else {
