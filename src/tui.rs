@@ -1590,6 +1590,31 @@ impl App {
         }
     }
 
+    /// J/K — move to the next/prev task in the list while staying in the detail
+    /// pane, resetting the per-task detail view state.
+    fn detail_next_task(&mut self, delta: i32) {
+        let len = self.rows().len();
+        if len == 0 {
+            return;
+        }
+        let next = (self.cursor as i32 + delta).clamp(0, len as i32 - 1) as usize;
+        if next != self.cursor {
+            self.cursor = next;
+            self.detail_scroll = 0;
+            self.detail_link = 0;
+            self.detail_find = None;
+            self.detail_match = 0;
+        }
+    }
+
+    /// G — scroll the detail pane so its last line rests at the viewport bottom.
+    fn detail_scroll_bottom(&mut self) {
+        if let Some(t) = self.selected() {
+            let n = detail::build(t, &self.all).len() as u16;
+            self.detail_scroll = n.saturating_sub(self.detail_page.max(1));
+        }
+    }
+
     /// o — jump back to the previously visited task (browser back).
     fn nav_back(&mut self) {
         let Some(prev) = self.nav_back.pop() else {
@@ -2161,12 +2186,27 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::BackTab | KeyCode::Char('[') => app.jump_link(-1),
             KeyCode::Char('o') => app.nav_back(),
             KeyCode::Char('i') => app.nav_forward(),
-            KeyCode::Char('E') => app.open_edit(),
             KeyCode::Char('/') => app.open_detail_find(),
             KeyCode::Char('n') => app.detail_find_jump(1),
             KeyCode::Char('N') => app.detail_find_jump(-1),
             KeyCode::Char('?') => app.open_help(),
             KeyCode::Enter => app.follow_link(),
+            // Mutating ops mirrored from the list pane (all act on selected()).
+            KeyCode::Char('S') => app.open_state_picker(),
+            KeyCode::Char('P') => app.open_priority_picker(),
+            KeyCode::Char('T') => app.open_type_picker(),
+            KeyCode::Char('L') => app.open_labels(),
+            KeyCode::Char('X') => app.open_slaughter_confirm(),
+            KeyCode::Char('E') => app.open_edit(),
+            KeyCode::Char('D') => app.open_dep_picker(),
+            KeyCode::Char('R') => app.open_reparent_picker(),
+            KeyCode::Char('c') => app.open_create(false),
+            KeyCode::Char('C') => app.open_create(true),
+            KeyCode::Char('f') => app.open_drawer(),
+            KeyCode::Char('*') => app.toggle_star(),
+            // Move between tasks without leaving the detail pane.
+            KeyCode::Char('J') => app.detail_next_task(1),
+            KeyCode::Char('K') => app.detail_next_task(-1),
             KeyCode::Char('j') | KeyCode::Down => {
                 app.detail_scroll = app.detail_scroll.saturating_add(1)
             }
@@ -2176,6 +2216,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('d') => app.detail_scroll = app.detail_scroll.saturating_add(half as u16),
             KeyCode::Char('u') => app.detail_scroll = app.detail_scroll.saturating_sub(half as u16),
             KeyCode::Char('g') => app.detail_scroll = 0,
+            KeyCode::Char('G') => app.detail_scroll_bottom(),
             _ => {}
         },
     }
@@ -2321,6 +2362,7 @@ fn help_content() -> Vec<Line<'static>> {
         entry("Tab / [ / ]", "Cycle links"),
         entry("Enter", "Follow link"),
         entry("i / o", "Nav forward / back"),
+        entry("J / K", "Next / prev task (stay in detail)"),
         entry("/ , n / N", "Find, next / prev match"),
         blank(),
         section("Edit"),
