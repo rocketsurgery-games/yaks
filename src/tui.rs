@@ -525,6 +525,10 @@ pub struct App {
     /// Active detail-pane find query + which match is current (n/N cycle).
     detail_find: Option<String>,
     detail_match: usize,
+    /// Browser-style navigation history of visited task ids (o = back, i =
+    /// forward), driven by following detail links.
+    nav_back: Vec<String>,
+    nav_fwd: Vec<String>,
     collapsed: HashSet<String>,
     /// The live view filter applied by the tree (re-colors + prunes).
     filter: FilterSpec,
@@ -559,6 +563,8 @@ impl App {
             detail_link: 0,
             detail_find: None,
             detail_match: 0,
+            nav_back: Vec::new(),
+            nav_fwd: Vec::new(),
             collapsed: HashSet::new(),
             filter,
             page: 10,
@@ -1375,6 +1381,17 @@ impl App {
         self.detail_scroll = m[self.detail_match].0 as u16;
     }
 
+    /// Select `id` and show it in the detail pane, resetting the per-task detail
+    /// view state (scroll/link/find/match). Shared by link-follow and i/o nav.
+    fn open_task_in_detail(&mut self, id: &str) {
+        self.select_task(id); // drops focus to the list; we re-raise it below
+        self.focus = Focus::Detail;
+        self.detail_scroll = 0;
+        self.detail_link = 0;
+        self.detail_find = None;
+        self.detail_match = 0;
+    }
+
     fn follow_link(&mut self) {
         let jumps = self.detail_jumps();
         let Some(j) = jumps.into_iter().nth(self.detail_link) else {
@@ -1382,20 +1399,47 @@ impl App {
         };
         match j.target {
             detail::Target::Task(id) => {
-                self.select_task(&id);
-                // Stay in the detail pane on the followed task (select_task drops
-                // us to the list); reset the per-task detail view state.
-                self.focus = Focus::Detail;
-                self.detail_scroll = 0;
-                self.detail_link = 0;
-                self.detail_find = None;
-                self.detail_match = 0;
+                // Record the jump for o/i history (browser-style: a new follow
+                // clears the forward stack).
+                if let Some(cur) = self.selected_id() {
+                    if cur != id {
+                        self.nav_back.push(cur);
+                        self.nav_fwd.clear();
+                    }
+                }
+                self.open_task_in_detail(&id);
                 self.notification = Some(format!("→ {id}"));
             }
             detail::Target::Url(u) => {
                 self.notification = Some(format!("link: {u}"));
             }
         }
+    }
+
+    /// o — jump back to the previously visited task (browser back).
+    fn nav_back(&mut self) {
+        let Some(prev) = self.nav_back.pop() else {
+            self.notification = Some("no earlier yak".into());
+            return;
+        };
+        if let Some(cur) = self.selected_id() {
+            self.nav_fwd.push(cur);
+        }
+        self.open_task_in_detail(&prev);
+        self.notification = Some(format!("← {prev}"));
+    }
+
+    /// i — jump forward again after going back (browser forward).
+    fn nav_forward(&mut self) {
+        let Some(next) = self.nav_fwd.pop() else {
+            self.notification = Some("no later yak".into());
+            return;
+        };
+        if let Some(cur) = self.selected_id() {
+            self.nav_back.push(cur);
+        }
+        self.open_task_in_detail(&next);
+        self.notification = Some(format!("→ {next}"));
     }
 
     /// Jump to the Hairy view (where new tasks land) and select `id`.
@@ -1891,6 +1935,8 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => app.focus = Focus::List,
             KeyCode::Tab | KeyCode::Char(']') => app.jump_link(1),
             KeyCode::BackTab | KeyCode::Char('[') => app.jump_link(-1),
+            KeyCode::Char('o') => app.nav_back(),
+            KeyCode::Char('i') => app.nav_forward(),
             KeyCode::Char('/') => app.open_detail_find(),
             KeyCode::Char('n') => app.detail_find_jump(1),
             KeyCode::Char('N') => app.detail_find_jump(-1),
@@ -3229,6 +3275,31 @@ mod tests {
         assert_eq!(app.focus, Focus::Detail);
         assert_eq!(app.selected_id().as_deref(), Some("a1"));
         assert!(!app.collapsed.contains("a0"), "ancestor expanded");
+    }
+
+    #[test]
+    fn nav_history_back_and_forward() {
+        // o/i retrace the link-follow chain (yaksrs-5d63).
+        let mut app = linked();
+        enter_key(&mut app); // detail on a0
+        enter_key(&mut app); // follow link 0 -> a1
+        assert_eq!(app.selected_id().as_deref(), Some("a1"));
+        handle_key(&mut app, key('o')); // back -> a0
+        assert_eq!(app.selected_id().as_deref(), Some("a0"));
+        assert_eq!(app.focus, Focus::Detail);
+        handle_key(&mut app, key('i')); // forward -> a1
+        assert_eq!(app.selected_id().as_deref(), Some("a1"));
+        handle_key(&mut app, key('i')); // nothing further
+        assert_eq!(app.notification.as_deref(), Some("no later yak"));
+    }
+
+    #[test]
+    fn nav_back_on_empty_history_is_noop() {
+        let mut app = linked();
+        enter_key(&mut app); // detail on a0, no history yet
+        handle_key(&mut app, key('o'));
+        assert_eq!(app.selected_id().as_deref(), Some("a0"));
+        assert_eq!(app.notification.as_deref(), Some("no earlier yak"));
     }
 
     #[test]
