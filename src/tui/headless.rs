@@ -146,8 +146,10 @@ impl Driver {
     }
 
     fn press(&mut self, ev: KeyEvent) {
-        // Mirror the live loop's paging basis (main area height minus tab+status).
+        // Mirror the live loop's paging basis (main area height minus tab+status,
+        // and the detail viewport which also drops the blank gap line).
         self.app.page = self.h.saturating_sub(2).max(1);
+        self.app.detail_page = self.h.saturating_sub(3).max(1);
         handle_key(&mut self.app, ev);
     }
 

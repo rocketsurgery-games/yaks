@@ -530,6 +530,9 @@ pub struct App {
     filter: FilterSpec,
     /// Approx. list viewport height, refreshed each loop for paging math.
     page: u16,
+    /// Approx. detail viewport height (mid area = terminal height - 3),
+    /// refreshed each loop; used to keep the active link scrolled into view.
+    detail_page: u16,
     overlay: Overlay,
     /// Transient one-line status message shown until the next mutation.
     notification: Option<String>,
@@ -559,6 +562,7 @@ impl App {
             collapsed: HashSet::new(),
             filter,
             page: 10,
+            detail_page: 10,
             overlay: Overlay::None,
             notification: None,
             editor_vim: true,
@@ -1309,8 +1313,21 @@ impl App {
         }
         let n = jumps.len() as i32;
         self.detail_link = (self.detail_link as i32 + delta).rem_euclid(n) as usize;
-        // Bring the target line into view.
-        self.detail_scroll = jumps[self.detail_link].line as u16;
+        // Bring the target line into view without disturbing the scroll when it
+        // is already visible (so cycling links doesn't jump the viewport).
+        let line = jumps[self.detail_link].line as u16;
+        self.scroll_line_into_view(line);
+    }
+
+    /// Move `detail_scroll` the minimum needed so `line` sits inside the detail
+    /// viewport; leave it untouched when the line is already visible.
+    fn scroll_line_into_view(&mut self, line: u16) {
+        let vh = self.detail_page.max(1);
+        if line < self.detail_scroll {
+            self.detail_scroll = line;
+        } else if line >= self.detail_scroll.saturating_add(vh) {
+            self.detail_scroll = line.saturating_sub(vh - 1);
+        }
     }
 
     fn open_detail_find(&mut self) {
@@ -1767,7 +1784,9 @@ fn event_loop(term: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> R
     loop {
         term.draw(|f| render(app, f))?;
         // Record the main-area height (minus tab + help lines) for paging.
-        app.page = term.size()?.height.saturating_sub(2).max(1);
+        let h = term.size()?.height;
+        app.page = h.saturating_sub(2).max(1);
+        app.detail_page = h.saturating_sub(3).max(1);
         if let Event::Key(k) = event::read()? {
             if k.kind == KeyEventKind::Press {
                 handle_key(app, k);
@@ -3183,6 +3202,20 @@ mod tests {
             KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE),
         );
         assert_eq!(app.detail_link, 0);
+    }
+
+    #[test]
+    fn scroll_into_view_is_stable_and_minimal() {
+        let mut app = App::new(vec![]);
+        app.detail_page = 10; // viewport shows 10 rows
+        app.detail_scroll = 5; // currently rows 5..15
+        app.scroll_line_into_view(8); // already visible -> unchanged
+        assert_eq!(app.detail_scroll, 5);
+        app.scroll_line_into_view(2); // above -> scroll up to it
+        assert_eq!(app.detail_scroll, 2);
+        app.detail_scroll = 5;
+        app.scroll_line_into_view(20); // below -> land it on the last row
+        assert_eq!(app.detail_scroll, 20 - (10 - 1));
     }
 
     // -- view substrate (6b-i) --------------------------------------------
