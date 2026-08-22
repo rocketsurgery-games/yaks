@@ -7,9 +7,12 @@
 
 mod cache;
 mod detail;
+mod headless;
 mod tree;
 mod view;
 mod views_store;
+
+pub use headless::{HeadlessOpts, run_headless};
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -803,6 +806,21 @@ impl App {
             return;
         }
         self.cursor = (self.cursor as i32 + delta).clamp(0, len - 1) as usize;
+    }
+
+    /// One-line summary of internal state for the headless snapshot header.
+    fn state_header(&self) -> String {
+        let focus = match self.focus {
+            Focus::List => "list",
+            Focus::Detail => "detail",
+        };
+        let sel = self.selected_id().unwrap_or_else(|| "-".into());
+        format!(
+            "focus={focus} · view={} · cursor={} · sel={sel} · overlay={}",
+            self.active_view().name,
+            self.cursor,
+            overlay_name(&self.overlay),
+        )
     }
 
     fn toggle_collapse(&mut self) {
@@ -1967,6 +1985,20 @@ fn render_fuzzy_results(app: &App, fp: &FuzzyPick, frame: &mut Frame, area: Rect
         body,
         &mut state,
     );
+}
+
+fn overlay_name(o: &Overlay) -> &'static str {
+    match o {
+        Overlay::None => "none",
+        Overlay::Pick { .. } => "pick",
+        Overlay::Confirm { .. } => "confirm",
+        Overlay::Edit(_) => "edit",
+        Overlay::Fuzzy(_) => "fuzzy",
+        Overlay::Search(_) => "search",
+        Overlay::Drawer(_) => "drawer",
+        Overlay::DetailFind(_) => "detail-find",
+        Overlay::ViewPicker(_) => "view-picker",
+    }
 }
 
 fn status_word(s: Status) -> &'static str {

@@ -14,7 +14,11 @@ fn run(args: &[&str]) -> String {
         .args(args)
         .output()
         .unwrap();
-    assert!(out.status.success(), "command {args:?} failed: {:?}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "command {args:?} failed: {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8(out.stdout).unwrap()
 }
 
@@ -22,6 +26,44 @@ macro_rules! snap {
     ($name:literal, $args:expr) => {
         insta::assert_snapshot!($name, run($args))
     };
+}
+
+/// Drive the headless TUI over the fixture herd with isolated XDG dirs (so
+/// persisted views/cache can't make the output machine-dependent).
+fn run_headless(args: &[&str], stdin: &str) -> String {
+    let herd = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/herd");
+    let xdg = std::env::temp_dir().join(format!("yaksrs-headless-{}", std::process::id()));
+    let out = Command::cargo_bin("yaks")
+        .unwrap()
+        .current_dir(herd)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .env("XDG_CACHE_HOME", &xdg)
+        .args(args)
+        .write_stdin(stdin)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "headless {args:?} failed: {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&xdg);
+    String::from_utf8(out.stdout).unwrap()
+}
+
+#[test]
+fn headless_session() {
+    // Initial frame + one cursor move; deterministic under isolated XDG.
+    let out = run_headless(&["tui", "--headless", "--size", "72x12"], "key j\nquit\n");
+    insta::assert_snapshot!("headless_session", out);
+}
+
+#[test]
+fn headless_state_header_tracks_focus() {
+    let out = run_headless(&["tui", "--headless", "--size", "72x12"], "key l\nquit\n");
+    // Entering the detail pane flips the state header's focus field.
+    assert!(out.contains("focus=list"));
+    assert!(out.contains("focus=detail"));
 }
 
 #[test]
@@ -38,7 +80,18 @@ fn list_json() {
 }
 #[test]
 fn list_filtered() {
-    snap!("list_filtered", &["list", "--type", "feature", "--priority", "1", "--priority", "2"]);
+    snap!(
+        "list_filtered",
+        &[
+            "list",
+            "--type",
+            "feature",
+            "--priority",
+            "1",
+            "--priority",
+            "2"
+        ]
+    );
 }
 #[test]
 fn next() {

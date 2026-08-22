@@ -180,7 +180,18 @@ enum Command {
     /// Group yaks by the external issue they roll up to.
     Rollup(RollupArgs),
     /// Open the interactive terminal UI.
-    Tui,
+    Tui {
+        /// Drive the TUI headlessly: read actions on stdin, emit text snapshots
+        /// on stdout (for agents / scripted tests). No real terminal is used.
+        #[arg(long)]
+        headless: bool,
+        /// Terminal size for headless mode, e.g. "100x30" (default 80x24).
+        #[arg(long)]
+        size: Option<String>,
+        /// In headless mode, also emit an aligned style grid + legend.
+        #[arg(long)]
+        style: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -438,11 +449,41 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Command::Tui => {
-            tui::run(tui::App::with_herd(herd)?)?;
+        Command::Tui {
+            headless,
+            size,
+            style,
+        } => {
+            let app = tui::App::with_herd(herd)?;
+            if headless {
+                let (w, h) = parse_size(size.as_deref());
+                tui::run_headless(
+                    app,
+                    tui::HeadlessOpts {
+                        width: w,
+                        height: h,
+                        style,
+                    },
+                )?;
+            } else {
+                tui::run(app)?;
+            }
         }
     }
     Ok(())
+}
+
+/// Parse a "WxH" size string; falls back to 80x24 on absence or bad input.
+fn parse_size(s: Option<&str>) -> (u16, u16) {
+    let default = (80, 24);
+    let Some(s) = s else { return default };
+    let Some((w, h)) = s.split_once(['x', 'X']) else {
+        return default;
+    };
+    match (w.trim().parse(), h.trim().parse()) {
+        (Ok(w), Ok(h)) if w > 0 && h > 0 => (w, h),
+        _ => default,
+    }
 }
 
 // -- CLI arg mapping ------------------------------------------------------

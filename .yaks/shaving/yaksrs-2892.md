@@ -4,7 +4,7 @@ title: 'Phase 3: demo + snapshot testing via rendered Buffer + avt'
 type: task
 priority: 4
 created: '2026-08-20T03:25:50Z'
-updated: '2026-08-20T03:25:50Z'
+updated: '2026-08-22T03:18:46Z'
 labels:
 - rust
 - phase3
