@@ -1,0 +1,20 @@
+---
+source: src/tui.rs
+expression: "draw(&app, 72, 16)"
+---
+ Hairy 2 · Shaving 1 · Shorn 1 · Recent 4 · Starred 0
+▾ [H] p2 Root A                 Views
+    [H] p3 Child A1             ▸ * Hairy  (2)  (builtin)
+    [N] p3 Child A2 done          * Shaving  (1)  (builtin)
+                                  * Shorn  (1)  (builtin)
+                                  * Recent  (4)  (builtin)
+                                  * Starred  (0)  (builtin)
+
+
+
+
+
+
+
+
+Enter open · p pin · J/K move · r rename · d delete · Esc close

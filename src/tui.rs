@@ -71,6 +71,8 @@ enum Overlay {
     Drawer(Drawer),
     /// Detail-pane find: edits `App.detail_find` live.
     DetailFind(SearchBox),
+    /// The view manager (`v`): carries the picker's selection index.
+    ViewPicker(usize),
 }
 
 /// What a resolved single-key pick should do (carries the target task id).
@@ -107,6 +109,7 @@ enum EditAction {
     Body(String),
     CreateTitle { parent: Option<String> },
     SaveView,
+    RenameView { index: usize },
 }
 
 fn make_handler(vim: bool) -> EditorEventHandler {
@@ -700,6 +703,99 @@ impl App {
         self.notification = Some(format!("saved view: {name}"));
     }
 
+    fn persist_views(&self) {
+        if let Some(h) = &self.herd {
+            views_store::save_views(h.root(), &self.views);
+        }
+    }
+
+    fn open_view_picker(&mut self) {
+        self.overlay = Overlay::ViewPicker(self.view.min(self.views.len().saturating_sub(1)));
+    }
+
+    fn handle_view_picker_key(&mut self, k: KeyEvent) {
+        let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        let sel = match &self.overlay {
+            Overlay::ViewPicker(s) => *s,
+            _ => return,
+        };
+        let n = self.views.len();
+        match k.code {
+            KeyCode::Esc | KeyCode::Char('q') => self.overlay = Overlay::None,
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.overlay = Overlay::ViewPicker((sel + 1).min(n - 1))
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.overlay = Overlay::ViewPicker(sel.saturating_sub(1))
+            }
+            KeyCode::Enter => {
+                self.set_view(sel);
+                self.overlay = Overlay::None;
+            }
+            KeyCode::Char('p') | KeyCode::Char(' ') => {
+                if self.views[sel].pinned && !views_store::can_unpin(&self.views, sel) {
+                    self.notification = Some("can't unpin the last tab".into());
+                } else {
+                    self.views[sel].pinned = !self.views[sel].pinned;
+                    self.persist_views();
+                }
+            }
+            KeyCode::Char('J') => self.reorder_view(sel, 1),
+            KeyCode::Char('K') => self.reorder_view(sel, -1),
+            KeyCode::Char('r') => {
+                let name = self.views[sel].name.clone();
+                self.overlay = Overlay::Edit(Editor::new(
+                    self.editor_vim,
+                    true,
+                    "Rename view: ".into(),
+                    &name,
+                    EditAction::RenameView { index: sel },
+                ));
+            }
+            KeyCode::Char('d') => self.delete_view(sel),
+            _ if ctrl && k.code == KeyCode::Char('n') => {
+                self.overlay = Overlay::ViewPicker((sel + 1).min(n - 1))
+            }
+            _ if ctrl && k.code == KeyCode::Char('p') => {
+                self.overlay = Overlay::ViewPicker(sel.saturating_sub(1))
+            }
+            _ => {}
+        }
+    }
+
+    /// Move view `sel` by `dir`, keeping the active view pointing at its own
+    /// entry and the picker selection following the moved row.
+    fn reorder_view(&mut self, sel: usize, dir: i32) {
+        let active_key = self.views[self.view].key.clone();
+        let ns = views_store::move_view(&mut self.views, sel, dir);
+        self.view = self
+            .views
+            .iter()
+            .position(|v| v.key == active_key)
+            .unwrap_or(self.view);
+        self.persist_views();
+        self.overlay = Overlay::ViewPicker(ns);
+    }
+
+    fn delete_view(&mut self, sel: usize) {
+        if self.views[sel].builtin {
+            self.notification = Some("can't delete a built-in view".into());
+            return;
+        }
+        let active_key = self.views[self.view].key.clone();
+        self.views.remove(sel);
+        self.persist_views();
+        // Keep the active view valid; if it was the deleted one, clamp.
+        self.view = self
+            .views
+            .iter()
+            .position(|v| v.key == active_key)
+            .unwrap_or_else(|| self.view.min(self.views.len() - 1));
+        let ns = sel.min(self.views.len() - 1);
+        self.overlay = Overlay::ViewPicker(ns);
+        self.clamp_cursor();
+    }
+
     fn move_cursor(&mut self, delta: i32) {
         let len = self.rows().len() as i32;
         if len == 0 {
@@ -1076,6 +1172,10 @@ impl App {
             self.handle_drawer_key(k);
             return;
         }
+        if matches!(self.overlay, Overlay::ViewPicker(_)) {
+            self.handle_view_picker_key(k);
+            return;
+        }
         // The fuzzy picker: nav/commit/cancel are intercepted; everything else
         // edits the query (and resets the selection to the top match).
         if matches!(self.overlay, Overlay::Fuzzy(_)) {
@@ -1213,7 +1313,8 @@ impl App {
             | Overlay::Fuzzy(_)
             | Overlay::Search(_)
             | Overlay::Drawer(_)
-            | Overlay::DetailFind(_) => {}
+            | Overlay::DetailFind(_)
+            | Overlay::ViewPicker(_) => {}
             Overlay::Pick {
                 prompt,
                 keys,
@@ -1283,6 +1384,15 @@ impl App {
                 );
             }
             EditAction::SaveView => self.save_current_view(text),
+            EditAction::RenameView { index } => {
+                let name = text.trim().to_string();
+                if !name.is_empty() && index < self.views.len() {
+                    self.views[index].name = name;
+                    self.persist_views();
+                }
+                // Return to the picker on the renamed row.
+                self.overlay = Overlay::ViewPicker(index.min(self.views.len().saturating_sub(1)));
+            }
             EditAction::CreateTitle { parent } => {
                 let title = text.trim().to_string();
                 if title.is_empty() {
@@ -1547,6 +1657,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('/') => app.open_search(),
             KeyCode::Char('f') => app.open_drawer(),
             KeyCode::Char('*') => app.toggle_star(),
+            KeyCode::Char('v') => app.open_view_picker(),
             KeyCode::Char('V') => app.open_save_view(),
             KeyCode::Esc => {
                 if app.is_view_modified() {
@@ -1605,9 +1716,50 @@ fn render(app: &App, frame: &mut Frame) {
         Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, right),
         Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, right),
         Overlay::Drawer(d) => render_drawer(d, frame, right),
+        Overlay::ViewPicker(sel) => render_view_picker(app, *sel, frame, right),
         _ => render_detail(app, frame, right),
     }
     render_status(app, frame, bot);
+}
+
+fn render_view_picker(app: &App, sel: usize, frame: &mut Frame, area: Rect) {
+    let [head, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "Views",
+            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        head,
+    );
+    let items: Vec<ListItem> = app
+        .views
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let active = if i == app.view { "▸" } else { " " };
+            let pin = if v.pinned { "*" } else { " " };
+            let lock = if v.builtin { "  (builtin)" } else { "" };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{active} "), Style::new().fg(Color::Cyan)),
+                Span::styled(format!("{pin} "), Style::new().fg(Color::Yellow)),
+                Span::raw(v.name.clone()),
+                Span::styled(
+                    format!("  ({})", app.view_count(v)),
+                    Style::new().fg(Color::DarkGray),
+                ),
+                Span::styled(lock.to_string(), Style::new().fg(Color::DarkGray)),
+            ]))
+        })
+        .collect();
+    let mut state = ListState::default();
+    if !app.views.is_empty() {
+        state.select(Some(sel.min(app.views.len() - 1)));
+    }
+    frame.render_stateful_widget(
+        List::new(items).highlight_style(Style::new().fg(Color::Black).bg(Color::Cyan)),
+        body,
+        &mut state,
+    );
 }
 
 fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
@@ -2072,6 +2224,17 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
     // Detail-pane find field.
     if let Overlay::DetailFind(sb) = &app.overlay {
         render_query_line("find: ", &sb.query, frame, area);
+        return;
+    }
+    // View manager help hint.
+    if matches!(&app.overlay, Overlay::ViewPicker(_)) {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "Enter open · p pin · J/K move · r rename · d delete · Esc close",
+                Style::new().fg(Color::DarkGray),
+            )),
+            area,
+        );
         return;
     }
     // Drawer help hint.
@@ -2573,6 +2736,94 @@ mod tests {
         assert_eq!(v.name, "kids");
         assert_eq!(v.spec.search.as_deref(), Some("child"));
         assert!(!v.builtin && v.pinned);
+    }
+
+    // -- view picker (6b-ii) ----------------------------------------------
+
+    #[test]
+    fn view_picker_overlay() {
+        let mut app = sample();
+        handle_key(&mut app, key('v'));
+        assert!(matches!(app.overlay, Overlay::ViewPicker(_)));
+        insta::assert_snapshot!(draw(&app, 72, 16));
+    }
+
+    #[test]
+    fn picker_activates_selected_view() {
+        let mut app = sample();
+        handle_key(&mut app, key('v'));
+        for _ in 0..3 {
+            handle_key(&mut app, key('j'));
+        }
+        enter_key(&mut app);
+        assert!(matches!(app.overlay, Overlay::None));
+        assert_eq!(app.active_view().key, "recent");
+    }
+
+    #[test]
+    fn picker_unpin_removes_from_tab_bar() {
+        let mut app = sample();
+        handle_key(&mut app, key('v'));
+        handle_key(&mut app, key('j')); // sel 1 = Shaving
+        handle_key(&mut app, key('p')); // unpin
+        assert!(!app.views[1].pinned);
+        assert!(!app.pinned_indices().contains(&1));
+    }
+
+    #[test]
+    fn picker_move_keeps_active_view() {
+        let mut app = sample(); // active = Hairy (0)
+        handle_key(&mut app, key('v'));
+        handle_key(&mut app, key('J')); // move Hairy down
+        assert_eq!(app.views[0].name, "Shaving");
+        assert_eq!(app.views[1].name, "Hairy");
+        assert_eq!(app.active_view().name, "Hairy"); // followed the move
+    }
+
+    #[test]
+    fn picker_rename_returns_to_picker() {
+        let mut app = sample();
+        handle_key(&mut app, key('v'));
+        handle_key(&mut app, key('r')); // seeded with the current name
+        typ(&mut app, "Fuzz");
+        enter_key(&mut app);
+        assert!(app.views[0].name.contains("Fuzz") && app.views[0].name != "Hairy");
+        assert!(matches!(app.overlay, Overlay::ViewPicker(0)));
+    }
+
+    #[test]
+    fn picker_deletes_custom_but_not_builtin() {
+        let mut app = sample();
+        // Create a custom view first.
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "x");
+        enter_key(&mut app);
+        handle_key(&mut app, key('V'));
+        typ(&mut app, "mine");
+        enter_key(&mut app);
+        assert_eq!(app.views.len(), 6);
+        // Delete it via the picker (active view is the custom one, index 5).
+        handle_key(&mut app, key('v'));
+        handle_key(&mut app, key('d'));
+        assert_eq!(app.views.len(), 5);
+        // Deleting a built-in is refused.
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        handle_key(&mut app, key('v'));
+        // selection is clamped to a built-in row; delete refuses.
+        handle_key(&mut app, key('g')); // no-op; ensure sel 0 path
+        let before = app.views.len();
+        // move selection to top then delete
+        handle_key(&mut app, key('k'));
+        handle_key(&mut app, key('k'));
+        handle_key(&mut app, key('k'));
+        handle_key(&mut app, key('k'));
+        handle_key(&mut app, key('k'));
+        handle_key(&mut app, key('d'));
+        assert_eq!(app.views.len(), before);
+        assert_eq!(
+            app.notification.as_deref(),
+            Some("can't delete a built-in view")
+        );
     }
 
     #[test]
