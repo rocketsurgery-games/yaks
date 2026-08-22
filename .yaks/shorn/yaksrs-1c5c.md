@@ -4,7 +4,7 @@ title: Eval fixtures + programmatic gold Q&A battery
 type: task
 priority: 1
 created: '2026-08-22T13:29:05Z'
-updated: '2026-08-22T13:55:33Z'
+updated: '2026-08-22T15:05:48Z'
 parent: yaksrs-9b8d
 labels:
 - tui
@@ -20,3 +20,7 @@ Built throwaway generator tools/scratch/style_eval.py (uncommitted): one source-
 ---
 ▸ 2026-08-22T13:55:33Z
 Generator extended: box + list + 3 cliff-hunt scenario fixtures (align/contain/confound) with programmatic gold; modes all/sizes/doc/scenario. Reference dump at tools/scratch/encodings-sample.md. Next: emit a portable JSON eval bundle (frames+questions+gold) for out-of-band weaker-model runs.
+
+---
+▸ 2026-08-22T15:05:48Z
+Delivered: throwaway generator tools/scratch/style_eval.py (uncommitted) emits every encoding + programmatic gold for the fixture/scenario/valign/vartable batteries; findings in docs/tui-style-eval.md. Further extension (portable cross-family bundle) tracked in d487.
