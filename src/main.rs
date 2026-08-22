@@ -4,6 +4,7 @@
 //! binary is a thin CLI over `herd::Herd` (the print-free core ops facade):
 //! every command is parse args -> call one Herd op -> render (text or --json).
 
+mod clipboard;
 mod filter;
 mod herd;
 mod json;

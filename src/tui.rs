@@ -1590,6 +1590,16 @@ impl App {
         }
     }
 
+    /// y — copy the selected task's id to the system clipboard (best-effort).
+    fn copy_selected_id(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        self.notification = Some(if crate::clipboard::copy_text(&id) {
+            format!("copied {id}")
+        } else {
+            "clipboard unavailable".into()
+        });
+    }
+
     /// J/K — move to the next/prev task in the list while staying in the detail
     /// pane, resetting the per-task detail view state.
     fn detail_next_task(&mut self, delta: i32) {
@@ -2159,6 +2169,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('/') => app.open_search(),
             KeyCode::Char('f') => app.open_drawer(),
             KeyCode::Char('*') => app.toggle_star(),
+            KeyCode::Char('y') => app.copy_selected_id(),
             KeyCode::Char('v') => app.open_view_picker(),
             KeyCode::Char('V') => app.open_save_view(),
             KeyCode::Char('?') => app.open_help(),
@@ -2207,6 +2218,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             // Move between tasks without leaving the detail pane.
             KeyCode::Char('J') => app.detail_next_task(1),
             KeyCode::Char('K') => app.detail_next_task(-1),
+            KeyCode::Char('y') => app.copy_selected_id(),
             KeyCode::Char('j') | KeyCode::Down => {
                 app.detail_scroll = app.detail_scroll.saturating_add(1)
             }
@@ -2378,6 +2390,7 @@ fn help_content() -> Vec<Line<'static>> {
         entry("Esc", "Revert filter to the active view"),
         blank(),
         section("General"),
+        entry("y", "Copy yak id to clipboard"),
         entry("?", "Toggle this help"),
         entry("q / Ctrl-C", "Quit"),
     ]
