@@ -24,7 +24,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
@@ -52,7 +52,7 @@ jobs:
             bin: yaks.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -76,7 +76,7 @@ jobs:
           mkdir -p "artifacts/${{ matrix.target }}"
           cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" \
              "artifacts/${{ matrix.target }}/${{ matrix.bin }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: bin-${{ matrix.target }}
           path: artifacts
@@ -85,19 +85,24 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for npm Trusted Publishing (tokenless publish)
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
         with:
           pattern: bin-*
           path: artifacts
           merge-multiple: true
       - name: Show collected binaries
         run: find artifacts -type f | sort
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+      - name: Ensure npm supports Trusted Publishing (>= 11.5.1)
+        run: npm install -g npm@latest
       - name: Resolve version + check lockstep
         id: ver
         run: |
@@ -120,6 +125,11 @@ jobs:
         run: node npm/yaks/test-mapping.mjs
       - name: Publish
         env:
+          # OIDC Trusted Publishing is used when a per-package trusted publisher
+          # is configured (no token, provenance for free). NODE_AUTH_TOKEN is
+          # only the bootstrap fallback for the first publish that creates the
+          # packages; once trusted publishers are set up, delete the secret and
+          # this env is simply empty. The npm CLI tries OIDC first, then token.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           # Real publish only on a tag push; every other trigger is a dry-run.
