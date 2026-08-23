@@ -4,7 +4,7 @@ title: TUI agent testing interface
 type: task
 priority: 3
 created: '2026-08-22T12:04:00Z'
-updated: '2026-08-22T12:39:50Z'
+updated: '2026-08-22T15:31:48Z'
 ---
 
 Library and tools allowing agents to effectively operate and test TUIs.

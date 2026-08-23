@@ -4,7 +4,7 @@ title: Add an 'init' command to create a new .yaks/ herd
 type: feature
 priority: 2
 created: '2026-08-23T02:09:20Z'
-updated: '2026-08-23T02:09:20Z'
+updated: '2026-08-23T02:42:38Z'
 labels:
 - cli
 ---

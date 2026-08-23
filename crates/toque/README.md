@@ -1,21 +1,19 @@
 # toque
 
-Drive a [ratatui](https://ratatui.rs) app **headlessly** — from under the hat,
-like the rat steering the chef. Instead of a real terminal, your app renders
-into an in-memory `TestBackend` buffer; you inject keys over a tiny line
-protocol and get back a deterministic, plain-text snapshot after each step.
+Drive a [ratatui](https://ratatui.rs) app **headlessly** — from under the hat, so to speak. Instead
+of a real terminal, your app renders into an in-memory `TestBackend` buffer; you inject keys over a
+tiny line protocol and get back a deterministic, plain-text snapshot after each step.
 
 It does two things, both from a hidden position:
 
 - **Drive** — feed keystrokes (`key j`, `key C-c`, `type hello`, `resize 80 24`).
-- **Observe** — emit a text snapshot: a state header (internal facts you choose
-  to expose), the character grid (layout), and, optionally, per-cell **style**
-  encoded so a language model can actually use it (selection, focus, links,
-  borders, dimming).
+- **Observe** — emit a text snapshot: a state header (internal facts you choose to expose), the
+  character grid (layout), and, optionally, per-cell **style** encoded so a language model can
+  actually use it (selection, focus, links, borders, dimming).
 
-Because a frame is a pure function of the app plus the terminal size, the output
-is deterministic — good for **agent-driven exploration** of a TUI *and* for
-`insta`-style **snapshot tests** of any ratatui UI.
+Because a frame is a pure function of the app plus the terminal size, the output is deterministic —
+good for **agent-driven exploration** of a TUI *and* for `insta`-style **snapshot tests** of any
+ratatui UI.
 
 ## Quick start
 
@@ -41,9 +39,9 @@ run(MyApp { /* … */ }, DriverOpts {
 }).unwrap();
 ```
 
-`run` reads the protocol from stdin and writes frames to stdout. For tests,
-drive a `Session` directly against any `Write` sink, or skip the protocol
-entirely with `render_to_buffer` + `SnapshotEncoder`.
+`run` reads the protocol from stdin and writes frames to stdout. For tests, drive a `Session`
+directly against any `Write` sink, or skip the protocol entirely with `render_to_buffer` +
+`SnapshotEncoder`.
 
 ## Protocol
 
@@ -67,15 +65,14 @@ A frame looks like:
 === end ===
 ```
 
-With `diff: true`, after the first (full) frame only changed body lines are
-emitted as `L<i>: <line>` — a large token saving across a multi-step session.
+With `diff: true`, after the first (full) frame only changed body lines are emitted as `L<i>:
+<line>` — a large token saving across a multi-step session.
 
 ## Style encodings
 
-The hard question isn't the character grid (layout serializes trivially) — it's
-how to encode per-cell **style** so a model can use it, and at what token cost.
-`StyleEncoding` offers three, all keyed by a persistent registry so style-ids
-stay stable across frames (keeping diffs compact):
+The hard question isn't the character grid (layout serializes trivially) — it's how to encode
+per-cell **style** so a model can use it, and at what token cost. `StyleEncoding` offers three, all
+keyed by a persistent registry so style-ids stay stable across frames (keeping diffs compact):
 
 | encoding | form |
 |----------|------|
@@ -83,20 +80,19 @@ stay stable across frames (keeping diffs compact):
 | `Interleaved` | each text row followed by an aligned row of style-ids |
 | `Parallel` | the whole char grid, then a second aligned grid of style-ids |
 
-Each frame ends with a `legend:` mapping ids to concrete styles
-(`fg=cyan`, `bg=idx237`, `bold`, `reversed`, …).
+Each frame ends with a `legend:` mapping ids to concrete styles (`fg=cyan`, `bg=idx237`, `bold`,
+`reversed`, …).
 
 ### Why `spans` is the default (evaluation summary)
 
-We evaluated six encodings against a battery of layout/alignment questions,
-scored by a frontier model, with real token counts. The full write-up lives in
-the yaks repo (`docs/tui-style-eval.md`); the short version:
+We evaluated six encodings against a battery of layout/alignment questions, scored by a frontier
+model, with real token counts. The full write-up lives in the yaks repo (`docs/tui-style-eval.md`);
+the short version:
 
-- **Accuracy saturated.** On simple *and* deliberately adversarial layouts
-  (subtle 1-column misalignment, nested-vs-disjoint boxes, a list inside a box
-  next to a same-format decoy), every style-bearing encoding scored ~perfectly.
-  Accuracy did **not** discriminate the encodings at this model tier — so the
-  deciding axis is **token cost**.
+- **Accuracy saturated.** On simple *and* deliberately adversarial layouts (subtle 1-column
+  misalignment, nested-vs-disjoint boxes, a list inside a box next to a same-format decoy), every
+  style-bearing encoding scored ~perfectly. Accuracy did **not** discriminate the encodings at this
+  model tier — so the deciding axis is **token cost**.
 - **Cost (dense-list fixture, vs plain-only = 132 tokens):**
 
   | encoding | tokens | × plain |
@@ -108,26 +104,24 @@ the yaks repo (`docs/tui-style-eval.md`); the short version:
   | ruler *(coordinate anchors; not shipped)* | 508 | 3.85× |
   | doublewidth *(id+char interleave; dead)* | 836 | 6.33× |
 
-- **`spans` survives vertical alignment** — the surprising result. It preserves
-  inter-run whitespace **literally**, so a model recovers a column by *summing
-  whitespace (arithmetic)*, not by seeing it. It stayed correct on cue-free
-  cumulative-offset stress out to ~16 columns / ~100 wide, with no false
-  positives. Human-legibility and model-legibility diverge here.
+- **`spans` survives vertical alignment** — the surprising result. It preserves inter-run whitespace
+  **literally**, so a model recovers a column by *summing whitespace (arithmetic)*, not by seeing
+  it. It stayed correct on cue-free cumulative-offset stress out to ~16 columns / ~100 wide, with no
+  false positives. Human-legibility and model-legibility diverge here.
 
-**Load-bearing constraint:** because `spans` leans on literal whitespace,
-`SnapshotEncoder` never collapses runs of spaces. Don't normalize them.
+**Load-bearing constraint:** because `spans` leans on literal whitespace, `SnapshotEncoder` never
+collapses runs of spaces. Don't normalize them.
 
-**Caveat:** all probes ran on a single frontier model family (Claude Opus 4.8).
-Cross-model-family behavior at this specific capability is untested, and weaker
-models would likely crack the whitespace arithmetic first — it's reasonable to
-require a frontier model for UI work. `interleaved` is the explicit aligned-grid
-fallback if you want a column grid handed to you rather than reconstructed; it
-dominates `parallel`.
+**Caveat:** all probes ran on a single frontier model family (Claude Opus 4.8). Cross-model-family
+behavior at this specific capability is untested, and weaker models would likely crack the
+whitespace arithmetic first — it's reasonable to require a frontier model for UI work. `interleaved`
+is the explicit aligned-grid fallback if you want a column grid handed to you rather than
+reconstructed; it dominates `parallel`.
 
 ## Status
 
-Extracted from the [yaks](https://github.com/joelgwebber/yaks-rs) TUI, which is
-its first consumer. Pre-1.0: the API may shift as more apps adopt it.
+Extracted from the [yaks](https://github.com/rocketsurgery-games/yaks) TUI, which is its first consumer.
+Pre-1.0: the API may shift as more apps adopt it.
 
 ## License
 

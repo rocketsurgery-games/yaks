@@ -1,9 +1,8 @@
 //! # toque
 //!
-//! Drive a [`ratatui`] app **headlessly** — from under the hat, like the rat
-//! steering the chef. Instead of a real terminal, the app renders into an
-//! in-memory [`ratatui::backend::TestBackend`] buffer; you inject keys over a
-//! tiny line protocol and get back a plain-text snapshot after each step.
+//! Drive a [`ratatui`] app **headlessly** — from under the hat, so to speak. Instead of a real
+//! terminal, the app renders into an in-memory [`ratatui::backend::TestBackend`] buffer; you inject
+//! keys over a tiny line protocol and get back a plain-text snapshot after each step.
 //!
 //! Two jobs, both from a hidden position:
 //! - **Drive** — feed keystrokes (`key j`, `key C-c`, `type hello`, `resize`).
