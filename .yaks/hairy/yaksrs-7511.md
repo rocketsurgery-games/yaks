@@ -1,0 +1,12 @@
+---
+id: yaksrs-7511
+title: Add an 'init' command to create a new .yaks/ herd
+type: feature
+priority: 2
+created: '2026-08-23T02:09:20Z'
+updated: '2026-08-23T02:09:20Z'
+labels:
+- cli
+---
+
+MISSING TOOL discovered during skills reconstruction: the Rust CLI has no 'init' (store::discover_root only walks up and errors if none found), so there is no way to start a fresh herd — the yak skill can't tell a user how to begin one. Port the Python 'yaks init': create .yaks/{hairy,shaving,shorn,dead}/ + a config.yaml (prefix/default_type/default_priority/vim_mode). Then the skill's Running-yaks section can point at it.
