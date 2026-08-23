@@ -1,0 +1,135 @@
+name: release
+
+# Build the 5-platform `yaks` binaries and publish the @rocketsurgery/yaks npm
+# packages.
+#
+#   - push a tag `vX.Y.Z`  -> real publish to npm (needs the NPM_TOKEN secret)
+#   - run manually (workflow_dispatch) -> full dry-run: build every target,
+#     assemble dist/npm, and `npm publish --dry-run` (publishes nothing, needs
+#     no token). Use this to exercise the whole pipeline before you tag.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+            bin: yaks
+          - target: x86_64-apple-darwin
+            os: macos-14
+            bin: yaks
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            bin: yaks
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            bin: yaks
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            bin: yaks.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      # aarch64 Linux is the only cross build that needs a linker; all deps are
+      # pure Rust (arboard uses x11rb on Linux), so no target C libraries.
+      - name: Install aarch64-linux cross linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+      - name: Build
+        shell: bash
+        run: cargo build --release --locked --bin yaks --target ${{ matrix.target }}
+      - name: Stage binary
+        shell: bash
+        run: |
+          mkdir -p "artifacts/${{ matrix.target }}"
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" \
+             "artifacts/${{ matrix.target }}/${{ matrix.bin }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: artifacts
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: artifacts
+          merge-multiple: true
+      - name: Show collected binaries
+        run: find artifacts -type f | sort
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Resolve version + check lockstep
+        id: ver
+        run: |
+          crate="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')"
+          npmv="$(node -p "require('./npm/yaks/package.json').version")"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="$crate"
+          fi
+          echo "resolved=$v  cargo=$crate  npm=$npmv"
+          if [ "$v" != "$crate" ] || [ "$v" != "$npmv" ]; then
+            echo "::error::version mismatch (want '$v'; Cargo.toml='$crate' npm='$npmv'). Bump them in lockstep."
+            exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Assemble npm packages
+        run: node scripts/build-npm.mjs "${{ steps.ver.outputs.version }}"
+      - name: Sanity - launcher mapping
+        run: node npm/yaks/test-mapping.mjs
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Real publish only on a tag push; every other trigger is a dry-run.
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            flag=""
+            echo "== REAL publish of v${{ steps.ver.outputs.version }} =="
+          else
+            flag="--dry-run"
+            echo "== dry-run (no token used, nothing published) =="
+          fi
+          for d in dist/npm/*/; do
+            ( cd "$d" && npm publish --access public $flag )
+          done

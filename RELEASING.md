@@ -10,10 +10,30 @@ installs only the one matching the host's os/cpu, and `bin/yaks.js` execs it.
 Users get it via `npm i -g @rocketsurgery/yaks` (command stays `yaks`) or
 `npx @rocketsurgery/yaks`.
 
-Release steps:
+### Automated (primary): the `release` workflow
+
+`.github/workflows/release.yml` does the whole thing:
+
+- **Push a tag `vX.Y.Z`** -> it runs the tests, matrix-builds all five target
+  binaries, assembles `dist/npm/*` via `build-npm.mjs`, and publishes every
+  package to npm. Requires an **`NPM_TOKEN`** repo secret (a granular/automation
+  token with publish rights to the `@rocketsurgery` scope).
+- **Run it manually** (Actions -> release -> Run workflow) -> identical pipeline
+  but ends in `npm publish --dry-run`: nothing is published and no token is
+  used. Use this to exercise the full cross-platform build before you tag.
+
+The workflow enforces version lockstep: the tag (minus `v`) must equal both
+`Cargo.toml`'s version and `npm/yaks/package.json`'s version, or it fails before
+publishing. So the release ritual is just: bump those two (below), commit, then
+`git tag vX.Y.Z && git push --tags`.
+
+One-time setup: add the `NPM_TOKEN` secret under the repo's
+Settings -> Secrets and variables -> Actions. Never commit the token.
+
+### Manual (fallback)
+
 1. Build release binaries for each target into `artifacts/<rust-target-triple>/yaks[.exe]`
-   (CI matrix; cross-compile or per-runner). Targets are listed in
-   `scripts/build-npm.mjs`.
+   (the targets are listed in `scripts/build-npm.mjs`).
 2. `node scripts/build-npm.mjs <version>` — assembles `dist/npm/*` (launcher +
    per-platform packages, versions matched).
 3. Publish: `for d in dist/npm/*/; do (cd "$d" && npm publish --access public); done`
