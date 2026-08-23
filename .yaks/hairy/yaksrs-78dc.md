@@ -9,4 +9,14 @@ labels:
 - ui
 ---
 
-Carried over from Python-repo yak-b91e. Audit how yaks in each state are shown, hidden, or dimmed across views; the parity pass touched this but the rules deserve a holistic review.
+I *think* the rules go something like this (but please double-check before diving in):
+- Never show a child yak without its parent chain, regardless of the parents' states.
+- If a parent is shaving, and you're viewing shaving yaks, then show only its
+
+---
+▸ 2026-08-12T15:41:50Z
+Also consider that there may not be one "right" answer to how much detail to show for related parent/child yaks in a different state.
+Eg, I might want to show *all* children for currently-shaving yaks, so that I can see both sides of the completion state of its children.
+Or I could want to see *only* those parents strictly required to show the parent chain to root.
+Or at times it's only important to see the parent chain, and children remaining to be shorn.
+IOW, it's probably a view state affordance question.

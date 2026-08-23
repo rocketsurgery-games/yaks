@@ -9,4 +9,4 @@ labels:
 - ui
 ---
 
-Carried over from Python-repo yak-0b0b. Select multiple list rows and apply a mutation to all at once: state transitions, priority, labels, dep, slaughter.
+For mutations where it makes sense -- eg, set state, slaughter, adding a label, perhaps removing common labels, etc -- it would be useful to be able to multi-select list items with 'v' / 'j/k' before an action.

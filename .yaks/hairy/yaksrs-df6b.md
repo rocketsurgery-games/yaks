@@ -10,4 +10,4 @@ labels:
 - config
 ---
 
-Carried over from Python-repo yak-9835. Edit .yaks/config.yaml keys from inside the TUI: prefix, default_type, default_priority, vim_mode, and any future label definitions.
+Consider a settings/config panel or key for editing user-global and per-project config (vim_mode, keybindings, etc.) from inside the TUI. Out of scope for the vim-keys rollout itself.

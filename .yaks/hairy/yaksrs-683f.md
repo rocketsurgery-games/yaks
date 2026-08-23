@@ -9,4 +9,4 @@ labels:
 - ui
 ---
 
-Carried over from Python-repo yak-f487. Preserve a draft when an edit form or comment is dismissed or interrupted, so in-progress text is not lost.
+Preserve a draft when an edit form or comment is dismissed or interrupted, so in-progress text is not lost.

@@ -9,4 +9,4 @@ labels:
 - ui
 ---
 
-Carried over from Python-repo yak-3f26. Confirmed gap in yaks-rs: CreateForm has only title/labels/description/type/priority, no source field. Only the CLI update --source can set it; the TUI form cannot. Add a source field to the form.
+You have to edit the yak file manually to add or update this field. Super annoying.

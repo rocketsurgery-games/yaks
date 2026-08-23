@@ -9,4 +9,5 @@ labels:
 - config
 ---
 
-Carried over from Python-repo yak-9332. Let .yaks/config.yaml declare the project's known labels (and maybe descriptions/colors), so agents reuse a defined vocabulary rather than inventing taxonomies. Pairs with the new label guidance in the yak skill and yaksrs-7cd1.
+While the yaks CLI/TUI doesn't need explicit label definitions for anything, it could still be useful for auto-complete in the UI.
+More importantly, if we can find a good way to get context into the calling agent (cf yak-011e), we can use label definitions to help nudge it in the right direction.

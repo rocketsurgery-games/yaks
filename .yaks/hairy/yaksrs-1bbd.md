@@ -10,4 +10,4 @@ labels:
 - search
 ---
 
-Carried over from Python-repo yak-6f33. Keep the active search/filter context as you move between views and into detail, instead of it being scoped/reset per view. Adjacent to the global nav-history yak.
+Eg, so I can search for a keyword in the list view, and continue searching for it in the details.

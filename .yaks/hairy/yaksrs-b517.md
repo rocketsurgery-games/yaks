@@ -9,4 +9,9 @@ labels:
 - agent
 ---
 
-Carried over from Python-repo yak-1810. Partially done: the TUI M key adds timestamped comments. The deeper intent is a formal comment structure an agent can reliably scan and follow up on, e.g. look for new comments I added and act on them.
+Use user feedback to drive agent behavior. E.g., "look for any new comments I've added and follow up
+on them". This requires some kind of formal structure for comments, so that the agent can find them
+reliably. Probably best to support this directly through skills and python code, so the agent's work
+is limited.
+
+yak-6f9e

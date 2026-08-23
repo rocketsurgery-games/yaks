@@ -9,4 +9,4 @@ labels:
 - ui
 ---
 
-Carried over from Python-repo yak-9628. No dedicated affordance exists: the fuzzy picker only does AddDep/Reparent, and Search just filters the list. Add a way to type an id and jump straight to that yak's detail.
+We already have a type-ahead search facility. We should make it easier to use this to find a random yak by id.
