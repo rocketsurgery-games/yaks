@@ -76,7 +76,7 @@ jobs:
           mkdir -p "artifacts/${{ matrix.target }}"
           cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" \
              "artifacts/${{ matrix.target }}/${{ matrix.bin }}"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: bin-${{ matrix.target }}
           path: artifacts
@@ -90,7 +90,7 @@ jobs:
       id-token: write # OIDC token for npm Trusted Publishing (tokenless publish)
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           pattern: bin-*
           path: artifacts
