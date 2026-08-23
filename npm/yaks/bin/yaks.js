@@ -8,11 +8,11 @@ const { spawnSync } = require("node:child_process");
 
 // host key ("<platform> <arch>") -> platform package name
 const TARGETS = {
-  "darwin arm64": "yakherder-darwin-arm64",
-  "darwin x64": "yakherder-darwin-x64",
-  "linux x64": "yakherder-linux-x64",
-  "linux arm64": "yakherder-linux-arm64",
-  "win32 x64": "yakherder-win32-x64",
+  "darwin arm64": "@rocketsurgery/yaks-darwin-arm64",
+  "darwin x64": "@rocketsurgery/yaks-darwin-x64",
+  "linux x64": "@rocketsurgery/yaks-linux-x64",
+  "linux arm64": "@rocketsurgery/yaks-linux-arm64",
+  "win32 x64": "@rocketsurgery/yaks-win32-x64",
 };
 
 function pkgFor(platform, arch) {

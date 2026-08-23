@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 const require = createRequire(import.meta.url);
 const { pkgFor, TARGETS } = require("./bin/yaks.js");
 
-assert.equal(pkgFor("darwin", "arm64"), "yakherder-darwin-arm64");
-assert.equal(pkgFor("linux", "x64"), "yakherder-linux-x64");
-assert.equal(pkgFor("win32", "x64"), "yakherder-win32-x64");
+assert.equal(pkgFor("darwin", "arm64"), "@rocketsurgery/yaks-darwin-arm64");
+assert.equal(pkgFor("linux", "x64"), "@rocketsurgery/yaks-linux-x64");
+assert.equal(pkgFor("win32", "x64"), "@rocketsurgery/yaks-win32-x64");
 assert.equal(pkgFor("sunos", "sparc"), null);
 // every mapped package is also declared as an optionalDependency
 const pkg = require("./package.json");

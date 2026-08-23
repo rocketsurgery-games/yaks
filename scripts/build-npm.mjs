@@ -2,9 +2,10 @@
 // Assemble npm packages from prebuilt binaries.
 //
 // Expects binaries under artifacts/<rust-target-triple>/yaks[.exe] and emits
-// dist/npm/yakherder/ (the launcher) + dist/npm/yakherder-<npm-target>/ (one
-// per platform, each carrying its binary). Publish each dist/npm/* with
-// `npm publish`. Usage: node scripts/build-npm.mjs <version>
+// dist/npm/yaks/ (the launcher) + dist/npm/yaks-<npm-target>/ (one per
+// platform, each carrying its binary). Dist dir names are flat so the publish
+// glob works; the package names inside are scoped (@rocketsurgery/yaks[-*]).
+// Publish each dist/npm/* with `npm publish`. Usage: node scripts/build-npm.mjs <version>
 import { existsSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,13 +35,14 @@ const template = readFileSync(join(root, "npm", "platform-template", "package.js
 
 for (const [triple, m] of Object.entries(MAP)) {
   const src = join(root, "artifacts", triple, m.exe);
-  const name = `yakherder-${m.t}`;
-  optionalDeps[name] = version;
+  const pkgName = `@rocketsurgery/yaks-${m.t}`;
+  const dirName = `yaks-${m.t}`; // flat dist dir; scoped name lives in package.json
+  optionalDeps[pkgName] = version;
   if (!existsSync(src)) {
-    console.warn(`skip ${name}: missing ${src}`);
+    console.warn(`skip ${pkgName}: missing ${src}`);
     continue;
   }
-  const pkgDir = join(out, name);
+  const pkgDir = join(out, dirName);
   mkdirSync(join(pkgDir, "bin"), { recursive: true });
   const manifest = template
     .replaceAll("__TARGET__", m.t)
@@ -51,16 +53,16 @@ for (const [triple, m] of Object.entries(MAP)) {
   const dest = join(pkgDir, "bin", m.exe);
   copyFileSync(src, dest);
   chmodSync(dest, 0o755);
-  console.log(`built ${name}@${version}`);
+  console.log(`built ${pkgName}@${version}`);
 }
 
 // launcher package with version-matched optionalDependencies
-const launcher = JSON.parse(readFileSync(join(root, "npm", "yakherder", "package.json"), "utf8"));
+const launcher = JSON.parse(readFileSync(join(root, "npm", "yaks", "package.json"), "utf8"));
 launcher.version = version;
 launcher.optionalDependencies = optionalDeps;
-const ldir = join(out, "yakherder");
+const ldir = join(out, "yaks");
 mkdirSync(join(ldir, "bin"), { recursive: true });
 writeFileSync(join(ldir, "package.json"), JSON.stringify(launcher, null, 2) + "\n");
-copyFileSync(join(root, "npm", "yakherder", "bin", "yaks.js"), join(ldir, "bin", "yaks.js"));
-console.log(`built launcher yakherder@${version}`);
+copyFileSync(join(root, "npm", "yaks", "bin", "yaks.js"), join(ldir, "bin", "yaks.js"));
+console.log(`built launcher @rocketsurgery/yaks@${version}`);
 console.log(`\nPublish: for d in dist/npm/*/; do (cd "$d" && npm publish --access public); done`);

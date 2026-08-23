@@ -13,11 +13,11 @@ This project tracks work with Yaks. Tasks are markdown files with YAML frontmatt
 
 Yaks is a single self-contained binary — a plain command-line tool. Run it directly from your shell; there are **no slash commands**. Use the first invocation that works in your environment:
 
-1. **`yaks <cmd>`** — if `yaks` is on `PATH` (installed via `npm i -g yakherder`, or a cargo-dist shell/Homebrew installer). Prefer this.
-2. **`npx yakherder <cmd>`** — zero-install, if Node is available.
-3. **`./target/release/yaks <cmd>`** — when working inside a yaks-rs checkout you've built with `cargo build --release`.
+1. **`yaks <cmd>`** — if `yaks` is on `PATH` (installed via `npm i -g @rocketsurgery/yaks`, or a cargo-dist shell/Homebrew installer). Prefer this.
+2. **`npx @rocketsurgery/yaks <cmd>`** — zero-install, if Node is available.
+3. **`./target/release/yaks <cmd>`** — when working inside a checkout you've built with `cargo build --release`.
 
-The npm package is named `yakherder` (the name `yaks` was taken); the command it installs is `yaks`. Every example below is written as `yaks <cmd>` — substitute whichever invocation works for you. The CLI is stateless: each call is independent, there's nothing to keep running.
+The npm package is `@rocketsurgery/yaks` (the unscoped `yaks` was taken, so it's published under the `rocketsurgery` org); the command it installs is `yaks`. Every example below is written as `yaks <cmd>` — substitute whichever invocation works for you. The CLI is stateless: each call is independent, there's nothing to keep running.
 
 Add `--json` to any query command (`list`, `show`, `next`, `tangled`, `search`, `stats`, `rollup`) for machine-readable output.
 

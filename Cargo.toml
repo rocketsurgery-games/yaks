@@ -8,7 +8,7 @@ version = "0.0.1"
 edition = "2024"
 description = "Filesystem-native task tracker (Rust port — Phase 0 spike)"
 license = "Apache-2.0"
-repository = "https://github.com/joelgwebber/yaks-rs"
+repository = "https://github.com/rocketsurgery-games/yaks"
 default-run = "yaks"
 
 [[bin]]
