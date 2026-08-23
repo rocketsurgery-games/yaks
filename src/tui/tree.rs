@@ -1,5 +1,4 @@
-//! Task tree building + collapse for the list pane, ported from the Python
-//! `yaktui.tree`.
+//! Task tree building + collapse for the list pane.
 //!
 //! `build` returns a flat, pre-ordered list of rows for one tab. The tab's
 //! status set is the *anchor*; the tab also pulls in each anchor's family

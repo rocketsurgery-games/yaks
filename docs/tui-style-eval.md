@@ -1,9 +1,8 @@
 # Encoding TUI snapshots for LLMs: a style-encoding evaluation
 
-Research report seeding the design of the agent-drivable TUI snapshot format.
-Captured under `yaksrs-9b8d` (TUI agent testing interface) and its meta-probe
-`yaksrs-9dae`. If we later hoist the headless-harness + differential toolkit into
-a shared crate, this is the justification seed for its README.
+Research report behind the agent-drivable TUI snapshot format used by the
+`toque` crate. It documents why `spans` is the default style encoding and is the
+justification seed for `toque`'s README.
 
 ## Problem
 
@@ -20,13 +19,13 @@ or does tokenization destroy it?
 
 ## Method
 
-- **One source of truth, many encodings.** A throwaway generator
-  (`tools/scratch/style_eval.py`, uncommitted) renders a fixture (grid + style
-  spans) into the plain grid, every candidate encoding, and **programmatically
-  derived gold answers** — so the answer key can never drift from the encoding.
-- **Differential harness.** The Rust `--headless` harness and a Python
-  `pyte`-based capture of the original curses TUI emit the identical frame
-  format, so encodings can be compared like-for-like.
+- **One source of truth, many encodings.** A throwaway generator (not included
+  in the repo) renders a fixture (grid + style spans) into the plain grid, every
+  candidate encoding, and **programmatically derived gold answers** — so the
+  answer key can never drift from the encoding.
+- **Real frames.** The `--headless` harness emits a stable framed grid after
+  each input, so every encoding is produced from the same actual frames and
+  compared like-for-like.
 - **Probes.** Each `(fixture, encoding)` was handed to a fresh, context-free
   sub-agent (frontier model, Claude Opus 4.8) answering a fixed question battery;
   answers scored against the gold. ~40 probes total.
@@ -116,15 +115,5 @@ optimization) would destroy column recoverability. **Keep spaces literal.**
   ratatui `Style`; recovering semantic names (a `classify` hook / themed palette)
   is a separate, optional layer — the snapshot itself only needs concrete style.
 
-## Reproducing
-
-```
-python3 tools/scratch/style_eval.py doc      # every encoding on two fixtures -> encodings-sample.md
-python3 tools/scratch/style_eval.py sizes    # token cost per encoding (tiktoken)
-python3 tools/scratch/style_eval.py scenario # align / contain / confound
-python3 tools/scratch/style_eval.py valign   # divider / box vertical-alignment
-python3 tools/scratch/style_eval.py vartables# cue-free cumulative-offset sweep
-```
-
-(Generator is throwaway/uncommitted; this report and the winning encoders in the
-Rust harness are the durable artifacts.)
+The fixture generator was a throwaway script (not included). The durable
+artifacts are this report and the encoders shipped in the `toque` crate.

@@ -55,8 +55,8 @@ enum Focus {
     Detail,
 }
 
-/// A modal prompt painted on the bottom line, reproducing the Python TUI's
-/// `pick()` (single keypress) and `confirm()` (y/N) dialogs. Kept as plain
+/// A modal prompt painted on the bottom line: `pick()` (single keypress) and
+/// `confirm()` (y/N) dialogs. Kept as plain
 /// data so `render` stays pure — the action to perform on commit rides along.
 enum Overlay {
     None,
@@ -2546,7 +2546,7 @@ fn render_view_picker(app: &App, sel: usize, frame: &mut Frame, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, v)| {
-            // 📌 pinned, 🔒 builtin — emoji glyphs matching the Python view manager.
+            // 📌 pinned, 🔒 builtin — emoji glyphs for the view manager.
             let active = if i == app.view { "▸" } else { " " };
             let pin = if v.pinned { "\u{1f4cc}" } else { "  " };
             let lock = if v.builtin { "  \u{1f512}" } else { "" };

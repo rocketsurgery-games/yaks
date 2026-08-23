@@ -104,7 +104,7 @@ impl Herd {
                 });
             }
             SchemaStatus::Older(v) => Some(format!(
-                "herd schema v{v} predates this yaks (v{}); reading best-effort. Run the Python yaks once to migrate.",
+                "herd schema v{v} predates this yaks (v{}); reading best-effort.",
                 store::SCHEMA
             )),
             SchemaStatus::Compatible => None,

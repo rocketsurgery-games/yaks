@@ -1,7 +1,6 @@
-//! Core task model for yaks-rs.
+//! Core task model for yaks.
 //!
-//! Deliberately mirrors the Python `yaklib.model` shapes closely enough to
-//! read and write the *same* `.yaks/` files. Status is implicit from the
+//! Status is implicit from the
 //! directory the file lives in; parentage is a frontmatter field (flat,
 //! stable ids).
 
@@ -53,7 +52,7 @@ impl Status {
 
 /// A single task, parsed from a `.md` file with YAML frontmatter.
 ///
-/// Field set matches the Python task format exactly. `created`/`updated` are
+/// The task's field set. `created`/`updated` are
 /// kept as opaque ISO-8601 strings so a read/write round-trip preserves them
 /// byte-for-byte (we never reformat timestamps we did not author).
 #[derive(Debug, Clone, PartialEq, Eq)]

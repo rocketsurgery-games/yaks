@@ -55,7 +55,7 @@ To check: `git check-ignore .yaks` printing a path means local-only; `git ls-fil
 - Commit the shorn yak move together with the code that completed it (hard rule 2).
 - Yak IDs are fine in commit messages and other in-repo references — collaborators can resolve them from the committed files.
 
-> This repo, yaks-rs, is **team mode**: `.yaks/` is committed, and yak IDs in commit messages are expected.
+> This repo is **team mode**: `.yaks/` is committed, and yak IDs in commit messages are expected.
 
 ## Keep yaks private (external surfaces)
 

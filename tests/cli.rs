@@ -1,6 +1,6 @@
 //! Golden snapshot tests for read commands over a fixed fixture herd
-//! (tests/fixtures/herd). Snapshots are yaks-rs's own goldens (semantic, not
-//! byte-parity with Python). Regenerate with: INSTA_UPDATE=always cargo test.
+//! (tests/fixtures/herd). Snapshots are yaks's own goldens (semantic).
+//! Regenerate with: INSTA_UPDATE=always cargo test.
 //! These double as assert_cmd smoke tests (yaksrs-c725).
 
 use assert_cmd::Command;

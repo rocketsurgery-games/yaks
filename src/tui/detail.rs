@@ -309,7 +309,7 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
 }
 
 #[cfg(test)]
-mod parity_tests {
+mod detail_tests {
     use super::*;
 
     fn t(id: &str, parent: Option<&str>, deps: &[&str]) -> Task {

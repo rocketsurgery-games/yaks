@@ -1,5 +1,5 @@
-//! Shared task filtering — mirrors the Python `yaklib.filter.FilterSpec` +
-//! `yaklib.deps` resolution. Semantics: AND across fields; OR within a
+//! Shared task filtering + dependency resolution. Semantics: AND across
+//! fields; OR within a
 //! multi-value field; an empty field is unconstrained.
 //!
 //! A dependency counts as "resolved" when its task is shorn OR dead, so
@@ -113,7 +113,7 @@ pub fn descendant_ids(tasks: &[Task], root_id: &str, include_dead: bool) -> Hash
 /// True if `start` (transitively) depends on `target` through `depends_on`
 /// edges. Used to keep a new dependency from forming a cycle: adding `target`
 /// as a dep of `start` is safe only when `target` does not already reach
-/// `start`. Mirrors the Python `deps.depends_on_transitively`.
+/// `start`.
 pub fn depends_on_transitively(tasks: &[Task], start: &str, target: &str) -> bool {
     let by_id: HashMap<&str, &Task> = tasks.iter().map(|t| (t.id.as_str(), t)).collect();
     let mut stack: Vec<&str> = vec![start];

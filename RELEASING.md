@@ -1,4 +1,4 @@
-# Releasing yaks-rs
+# Releasing yaks
 
 `yaks` ships as a single static binary. Two distribution paths:
 

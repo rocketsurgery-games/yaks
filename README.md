@@ -1,59 +1,148 @@
-# yaks-rs
+# yaks
 
-A Rust port of [yaks](https://github.com/joelgwebber/yaks), the filesystem-native
-task tracker. This repository is the **Phase 0 spike** (tracked as `yak-94e7`),
-the outcome of the Rust-conversion research arc (`yak-2219`).
+A filesystem-native task tracker. Tasks are plain markdown files with YAML
+frontmatter, kept in a `.yaks/` directory inside your project — no database, no
+daemon, no server. A task's status is implicit in *which folder it lives in*, so
+your task list is just files you can read, grep, edit, and commit alongside your
+code.
 
-## Why a separate repo?
+yaks ships as a single self-contained binary. Startup is effectively instant,
+which matters because the workflow is lots of small command invocations.
 
-The port proceeds in a fresh repo rather than converting in place, so the Python
-tree stays stable and shippable during the transition. The two implementations
-**interoperate at the data layer** — both read and write the same `.yaks/`
-directory (task files + a per-user derived index) — so they can coexist until
-the Rust version reaches parity and we flip the canonical repo.
-
-## Status: Phase 0 spike
-
-Read-only commands over the existing on-disk format, to prove fs interop +
-parsing and to measure cold-start latency against the Python baseline
-(~42–48 ms per invocation, of which only ~2–5 ms is real work).
-
-Implemented:
-
-- `yaks list [--all]` — list active tasks (add `--all` to include shorn)
-- `yaks show <id>` — show one task
-- `yaks next` — hairy tasks whose dependencies are all resolved
-
-All three discover the nearest `.yaks/` directory by walking up from the cwd,
-exactly like the Python tool.
-
-## Build & run
-
-```sh
-cargo build --release
-./target/release/yaks list
+```text
+.yaks/
+  hairy/     todo          (a hairy yak, not yet shaved)
+  shaving/   in progress   (you're shaving it)
+  shorn/     done          (shorn)
+  dead/      abandoned     (slaughtered; hidden from normal queries)
 ```
 
-## Measuring startup
+## Install
+
+**npm** (prebuilt binary for your platform; the command is `yaks`):
 
 ```sh
-cargo build --release
-python3 bench/startup.py        # rust vs python; prefers hyperfine if installed
-# or directly: hyperfine -N './target/release/yaks list'
+npm i -g @rocketsurgery/yaks     # then: yaks --help
+# or zero-install:
+npx @rocketsurgery/yaks list
 ```
 
-Current numbers on the dev herd: Rust `yaks list` ~6 ms median vs Python ~45 ms.
+**From source** (needs a Rust toolchain):
 
-## Roadmap (from the yak-2219 research)
+```sh
+git clone https://github.com/rocketsurgery-games/yaks
+cd yaks
+cargo build --release
+./target/release/yaks --help
+```
 
-| Phase | Scope | Key crates |
-|-------|-------|-----------|
-| 0 (here) | read-only CLI over existing files; startup benchmark; distribution skeleton | clap |
-| 1 | full CLI parity (create/update/shave/shorn/dep/…), `--json`, byte-parity tests | clap, serde |
-| 2 | TUI | ratatui + crossterm + edtui |
-| 3 | demo/recording via rendered Buffer | avt |
-| 4 | distribution cutover | cargo-dist + npm installer |
+## Quick start
 
-Storage stays fs-native: files authoritative, the index a derived, per-user,
-rebuildable cache (rkyv zero-copy archive; no embedded DB). See the `yak-1622`
-notes in the parent repo for the full rationale.
+A herd is just a `.yaks/` directory. Create one at your project root and start
+tracking:
+
+```sh
+mkdir .yaks
+yaks create --title "Wire up the login form" --type feature --priority 2
+yaks list
+yaks shave <id>     # start work  (hairy -> shaving)
+yaks shorn <id>     # finish      (shaving -> shorn)
+```
+
+That's the whole loop: **shave** a yak before you work on it, **shear** it
+(`shorn`) when it's done.
+
+## Concepts
+
+**States are adjectives, verbs are transitions.** A yak is *hairy* (todo),
+*shaving* (in progress), or *shorn* (done); *slaughtered* yaks go to a hidden
+`dead/`. You **shave** (hairy→shaving), **shear** / mark **shorn**
+(shaving→shorn), **regrow** (shorn→hairy), **slaughter**, and **revive**.
+
+**Task file.** Frontmatter for metadata, the markdown body for the description:
+
+```markdown
+---
+id: yak-a1b2
+title: Wire up the login form
+type: feature          # bug | feature | task | idea
+priority: 2            # 1 urgent … 5 lowest (default 3)
+created: "2026-02-16T10:00:00Z"
+updated: "2026-02-16T10:30:00Z"
+parent: yak-c3d4       # optional; only on child tasks
+depends_on: [yak-e5f6] # optional
+labels: [auth]         # optional
+source: https://…      # optional external issue URL
+---
+
+Longer description goes here.
+```
+
+IDs are flat and stable (`{prefix}-{4hex}`). Hierarchy lives in the `parent:`
+field, not in the ID. Dependencies are ids in `depends_on:`; a yak is *ready*
+when all of them are shorn (or dead), and *tangled* otherwise.
+
+## Commands
+
+| Command | What it does |
+|---------|--------------|
+| `yaks create` | Create a task (`--title`, `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description`) |
+| `yaks list` | List tasks; filter by `--status/--type/--priority/--label/--search`, `--ready`, `--tangled`, `--parent-of`, `--all` |
+| `yaks show <id>` | Full detail for one task, with parent + children |
+| `yaks update <id>` | Change fields/labels, set `--description`, or append a `--note` |
+| `yaks shave <id>` | hairy → shaving (alias: `work`) |
+| `yaks shorn <id>` | shaving → shorn (alias: `close`) |
+| `yaks regrow <id>` | shorn → hairy (alias: `reopen`) |
+| `yaks slaughter <id>` / `revive <id>` | move to / from the hidden `dead/` |
+| `yaks next` / `tangled` | ready tasks / dependency-blocked tasks |
+| `yaks search <q>` | substring search over id/title/description |
+| `yaks dep` / `reparent` | edit dependencies / move under a new parent |
+| `yaks rollup` | group yaks by the external issue they roll up to (`--keys` for a PR body) |
+| `yaks stats` | task statistics |
+| `yaks tui` | open the interactive terminal UI |
+
+Add `--json` to any query command for machine-readable output.
+
+## Interactive TUI
+
+`yaks tui` opens a full-screen browser over the herd — views by state, a detail
+pane, inline create/edit, dependency and reparent pickers, search, and an
+embedded modal editor (vim or emacs keybindings, per `.yaks/config.yaml`). It
+auto-refreshes when the files change underneath it, so it stays in sync if you
+(or an agent) edit yaks from elsewhere.
+
+## Use with an AI coding agent
+
+yaks includes an **agent skill** so assistants drive it correctly (shave before
+coding, shear when done, keep task state honest). It's a plain skill — it just
+shells out to the `yaks` CLI (or `npx`), so there's nothing to run as a plugin.
+
+Copy the skill into your agent's skills directory:
+
+```sh
+git clone https://github.com/rocketsurgery-games/yaks
+cp -r yaks/skills/yak          ~/.agents/skills/     # Zed; for other agents use their skills dir
+cp -r yaks/skills/yak-tracker  ~/.agents/skills/     # optional: external-tracker projection
+```
+
+It activates when a `.yaks/` directory is present. The skill calls the `yaks`
+binary (or `npx @rocketsurgery/yaks`), so make sure one of those is on the
+agent's `PATH`.
+
+## Configuration
+
+Optional per-project config lives in `.yaks/config.yaml`:
+
+```yaml
+prefix: yak            # id prefix (default "yak")
+default_type: task     # default --type
+default_priority: 3    # default --priority
+vim_mode: true         # TUI editor keybindings: vim (true) or emacs (false)
+```
+
+A user-global `~/.config/yaks/config.yaml` is merged underneath per-project
+values.
+
+## License
+
+Apache-2.0.

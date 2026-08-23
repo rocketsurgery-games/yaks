@@ -1,12 +1,11 @@
 //! Per-user, per-herd UI-state cache. This is *rebuildable* state (currently
 //! the set of collapsed tree ids), so it lives under `$XDG_CACHE_HOME`
 //! (default `~/.cache`) at `yaks/<slug>.json`, never in the herd and never
-//! committed. Mirrors the Python TUI's `~/.cache/yaks/<slug>.json`.
+//! committed.
 //!
-//! The slug is a stable hash of the absolute herd root. It need not match the
-//! Python tool's sha1 — this cache belongs to the Rust binary alone, and a
-//! slug change merely resets the cache (collapsed rows re-expand), which is
-//! harmless for rebuildable state.
+//! The slug is a stable hash of the absolute herd root. A slug change merely
+//! resets the cache (collapsed rows re-expand), which is harmless for
+//! rebuildable state.
 
 use std::collections::HashSet;
 use std::fs;

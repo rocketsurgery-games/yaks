@@ -1,7 +1,7 @@
 //! Filesystem discovery, frontmatter parsing, and task serialization.
 //!
-//! Reads and writes the same on-disk layout as the Python tool: a `.yaks/`
-//! directory with `hairy/ shaving/ shorn/ dead/` subdirs of `<id>.md` files,
+//! The on-disk layout: a `.yaks/` directory with `hairy/ shaving/ shorn/ dead/`
+//! subdirs of `<id>.md` files,
 //! each with `---`-delimited YAML frontmatter followed by a markdown body.
 //!
 //! The frontmatter parser is a deliberately small hand-rolled fast path
@@ -177,8 +177,8 @@ fn non_empty(s: String) -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }
 
-/// Serialization + atomic persistence. Mirrors the Python `dump_yaml` /
-/// `save_task` output so files round-trip between the two implementations.
+/// Serialization + atomic persistence: frontmatter + markdown body written to
+/// a temp file and renamed into place.
 ///
 /// Marked `allow(dead_code)` for now: exercised by the round-trip tests and
 /// wired into the `create`/`update` commands next (yaksrs-a2a4).
@@ -350,7 +350,7 @@ pub struct Config {
     pub vim_mode: bool,
 }
 
-/// Read `.yaks/config.yaml`; missing file/keys fall back to the Python
+/// Read `.yaks/config.yaml`; missing file/keys fall back to the built-in
 /// defaults (prefix "yak", type "task", priority 3).
 pub fn read_config(root: &Path) -> Config {
     let mut c = Config {
@@ -446,7 +446,7 @@ pub enum MoveOutcome {
 }
 
 /// Locate a task's current file by id via exact-path probes (O(1) per status
-/// dir), mirroring the Python `find_task_file`.
+/// dir).
 pub fn find_task_file(root: &Path, id: &str) -> Option<(Status, PathBuf)> {
     for st in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
         let p = root.join(st.dir()).join(format!("{id}.md"));
@@ -490,7 +490,7 @@ pub fn load_task_by_id(root: &Path, id: &str) -> Result<Option<Task>> {
     Ok(parse_task(&text, status))
 }
 
-/// Append a timestamped note block to a body, matching the Python format
+/// Append a timestamped note block to a body
 /// (`<body>\n\n---\n\u{25b8} <ts>\n<note>`; no leading blank line when empty).
 pub fn append_note(body: &str, ts: &str, note: &str) -> String {
     let desc = body.trim_end();

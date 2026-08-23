@@ -1,5 +1,5 @@
-//! JSON rendering for `--json`. Shapes are yaks-rs's own (semantic, not
-//! byte-identical to the Python tool); stability is pinned by golden snapshot
+//! JSON rendering for `--json`. Output shapes are stable, pinned by golden
+//! snapshot
 //! tests. serde_json's `preserve_order` keeps key order deterministic.
 //!
 //! Pure rendering: takes typed results from `herd` and returns `Value`s.

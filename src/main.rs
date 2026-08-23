@@ -1,8 +1,8 @@
-//! yaks-rs — a filesystem-native task tracker (Rust port).
+//! yaks — a filesystem-native task tracker.
 //!
-//! Reads and writes the SAME `.yaks/` files as the Python `yaks` tool. This
-//! binary is a thin CLI over `herd::Herd` (the print-free core ops facade):
-//! every command is parse args -> call one Herd op -> render (text or --json).
+//! This binary is a thin CLI over `herd::Herd` (the print-free core ops
+//! facade): every command is parse args -> call one Herd op -> render (text or
+//! --json). Tasks live as markdown files under `.yaks/`; status is the folder.
 
 mod clipboard;
 mod filter;
