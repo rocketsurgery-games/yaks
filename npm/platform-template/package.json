@@ -2,7 +2,7 @@
   "name": "@rocketsurgery/yaks-__TARGET__",
   "version": "0.0.0",
   "description": "yaks prebuilt binary for __TARGET__",
-  "repository": "https://github.com/rocketsurgery-games/yaks",
+  "repository": { "type": "git", "url": "git+https://github.com/rocketsurgery-games/yaks.git" },
   "os": ["__OS__"],
   "cpu": ["__CPU__"],
   "files": ["bin/"],
