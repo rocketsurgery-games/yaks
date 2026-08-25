@@ -3350,7 +3350,34 @@ fn route_multiline_key(
                         toggle_case(&mut state.borrow_mut());
                         return;
                     }
+                    KeyCode::Char('x') => {
+                        // Yank the char under the cursor before edtui deletes
+                        // it, so `x` then `p` works (dd/dw already yank).
+                        let ch = {
+                            let st = state.borrow();
+                            row_chars(&st, st.cursor.row).get(st.cursor.col).copied()
+                        };
+                        if let Some(c) = ch {
+                            crate::clipboard::copy_text(&c.to_string());
+                        }
+                        handler.on_key_event(k, &mut state.borrow_mut());
+                        return;
+                    }
                     KeyCode::Char('X') => {
+                        // Delete the previous char, yanking it first.
+                        let ch = {
+                            let st = state.borrow();
+                            (st.cursor.col > 0)
+                                .then(|| {
+                                    row_chars(&st, st.cursor.row)
+                                        .get(st.cursor.col - 1)
+                                        .copied()
+                                })
+                                .flatten()
+                        };
+                        if let Some(c) = ch {
+                            crate::clipboard::copy_text(&c.to_string());
+                        }
                         state.borrow_mut().execute(DeleteChar(1));
                         return;
                     }
@@ -4333,6 +4360,22 @@ mod tests {
             }
             _ => panic!("no editor overlay open"),
         }
+    }
+
+    #[test]
+    fn x_and_shift_x_delete_chars() {
+        // x deletes under the cursor, X deletes the previous char. (The yank to
+        // the system clipboard is best-effort and not asserted here.)
+        let mut app = editable();
+        app.open_comment();
+        typ(&mut app, "abcd");
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)); // Normal
+        typ(&mut app, "0"); // col 0
+        typ(&mut app, "x"); // remove 'a'
+        assert_eq!(editor_state(&app).1, "bcd");
+        typ(&mut app, "l"); // -> col 1 ('c')
+        typ(&mut app, "X"); // remove previous char 'b'
+        assert_eq!(editor_state(&app).1, "cd");
     }
 
     #[test]
