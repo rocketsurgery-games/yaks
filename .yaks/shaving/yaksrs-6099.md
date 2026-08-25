@@ -4,7 +4,7 @@ title: Anemic vi controls in editor
 type: bug
 priority: 2
 created: '2026-08-23T05:05:08Z'
-updated: '2026-08-25T02:38:11Z'
+updated: '2026-08-25T03:42:06Z'
 labels:
 - ui
 ---
@@ -64,3 +64,7 @@ Fork wired up: cloned rocketsurgery-games/edtui to yaks/.edtui (gitignored + wor
 ---
 ▸ 2026-08-25T02:38:11Z
 Second upstream PR shipped: counts (preiter93/edtui#72), yak d168 shorn. Two PRs now open (#71 r, #72 counts). Remaining upstream children: ~ (b3a0), W/B/E (7e59), x-yanks (cdf9), >>/<< (2a15), native gj/gk (114a), fancy-regex (d635), editor word-wrap (9a8f).
+
+---
+▸ 2026-08-25T03:42:06Z
+Third upstream PR: W/B/E WORD motions (preiter93/edtui#73), yak 7e59 shorn. Three PRs now open: #71 r, #72 counts, #73 W/B/E. Remaining vi-control children: ~ (b3a0), x-yanks (cdf9), >>/<< (2a15), native gj/gk (114a).
