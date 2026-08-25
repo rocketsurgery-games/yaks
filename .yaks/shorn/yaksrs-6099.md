@@ -4,7 +4,7 @@ title: Anemic vi controls in editor
 type: bug
 priority: 2
 created: '2026-08-23T05:05:08Z'
-updated: '2026-08-25T22:47:29Z'
+updated: '2026-08-25T23:12:07Z'
 labels:
 - ui
 ---
@@ -80,3 +80,7 @@ yaks now builds against the edtui fork (yaks-integration branch): r, counts, W/B
 ---
 ▸ 2026-08-25T22:47:29Z
 ENDGAME COMPLETE: ~, x/X-yank, and gj/gk/g0/g$ are now NATIVE in the edtui fork (yaks-integration), and ALL yaks-side vim shims are deleted. The editor is pure edtui now (r, counts, W/B/E/~/x/X/gj/gk + the stock keymap), no yaks vim engine, no count-leak. Fork feature branches (toggle-case, x-yanks, display-line-motions) are ready for you to review + upstream issue-first.
+
+---
+▸ 2026-08-25T23:12:06Z
+ALL vi-control work complete. Beyond the earlier endgame (~/x/X/gj-gk native + shims deleted), added indent (>>/<< and visual >/<) and word-aware editor wrapping to the fork, merged into yaks-integration, consumed by yaks. Editor is fully native edtui with a rich vim keymap + word-wrap. Fork feature branches (toggle-case, x-yanks, display-line-motions, indent, word-wrap) are all pushed and ready for you to review + upstream issue-first.
