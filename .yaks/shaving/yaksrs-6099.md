@@ -4,7 +4,7 @@ title: Anemic vi controls in editor
 type: bug
 priority: 2
 created: '2026-08-23T05:05:08Z'
-updated: '2026-08-25T22:16:24Z'
+updated: '2026-08-25T22:47:29Z'
 labels:
 - ui
 ---
@@ -76,3 +76,7 @@ PROCESS CHANGE: the three upstream PRs (#71 r, #72 counts, #73 W/B/E) were opene
 ---
 ▸ 2026-08-25T22:16:24Z
 yaks now builds against the edtui fork (yaks-integration branch): r, counts, W/B/E are NATIVE now; removed the redundant r/W/B yaks shims. Counts (3j/5x/2dd/3w/3W) work. Remaining yaks shims (gj/gk, ~, X, x-yank) have a count-leak edge (see 182f) to resolve by upstreaming them into the fork.
+
+---
+▸ 2026-08-25T22:47:29Z
+ENDGAME COMPLETE: ~, x/X-yank, and gj/gk/g0/g$ are now NATIVE in the edtui fork (yaks-integration), and ALL yaks-side vim shims are deleted. The editor is pure edtui now (r, counts, W/B/E/~/x/X/gj/gk + the stock keymap), no yaks vim engine, no count-leak. Fork feature branches (toggle-case, x-yanks, display-line-motions) are ready for you to review + upstream issue-first.

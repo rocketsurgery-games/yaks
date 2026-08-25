@@ -23,7 +23,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use anyhow::Result;
-use edtui::actions::{DeleteChar, ReplaceChar};
+
 use edtui::{EditorEventHandler, EditorMode, EditorState, EditorTheme, EditorView, Lines};
 use notify::event::{EventKind, ModifyKind};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -113,11 +113,6 @@ struct Editor {
     /// leaves Insert for Normal mode instead of closing the overlay, so the
     /// full normal-mode keymap is reachable even in single-line fields.
     vim: bool,
-    /// A buffered operator/prefix key (`g`, `r`) awaiting its next keystroke.
-    pending: Option<char>,
-    /// Content width of the last render, used to reproduce edtui's line wrap so
-    /// display-line motions land where the text visually wraps.
-    wrap_width: Cell<u16>,
     /// Prompt label (bottom-line prefix for fields; header for the body panel).
     label: String,
     action: EditAction,
@@ -150,8 +145,6 @@ impl Editor {
             handler: make_handler(vim),
             single_line,
             vim,
-            pending: None,
-            wrap_width: Cell::new(0),
             label,
             action,
         }
@@ -369,13 +362,6 @@ struct CreateForm {
     /// `Some(id)` when editing an existing task; `None` when creating.
     edit_id: Option<String>,
     handler: EditorEventHandler,
-    /// Whether the vim keybinding profile is active (enables `g`-motions).
-    vim: bool,
-    /// A buffered operator/prefix key in the description editor.
-    desc_pending: Option<char>,
-    /// Content width of the description editor at last render (for wrap-aware
-    /// display-line motions).
-    desc_wrap_width: Cell<u16>,
 }
 
 fn kind_index(kind: &str) -> usize {
@@ -398,9 +384,6 @@ impl CreateForm {
             parent,
             edit_id: None,
             handler: make_handler(vim),
-            vim,
-            desc_pending: None,
-            desc_wrap_width: Cell::new(0),
         }
     }
 
@@ -416,9 +399,6 @@ impl CreateForm {
             parent: task.parent.clone(),
             edit_id: Some(task.id.clone()),
             handler: make_handler(vim),
-            vim,
-            desc_pending: None,
-            desc_wrap_width: Cell::new(0),
         }
     }
 
@@ -1216,14 +1196,7 @@ impl App {
         }
         if is_desc {
             if let Overlay::Create(f) = &mut self.overlay {
-                route_multiline_key(
-                    &mut f.handler,
-                    &f.description,
-                    &mut f.desc_pending,
-                    f.desc_wrap_width.get(),
-                    f.vim,
-                    k,
-                );
+                f.handler.on_key_event(k, &mut f.description.borrow_mut());
             }
             return;
         }
@@ -2065,17 +2038,8 @@ impl App {
             } else if cancel {
                 self.overlay = Overlay::None;
                 self.notification = Some("cancelled".into());
-            } else if ed.single_line {
-                ed.handler.on_key_event(k, &mut ed.state.borrow_mut());
             } else {
-                route_multiline_key(
-                    &mut ed.handler,
-                    &ed.state,
-                    &mut ed.pending,
-                    ed.wrap_width.get(),
-                    ed.vim,
-                    k,
-                );
+                ed.handler.on_key_event(k, &mut ed.state.borrow_mut());
             }
             return;
         }
@@ -2924,7 +2888,6 @@ fn render_create(f: &CreateForm, syntax: Option<&str>, frame: &mut Frame, area: 
         rows[5],
     );
     if desc_focused {
-        f.desc_wrap_width.set(rows[6].width);
         let mut st = f.description.borrow_mut();
         let mode = st.mode;
         let view = apply_syntax(EditorView::new(&mut st).theme(editor_theme(mode)), syntax);
@@ -3042,279 +3005,6 @@ fn render_text_row(
     }
 }
 
-/// A `g`-prefixed display-line motion that edtui doesn't provide natively.
-#[derive(Clone, Copy)]
-enum GMotion {
-    Down,
-    Up,
-    Home,
-    End,
-}
-
-/// edtui's default tab width (`ViewState::default`).
-const EDITOR_TAB_WIDTH: usize = 2;
-
-/// Display width of a char, matching edtui's `helper::char_width`.
-fn ed_char_width(ch: char) -> usize {
-    use unicode_width::UnicodeWidthChar;
-    if ch == '\t' {
-        EDITOR_TAB_WIDTH
-    } else {
-        ch.width().unwrap_or(0)
-    }
-}
-
-/// Reproduce edtui's hard char-wrap (`LineWrapper::wrap_line`) as char-index
-/// ranges `[start, end)`, one per visual (display) line of a logical line.
-fn wrap_segments(line: &[char], width: usize) -> Vec<(usize, usize)> {
-    if width == 0 || line.is_empty() {
-        return vec![(0, line.len())];
-    }
-    let mut segs = Vec::new();
-    let mut seg_start = 0usize;
-    let mut w = 0usize;
-    for (i, &ch) in line.iter().enumerate() {
-        let cw = ed_char_width(ch);
-        if w + cw > width && i > seg_start {
-            segs.push((seg_start, i));
-            seg_start = i;
-            w = 0;
-        }
-        w += cw;
-    }
-    segs.push((seg_start, line.len()));
-    segs
-}
-
-/// The char index within `[s, e)` whose cell spans display column `vcol`
-/// (clamped to `e` when `vcol` is past the segment's end).
-fn col_at_vcol(line: &[char], s: usize, e: usize, vcol: usize) -> usize {
-    let mut w = 0usize;
-    for (i, &ch) in line.iter().enumerate().take(e).skip(s) {
-        let cw = ed_char_width(ch);
-        if vcol < w + cw {
-            return i;
-        }
-        w += cw;
-    }
-    e
-}
-
-fn row_chars(state: &EditorState, row: usize) -> Vec<char> {
-    state.lines.iter_row().nth(row).cloned().unwrap_or_default()
-}
-
-/// Highest column the cursor may occupy on `row`: `len` in insert mode (past the
-/// last char), `len - 1` otherwise — mirroring edtui's `helper::max_col`.
-fn max_col_for(state: &EditorState, row: usize) -> usize {
-    let len = row_chars(state, row).len();
-    if state.mode == EditorMode::Insert {
-        len
-    } else {
-        len.saturating_sub(1)
-    }
-}
-
-/// Move the cursor by a display line / to a display-line edge, reproducing the
-/// wrap edtui rendered at `width`. Operates on the public `cursor`/`lines`
-/// fields, so no fork of edtui is needed.
-fn display_line_nav(state: &mut EditorState, width: u16, motion: GMotion) {
-    let width = width as usize;
-    let row = state.cursor.row;
-    let line = row_chars(state, row);
-    let segs = wrap_segments(&line, width);
-    let col = state.cursor.col.min(line.len());
-    let cur = segs
-        .iter()
-        .position(|&(s, e)| col >= s && col < e)
-        .unwrap_or(segs.len() - 1);
-    let (s0, e0) = segs[cur];
-    let vcol: usize = line[s0..col.min(e0)]
-        .iter()
-        .map(|&c| ed_char_width(c))
-        .sum();
-
-    // Land on `target_col` within a segment on `target_row`; `is_last_seg`
-    // decides whether the trailing position is `len`/`len-1` or one-before the
-    // next visual line.
-    let land =
-        |state: &mut EditorState, target_row: usize, seg: (usize, usize), is_last_seg: bool| {
-            let (s, e) = seg;
-            let tline = row_chars(state, target_row);
-            let raw = col_at_vcol(&tline, s, e, vcol);
-            let hi = if is_last_seg {
-                max_col_for(state, target_row)
-            } else {
-                e.saturating_sub(1)
-            };
-            state.cursor.row = target_row;
-            state.cursor.col = raw.clamp(s, hi.max(s));
-        };
-
-    match motion {
-        GMotion::Home => state.cursor.col = s0,
-        GMotion::End => {
-            let is_last = cur + 1 == segs.len();
-            let hi = if is_last {
-                max_col_for(state, row)
-            } else {
-                e0.saturating_sub(1)
-            };
-            state.cursor.col = hi.max(s0);
-        }
-        GMotion::Down => {
-            if cur + 1 < segs.len() {
-                let is_last = cur + 2 == segs.len();
-                land(state, row, segs[cur + 1], is_last);
-            } else {
-                let n = state.lines.len();
-                let max_row = if state.mode == EditorMode::Insert {
-                    n
-                } else {
-                    n.saturating_sub(1)
-                };
-                if row < max_row {
-                    let nline = row_chars(state, row + 1);
-                    let nsegs = wrap_segments(&nline, width);
-                    land(state, row + 1, nsegs[0], nsegs.len() == 1);
-                }
-            }
-        }
-        GMotion::Up => {
-            if cur > 0 {
-                land(state, row, segs[cur - 1], false);
-            } else if row > 0 {
-                let pline = row_chars(state, row - 1);
-                let psegs = wrap_segments(&pline, width);
-                let last = psegs.len() - 1;
-                land(state, row - 1, psegs[last], true);
-            }
-        }
-    }
-}
-
-/// Toggle the case of the char under the cursor and advance (vim `~`). Routed
-/// through edtui's `ReplaceChar` so the edit lands in the undo history.
-fn toggle_case(state: &mut EditorState) {
-    let row = state.cursor.row;
-    let col = state.cursor.col;
-    let line = row_chars(state, row);
-    let Some(&ch) = line.get(col) else { return };
-    let toggled = if ch.is_uppercase() {
-        ch.to_lowercase().next()
-    } else if ch.is_lowercase() {
-        ch.to_uppercase().next()
-    } else {
-        None
-    };
-    if let Some(t) = toggled {
-        state.execute(ReplaceChar(Some(t)));
-    }
-    state.cursor.col = (col + 1).min(max_col_for(state, row));
-}
-
-/// Route a key to a multiline vim editor, intercepting the commands edtui
-/// lacks and forwarding everything else to the edtui handler.
-///
-/// Handled here (Normal mode): the `g`-prefixed display-line motions
-/// (gj/gk/g0/g$, gg), WORD motions `W`/`B`, `~` (toggle case), `X` (delete the
-/// previous char), and `r{char}` (replace). `pending` buffers a prefix key
-/// (`g` or `r`) until its argument arrives.
-fn route_multiline_key(
-    handler: &mut EditorEventHandler,
-    state: &RefCell<EditorState>,
-    pending: &mut Option<char>,
-    wrap_width: u16,
-    vim: bool,
-    k: KeyEvent,
-) {
-    if vim {
-        let mode = state.borrow().mode;
-        let normal = matches!(mode, EditorMode::Normal | EditorMode::Visual);
-        if normal {
-            // Resolve a buffered `g` motion prefix.
-            if let Some(prefix) = pending.take() {
-                match (prefix, k.code) {
-                    ('g', KeyCode::Char('j')) => {
-                        display_line_nav(&mut state.borrow_mut(), wrap_width, GMotion::Down)
-                    }
-                    ('g', KeyCode::Char('k')) => {
-                        display_line_nav(&mut state.borrow_mut(), wrap_width, GMotion::Up)
-                    }
-                    ('g', KeyCode::Char('0')) => {
-                        display_line_nav(&mut state.borrow_mut(), wrap_width, GMotion::Home)
-                    }
-                    ('g', KeyCode::Char('$')) => {
-                        display_line_nav(&mut state.borrow_mut(), wrap_width, GMotion::End)
-                    }
-                    ('g', KeyCode::Char('g')) => {
-                        // gg: jump to the first row.
-                        let mut st = state.borrow_mut();
-                        st.cursor.row = 0;
-                        st.cursor.col = 0;
-                    }
-                    // Unknown sequence: swallow the second key.
-                    _ => {}
-                }
-                return;
-            }
-            // Start a prefix, or run a single-key custom command (Normal only,
-            // to avoid desyncing a Visual-mode selection we don't track).
-            if mode == EditorMode::Normal {
-                match k.code {
-                    KeyCode::Char('g') if k.modifiers.is_empty() => {
-                        *pending = Some('g');
-                        return;
-                    }
-                    KeyCode::Char('~') => {
-                        toggle_case(&mut state.borrow_mut());
-                        return;
-                    }
-                    KeyCode::Char('x') => {
-                        // Yank the char under the cursor before edtui deletes
-                        // it, so `x` then `p` works (dd/dw already yank).
-                        let ch = {
-                            let st = state.borrow();
-                            row_chars(&st, st.cursor.row).get(st.cursor.col).copied()
-                        };
-                        if let Some(c) = ch {
-                            crate::clipboard::copy_text(&c.to_string());
-                        }
-                        handler.on_key_event(k, &mut state.borrow_mut());
-                        return;
-                    }
-                    KeyCode::Char('X') => {
-                        // Delete the previous char, yanking it first.
-                        let ch = {
-                            let st = state.borrow();
-                            (st.cursor.col > 0)
-                                .then(|| {
-                                    row_chars(&st, st.cursor.row)
-                                        .get(st.cursor.col - 1)
-                                        .copied()
-                                })
-                                .flatten()
-                        };
-                        if let Some(c) = ch {
-                            crate::clipboard::copy_text(&c.to_string());
-                        }
-                        state.borrow_mut().execute(DeleteChar(1));
-                        return;
-                    }
-                    _ => {}
-                }
-            } else if k.code == KeyCode::Char('g') && k.modifiers.is_empty() {
-                // Display-line motions are still useful in Visual mode.
-                *pending = Some('g');
-                return;
-            }
-        } else {
-            *pending = None;
-        }
-    }
-    handler.on_key_event(k, &mut state.borrow_mut());
-}
-
 /// Short mode label shown next to a vim editor so the current mode is visible.
 fn mode_tag(mode: EditorMode) -> &'static str {
     match mode {
@@ -3393,8 +3083,6 @@ fn render_editor_panel(ed: &Editor, syntax: Option<&str>, frame: &mut Frame, are
             head,
         );
     }
-    // Remember the content width so display-line motions match the render.
-    ed.wrap_width.set(body.width);
     let mut state = ed.state.borrow_mut();
     let view = apply_syntax(
         EditorView::new(&mut state).theme(editor_theme(mode)),
@@ -4294,7 +3982,11 @@ mod tests {
         typ(&mut app, "x"); // remove 'a'
         assert_eq!(editor_state(&app).1, "bcd");
         typ(&mut app, "l"); // -> col 1 ('c')
-        typ(&mut app, "X"); // remove previous char 'b'
+        // X (Shift+X) removes the previous char; terminals send Shift with it.
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT),
+        );
         assert_eq!(editor_state(&app).1, "cd");
     }
 
@@ -4320,102 +4012,6 @@ mod tests {
     }
 
     #[test]
-    fn wrap_segments_hard_wraps_like_edtui() {
-        // Matches edtui's LineWrapper: fixed-width chunks, no word boundaries.
-        let line: Vec<char> = "abcdefgh".chars().collect();
-        assert_eq!(wrap_segments(&line, 3), vec![(0, 3), (3, 6), (6, 8)]);
-        assert_eq!(wrap_segments(&[], 3), vec![(0, 0)]);
-    }
-
-    #[test]
-    fn display_line_nav_moves_within_wrapped_line() {
-        // One logical line "aaaabbbbcccc" wrapped at width 4 => three visual
-        // lines: aaaa | bbbb | cccc.
-        let mut st = EditorState::new(Lines::from("aaaabbbbcccc"));
-        st.mode = EditorMode::Normal;
-        st.cursor = edtui::Index2::new(0, 1); // visual col 1 on line 1
-
-        display_line_nav(&mut st, 4, GMotion::Down); // -> line 2, col 5
-        assert_eq!((st.cursor.row, st.cursor.col), (0, 5));
-        display_line_nav(&mut st, 4, GMotion::Down); // -> line 3, col 9
-        assert_eq!((st.cursor.row, st.cursor.col), (0, 9));
-        display_line_nav(&mut st, 4, GMotion::Up); // back to line 2, col 5
-        assert_eq!((st.cursor.row, st.cursor.col), (0, 5));
-        display_line_nav(&mut st, 4, GMotion::Home); // start of visual line 2
-        assert_eq!(st.cursor.col, 4);
-        display_line_nav(&mut st, 4, GMotion::End); // end of visual line 2
-        assert_eq!(st.cursor.col, 7);
-    }
-
-    #[test]
-    fn display_line_nav_crosses_logical_lines() {
-        let mut st = EditorState::new(Lines::from("aaaabbbb\nxy"));
-        st.mode = EditorMode::Normal;
-        st.cursor = edtui::Index2::new(0, 5); // visual col 1 on 2nd wrap of row 0
-        display_line_nav(&mut st, 4, GMotion::Down); // -> row 1 ("xy"), col 1
-        assert_eq!((st.cursor.row, st.cursor.col), (1, 1));
-        display_line_nav(&mut st, 4, GMotion::Up); // back up into row 0's 2nd wrap
-        assert_eq!((st.cursor.row, st.cursor.col), (0, 5));
-    }
-
-    #[test]
-    fn gj_gk_routed_through_multiline_editor() {
-        // End-to-end: open the comment editor, render (captures wrap width),
-        // type a long line, then use `gj`/`gk` to move by visual line.
-        let mut app = editable();
-        app.open_comment();
-        typ(&mut app, "aaaabbbbcccc");
-        // Render narrow so the line wraps at width 4 in the body area.
-        let _ = draw(&app, 6, 10); // panel body ends up 4 wide after the divider
-        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)); // Normal
-        let width = match &app.overlay {
-            Overlay::Edit(ed) => ed.wrap_width.get(),
-            _ => panic!("no editor"),
-        };
-        assert!(width >= 1, "wrap width should be captured at render");
-        // Move to a known visual column, then gj/gk.
-        typ(&mut app, "gg"); // row 0, col 0
-        typ(&mut app, "gj"); // down one visual line
-        let (_, _) = editor_state(&app);
-        let col_after_gj = match &app.overlay {
-            Overlay::Edit(ed) => ed.state.borrow().cursor.col,
-            _ => 0,
-        };
-        assert!(
-            col_after_gj >= width as usize,
-            "gj should move into the next visual segment (col {col_after_gj}, width {width})"
-        );
-        typ(&mut app, "gk"); // back up
-        let col_after_gk = match &app.overlay {
-            Overlay::Edit(ed) => ed.state.borrow().cursor.col,
-            _ => 999,
-        };
-        assert!(
-            col_after_gk < width as usize,
-            "gk should return to the first visual line"
-        );
-    }
-
-    #[test]
-    fn toggle_case_flips_and_advances() {
-        let mut st = EditorState::new(Lines::from("aB1"));
-        st.mode = EditorMode::Normal;
-        st.cursor = edtui::Index2::new(0, 0);
-        toggle_case(&mut st);
-        assert_eq!(
-            (st.lines.to_string(), st.cursor.col),
-            ("AB1".to_string(), 1)
-        );
-        toggle_case(&mut st);
-        assert_eq!(
-            (st.lines.to_string(), st.cursor.col),
-            ("Ab1".to_string(), 2)
-        );
-        toggle_case(&mut st); // digit: unchanged, still advances (clamped)
-        assert_eq!(st.lines.to_string(), "Ab1");
-    }
-
-    #[test]
     fn tilde_x_and_r_route_through_editor() {
         let mut app = editable();
         app.open_comment();
@@ -4424,7 +4020,11 @@ mod tests {
         typ(&mut app, "0"); // to col 0
         typ(&mut app, "~"); // Hello, cursor -> col 1
         assert_eq!(editor_state(&app).1, "Hello");
-        typ(&mut app, "X"); // delete previous char (the 'H')
+        // Cursor is on col 1 after ~; X (Shift+X) deletes the previous char 'H'.
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT),
+        );
         assert_eq!(editor_state(&app).1, "ello");
         typ(&mut app, "r"); // replace-char prefix
         typ(&mut app, "Y"); // 'e' -> 'Y'
