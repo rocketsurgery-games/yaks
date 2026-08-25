@@ -1,6 +1,9 @@
 [workspace]
 members = ["crates/toque"]
 # The root `yaks` package is implicitly a workspace member alongside crates/*.
+# `.edtui` is a local, gitignored working clone of the forked edtui repo (for
+# developing upstream PRs); it is its own repo/workspace, not a yaks member.
+exclude = [".edtui"]
 
 [package]
 name = "yaks"
@@ -15,17 +18,26 @@ default-run = "yaks"
 name = "yaks"
 path = "src/main.rs"
 
+[features]
+# Markdown syntax coloring in the editor. Opt-in because edtui's
+# syntax-highlighting pulls syntect with the Oniguruma C dep (onig_sys), which
+# would add a C toolchain requirement to the otherwise pure-Rust cross-compiled
+# release matrix. Build locally with `--features md-syntax` to try it. Making it
+# default is blocked on edtui switching syntect to pure-Rust fancy-regex.
+md-syntax = ["edtui/syntax-highlighting"]
+
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 ratatui = "0.30"
-edtui = { version = "0.11.7", default-features = false }
+edtui = { version = "0.11.7", default-features = false, features = ["arboard"] }
 toque = { path = "crates/toque" }
 notify = "6"
 arboard = "3"
 png = "0.17"
+unicode-width = "0.2"
 
 [profile.release]
 opt-level = 3

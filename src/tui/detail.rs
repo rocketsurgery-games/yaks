@@ -32,6 +32,9 @@ pub struct DLine {
     pub text: String,
     pub kind: Kind,
     pub links: Vec<(usize, usize, Target)>,
+    /// True when this line is a wrapped continuation of the previous one (set by
+    /// [`wrap`]). Lets yank rejoin a soft-wrapped line back into one logical line.
+    pub cont: bool,
 }
 
 /// A single navigable target, located at a line + starting column.
@@ -127,6 +130,7 @@ fn field(label: &str, value: &str) -> DLine {
         text: format!("{label:<13}{value}"),
         kind: Kind::Field,
         links: vec![],
+        cont: false,
     }
 }
 
@@ -135,6 +139,7 @@ fn section(text: &str) -> DLine {
         text: text.into(),
         kind: Kind::Section,
         links: vec![],
+        cont: false,
     }
 }
 
@@ -143,6 +148,7 @@ fn empty() -> DLine {
         text: String::new(),
         kind: Kind::Empty,
         links: vec![],
+        cont: false,
     }
 }
 
@@ -187,6 +193,7 @@ fn ref_line(prefix: String, glyph: &str, id: &str, title: &str, exists: bool) ->
         text,
         kind: Kind::Field,
         links,
+        cont: false,
     }
 }
 
@@ -285,16 +292,13 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
             text: format!("{head}{s}"),
             kind: Kind::Field,
             links,
+            cont: false,
         });
     }
 
     let body = task.body.trim();
     if !body.is_empty() {
-        out.push(DLine {
-            text: String::new(),
-            kind: Kind::Empty,
-            links: vec![],
-        });
+        out.push(empty());
         for raw in body.lines() {
             let line = strip_brackets(raw);
             let links = scan_body_links(&line, &known);
@@ -302,6 +306,106 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
                 text: line,
                 kind: Kind::Body,
                 links,
+                cont: false,
+            });
+        }
+    }
+    out
+}
+
+/// Display width of a char (wide glyphs like status emoji count as 2).
+fn char_disp(c: char) -> usize {
+    use unicode_width::UnicodeWidthChar;
+    c.width().unwrap_or(0)
+}
+
+/// Greedy word-wrap the char slice to `width` display columns, returning the
+/// `[start, end)` char ranges of each visual row. Breaks at the last space that
+/// fits (consuming it); hard-breaks a single word longer than `width`. Leading
+/// whitespace of the first row is preserved.
+fn wrap_ranges(chars: &[char], width: usize) -> Vec<(usize, usize)> {
+    let n = chars.len();
+    let mut rows = Vec::new();
+    let mut start = 0;
+    while start < n {
+        let mut w = 0;
+        let mut end = start;
+        while end < n {
+            let cw = char_disp(chars[end]);
+            if w + cw > width && end > start {
+                break;
+            }
+            w += cw;
+            end += 1;
+        }
+        if end >= n {
+            rows.push((start, n));
+            break;
+        }
+        // `end` is the first char that didn't fit. Prefer a word break: the
+        // rightmost space in (start, end].
+        let mut brk = None;
+        let mut k = end;
+        while k > start {
+            if chars[k] == ' ' {
+                brk = Some(k);
+                break;
+            }
+            k -= 1;
+        }
+        match brk {
+            Some(sp) => {
+                rows.push((start, sp)); // row excludes the break space
+                start = sp + 1; // consume it
+            }
+            None => {
+                rows.push((start, end)); // hard break mid-word
+                start = end;
+            }
+        }
+    }
+    if rows.is_empty() {
+        rows.push((0, 0));
+    }
+    rows
+}
+
+/// Soft-wrap detail lines to `width` display columns so that one `DLine` still
+/// equals one screen row (the whole line-cursor / jumplist / find / scroll model
+/// is row-indexed). Link `(col, len)` spans are remapped to their new per-row
+/// columns; continuation rows are marked `cont` so yank can rejoin them.
+/// `width == 0` (not yet rendered) is a no-op.
+pub fn wrap(lines: Vec<DLine>, width: usize) -> Vec<DLine> {
+    if width == 0 {
+        return lines;
+    }
+    let mut out = Vec::new();
+    for dl in lines {
+        let chars: Vec<char> = dl.text.chars().collect();
+        let total: usize = chars.iter().map(|&c| char_disp(c)).sum();
+        if total <= width {
+            out.push(dl);
+            continue;
+        }
+        let ranges = wrap_ranges(&chars, width);
+        for (ri, (s, e)) in ranges.iter().enumerate() {
+            let (s, e) = (*s, *e);
+            let text: String = chars[s..e].iter().collect();
+            // Keep the portion of each link that falls within this row.
+            let links = dl
+                .links
+                .iter()
+                .filter_map(|(c, l, t)| {
+                    let ls = (*c).max(s);
+                    let le = (*c + *l).min(e);
+                    (ls < le).then(|| (ls - s, le - ls, t.clone()))
+                })
+                .collect();
+            out.push(DLine {
+                text,
+                kind: dl.kind,
+                links,
+                cont: ri > 0,
             });
         }
     }
@@ -436,6 +540,67 @@ mod tests {
         let (col, len, _) = &body.links[0];
         let slice: String = body.text.chars().skip(*col).take(*len).collect();
         assert_eq!(slice, "yak-0001");
+    }
+
+    #[test]
+    fn wrap_splits_on_words_and_marks_continuations() {
+        let dl = DLine {
+            text: "aaaa bbbb cccc dddd".into(),
+            kind: Kind::Body,
+            links: vec![],
+            cont: false,
+        };
+        let rows = wrap(vec![dl], 10);
+        let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, vec!["aaaa bbbb", "cccc dddd"]);
+        assert!(!rows[0].cont);
+        assert!(rows[1].cont);
+    }
+
+    #[test]
+    fn wrap_remaps_link_columns_onto_the_row() {
+        let dl = DLine {
+            text: "see yak-0001 now".into(),
+            kind: Kind::Body,
+            links: vec![(4, 8, Target::Task("yak-0001".into()))],
+            cont: false,
+        };
+        let rows = wrap(vec![dl], 8);
+        let link_row = rows.iter().find(|r| !r.links.is_empty()).unwrap();
+        assert_eq!(link_row.text, "yak-0001");
+        let (col, len, _) = &link_row.links[0];
+        assert_eq!((*col, *len), (0, 8));
+    }
+
+    #[test]
+    fn wrap_preserves_indent_and_hard_breaks_long_words() {
+        let dl = DLine {
+            text: "  alpha beta gamma".into(),
+            kind: Kind::Body,
+            links: vec![],
+            cont: false,
+        };
+        assert_eq!(wrap(vec![dl], 10)[0].text, "  alpha");
+
+        let dl2 = DLine {
+            text: "abcdefghij".into(),
+            kind: Kind::Body,
+            links: vec![],
+            cont: false,
+        };
+        let texts: Vec<String> = wrap(vec![dl2], 4).iter().map(|r| r.text.clone()).collect();
+        assert_eq!(texts, vec!["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn wrap_zero_width_is_noop() {
+        let dl = DLine {
+            text: "long line here".into(),
+            kind: Kind::Body,
+            links: vec![],
+            cont: false,
+        };
+        assert_eq!(wrap(vec![dl], 0).len(), 1);
     }
 
     #[test]

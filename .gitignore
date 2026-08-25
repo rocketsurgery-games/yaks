@@ -2,3 +2,6 @@
 /dist
 node_modules/
 artifacts/
+# Local working clone of the forked edtui repo (rocketsurgery-games/edtui).
+# Used to develop + push upstream PR branches; yaks depends on it via git, not path.
+/.edtui

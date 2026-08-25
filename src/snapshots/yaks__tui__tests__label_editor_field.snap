@@ -1,5 +1,6 @@
 ---
 source: src/tui.rs
+assertion_line: 4143
 expression: "draw(&app, 72, 14)"
 ---
  🦬  Hairy (1)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (1)   ⭐  Starr
@@ -15,4 +16,4 @@ expression: "draw(&app, 72, 14)"
 
 
 
-Labels for e0: rust, tui
+Labels for e0: rust, tui                                          INSERT
