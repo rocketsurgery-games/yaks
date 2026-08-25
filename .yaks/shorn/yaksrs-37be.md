@@ -4,7 +4,7 @@ title: 'edtui PR: bind r (replace char) via char_arg'
 type: feature
 priority: 2
 created: '2026-08-24T22:11:59Z'
-updated: '2026-08-24T22:34:04Z'
+updated: '2026-08-25T03:52:21Z'
 parent: yaksrs-6099
 labels:
 - ui
@@ -18,3 +18,7 @@ Upstream probe PR. ReplaceChar(pub char) is in the Action enum but unbound becau
 ---
 ▸ 2026-08-24T22:34:03Z
 Implemented + opened PR preiter93/edtui#71 from branch yaks/replace-char-r on the fork. Change: ReplaceChar(char) -> ReplaceChar(Option<char>) + char_arg (mirrors FindForward); bind r in vim normal mode; r<char> replaces, r<Esc> cancels, . repeats; undo preserved. Fixed README (r was mislabeled 'redo'; redo is ctrl+r). Added test_replace_char_keybinding; cargo test --lib green (150). yaks NOT yet switched to the fork — integration/shim-removal is tracked in yaksrs-182f (batch once more PRs land). Built/tested edtui with the 1.95 toolchain since the repo's dev-deps need rustc>=1.88 (yaks pins stable=1.87).
+
+---
+▸ 2026-08-25T03:52:21Z
+Upstream PR withdrawn/closed (opened prematurely). Implementation is preserved on its fork branch for the user to review; re-upstreaming will go issues-first. Kept shorn since the code work is complete.

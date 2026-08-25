@@ -4,7 +4,7 @@ title: Anemic vi controls in editor
 type: bug
 priority: 2
 created: '2026-08-23T05:05:08Z'
-updated: '2026-08-25T03:42:06Z'
+updated: '2026-08-25T03:52:21Z'
 labels:
 - ui
 ---
@@ -68,3 +68,7 @@ Second upstream PR shipped: counts (preiter93/edtui#72), yak d168 shorn. Two PRs
 ---
 ▸ 2026-08-25T03:42:06Z
 Third upstream PR: W/B/E WORD motions (preiter93/edtui#73), yak 7e59 shorn. Three PRs now open: #71 r, #72 counts, #73 W/B/E. Remaining vi-control children: ~ (b3a0), x-yanks (cdf9), >>/<< (2a15), native gj/gk (114a).
+
+---
+▸ 2026-08-25T03:52:21Z
+PROCESS CHANGE: the three upstream PRs (#71 r, #72 counts, #73 W/B/E) were opened directly against preiter93/edtui by mistake and have been CLOSED at the user's request. Going forward, do NOT open PRs against upstream unsolicited. New flow: implement on a fork branch (rocketsurgery-games/edtui), let the user review, then file an ISSUE upstream first; only open a PR if invited. Work is preserved on fork branches: yaks/replace-char-r, yaks/count-prefixes, yaks/big-word-motions. The remaining vi-control children (b3a0 ~, cdf9 x-yanks, 2a15 >>/<<, 114a gj/gk) follow the same issues-first flow.
