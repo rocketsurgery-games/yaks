@@ -3193,71 +3193,6 @@ fn display_line_nav(state: &mut EditorState, width: u16, motion: GMotion) {
     }
 }
 
-/// Move the cursor to the start of the next/previous whitespace-delimited WORD
-/// (vim `W`/`B`), which edtui only offers for word (`w`/`b`), not WORD.
-fn big_word_forward(state: &mut EditorState) {
-    let is_blank = |c: char| c.is_whitespace();
-    let mut row = state.cursor.row;
-    let mut col = state.cursor.col;
-    let last_row = state.lines.len().saturating_sub(1);
-    let mut line = row_chars(state, row);
-    // Step over the current WORD (non-blanks), then over the blanks that follow.
-    let on_blank = line.get(col).is_none_or(|&c| is_blank(c));
-    if !on_blank {
-        while col < line.len() && !is_blank(line[col]) {
-            col += 1;
-        }
-    }
-    loop {
-        while col < line.len() && is_blank(line[col]) {
-            col += 1;
-        }
-        if col < line.len() {
-            break; // landed on a non-blank: next WORD start
-        }
-        if row >= last_row {
-            col = line.len().saturating_sub(1).max(0);
-            break;
-        }
-        row += 1;
-        col = 0;
-        line = row_chars(state, row);
-        if line.is_empty() {
-            break; // an empty line is itself a WORD boundary
-        }
-    }
-    state.cursor.row = row;
-    state.cursor.col = col.min(max_col_for(state, row));
-}
-
-fn big_word_backward(state: &mut EditorState) {
-    let is_blank = |c: char| c.is_whitespace();
-    let mut row = state.cursor.row;
-    let mut col = state.cursor.col;
-    let mut line = row_chars(state, row);
-    // Move one left (across line breaks), skip blanks, then to the WORD start.
-    loop {
-        if col == 0 {
-            if row == 0 {
-                break;
-            }
-            row -= 1;
-            line = row_chars(state, row);
-            col = line.len();
-        } else {
-            col -= 1;
-        }
-        if col < line.len() && !is_blank(line[col]) {
-            break;
-        }
-    }
-    while col > 0 && !is_blank(line[col - 1]) {
-        col -= 1;
-    }
-    state.cursor.row = row;
-    state.cursor.col = col.min(max_col_for(state, row));
-}
-
 /// Toggle the case of the char under the cursor and advance (vim `~`). Routed
 /// through edtui's `ReplaceChar` so the edit lands in the undo history.
 fn toggle_case(state: &mut EditorState) {
@@ -3273,7 +3208,7 @@ fn toggle_case(state: &mut EditorState) {
         None
     };
     if let Some(t) = toggled {
-        state.execute(ReplaceChar(t));
+        state.execute(ReplaceChar(Some(t)));
     }
     state.cursor.col = (col + 1).min(max_col_for(state, row));
 }
@@ -3297,7 +3232,7 @@ fn route_multiline_key(
         let mode = state.borrow().mode;
         let normal = matches!(mode, EditorMode::Normal | EditorMode::Visual);
         if normal {
-            // Resolve a buffered prefix (`g` motion or `r` replacement).
+            // Resolve a buffered `g` motion prefix.
             if let Some(prefix) = pending.take() {
                 match (prefix, k.code) {
                     ('g', KeyCode::Char('j')) => {
@@ -3318,9 +3253,6 @@ fn route_multiline_key(
                         st.cursor.row = 0;
                         st.cursor.col = 0;
                     }
-                    ('r', KeyCode::Char(c)) => {
-                        state.borrow_mut().execute(ReplaceChar(c));
-                    }
                     // Unknown sequence: swallow the second key.
                     _ => {}
                 }
@@ -3332,18 +3264,6 @@ fn route_multiline_key(
                 match k.code {
                     KeyCode::Char('g') if k.modifiers.is_empty() => {
                         *pending = Some('g');
-                        return;
-                    }
-                    KeyCode::Char('r') if k.modifiers.is_empty() => {
-                        *pending = Some('r');
-                        return;
-                    }
-                    KeyCode::Char('W') => {
-                        big_word_forward(&mut state.borrow_mut());
-                        return;
-                    }
-                    KeyCode::Char('B') => {
-                        big_word_backward(&mut state.borrow_mut());
                         return;
                     }
                     KeyCode::Char('~') => {
@@ -4474,21 +4394,6 @@ mod tests {
             col_after_gk < width as usize,
             "gk should return to the first visual line"
         );
-    }
-
-    #[test]
-    fn big_word_motions_span_punctuation_and_lines() {
-        let mut st = EditorState::new(Lines::from("foo.bar baz\nqux"));
-        st.mode = EditorMode::Normal;
-        st.cursor = edtui::Index2::new(0, 0);
-        big_word_forward(&mut st); // -> start of "baz"
-        assert_eq!((st.cursor.row, st.cursor.col), (0, 8));
-        big_word_forward(&mut st); // -> next line "qux"
-        assert_eq!((st.cursor.row, st.cursor.col), (1, 0));
-        big_word_backward(&mut st); // back to "baz"
-        assert_eq!((st.cursor.row, st.cursor.col), (0, 8));
-        big_word_backward(&mut st); // back to "foo.bar"
-        assert_eq!((st.cursor.row, st.cursor.col), (0, 0));
     }
 
     #[test]

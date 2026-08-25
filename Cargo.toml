@@ -32,7 +32,10 @@ anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 ratatui = "0.30"
-edtui = { version = "0.11.7", default-features = false, features = ["arboard"] }
+# Our fork, consuming the `yaks-integration` branch (r / counts / W-B-E, plus
+# more as we add it). CI fetches this from GitHub; the local ./.edtui checkout is
+# just where those branches are authored. Cargo.lock pins the exact commit.
+edtui = { git = "https://github.com/rocketsurgery-games/edtui", branch = "yaks-integration", default-features = false, features = ["arboard"] }
 toque = { path = "crates/toque" }
 notify = "6"
 arboard = "3"

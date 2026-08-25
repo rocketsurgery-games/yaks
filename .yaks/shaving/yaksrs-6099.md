@@ -4,7 +4,7 @@ title: Anemic vi controls in editor
 type: bug
 priority: 2
 created: '2026-08-23T05:05:08Z'
-updated: '2026-08-25T03:52:21Z'
+updated: '2026-08-25T22:16:24Z'
 labels:
 - ui
 ---
@@ -72,3 +72,7 @@ Third upstream PR: W/B/E WORD motions (preiter93/edtui#73), yak 7e59 shorn. Thre
 ---
 ▸ 2026-08-25T03:52:21Z
 PROCESS CHANGE: the three upstream PRs (#71 r, #72 counts, #73 W/B/E) were opened directly against preiter93/edtui by mistake and have been CLOSED at the user's request. Going forward, do NOT open PRs against upstream unsolicited. New flow: implement on a fork branch (rocketsurgery-games/edtui), let the user review, then file an ISSUE upstream first; only open a PR if invited. Work is preserved on fork branches: yaks/replace-char-r, yaks/count-prefixes, yaks/big-word-motions. The remaining vi-control children (b3a0 ~, cdf9 x-yanks, 2a15 >>/<<, 114a gj/gk) follow the same issues-first flow.
+
+---
+▸ 2026-08-25T22:16:24Z
+yaks now builds against the edtui fork (yaks-integration branch): r, counts, W/B/E are NATIVE now; removed the redundant r/W/B yaks shims. Counts (3j/5x/2dd/3w/3W) work. Remaining yaks shims (gj/gk, ~, X, x-yank) have a count-leak edge (see 182f) to resolve by upstreaming them into the fork.

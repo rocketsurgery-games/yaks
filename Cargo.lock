@@ -551,8 +551,7 @@ dependencies = [
 [[package]]
 name = "edtui"
 version = "0.11.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05bf278324f87113d64ea86a54e392470775c60db678806a911eccf2c484e860"
+source = "git+https://github.com/rocketsurgery-games/edtui?branch=yaks-integration#690893441761ccb8886bd2d2e09fdd05511f658c"
 dependencies = [
  "arboard",
  "crossterm",
