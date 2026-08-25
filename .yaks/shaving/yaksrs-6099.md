@@ -4,7 +4,7 @@ title: Anemic vi controls in editor
 type: bug
 priority: 2
 created: '2026-08-23T05:05:08Z'
-updated: '2026-08-24T22:34:25Z'
+updated: '2026-08-25T02:38:11Z'
 labels:
 - ui
 ---
@@ -60,3 +60,7 @@ Set up 6099 as a herd: children for the local markdown work + one per upstream e
 ---
 ▸ 2026-08-24T22:34:25Z
 Fork wired up: cloned rocketsurgery-games/edtui to yaks/.edtui (gitignored + workspace-excluded; NOT vendored into yaks). First upstream PR shipped: preiter93/edtui#71 (r = replace char), yak 37be shorn. gh is authed (joelgwebber, repo+workflow) so I can push branches + open PRs directly. edtui dev needs rustc>=1.88 -> use 'cargo +1.95.0 test' in .edtui. yaks still on crates.io 0.11.7; git-pin + shim removal deferred to 182f. Next candidates: counts (d168) or native gj/gk (114a).
+
+---
+▸ 2026-08-25T02:38:11Z
+Second upstream PR shipped: counts (preiter93/edtui#72), yak d168 shorn. Two PRs now open (#71 r, #72 counts). Remaining upstream children: ~ (b3a0), W/B/E (7e59), x-yanks (cdf9), >>/<< (2a15), native gj/gk (114a), fancy-regex (d635), editor word-wrap (9a8f).
