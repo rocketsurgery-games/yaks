@@ -351,6 +351,9 @@ impl Drawer {
     }
 }
 
+/// Max gap between two `Esc` presses for them to count as a double-tap cancel.
+const DOUBLE_ESC_MS: u64 = 300;
+
 // Task-form fixed rows: title, type, priority, labels. Content blocks (a
 // description, plus one per comment when editing) follow as rows `HEADER_ROWS +
 // block_index`, so the total row count is dynamic (`CreateForm::row_count`).
@@ -675,6 +678,9 @@ pub struct App {
     notification: Option<String>,
     /// Editor keybinding profile (vim vs emacs), from herd config.
     editor_vim: bool,
+    /// Timestamp of the last `Esc` in an editor overlay, for detecting a rapid
+    /// double-`Esc` (a Ctrl-C-equivalent cancel gesture). See [`App::register_double_esc`].
+    last_esc: Option<std::time::Instant>,
     quit: bool,
 }
 
@@ -707,6 +713,7 @@ impl App {
             overlay: Overlay::None,
             notification: None,
             editor_vim: true,
+            last_esc: None,
             quit: false,
         }
     }
@@ -1276,7 +1283,7 @@ impl App {
         self.scroll_line_into_view(self.detail_line as u16);
     }
 
-    fn handle_create_key(&mut self, k: KeyEvent) {
+    fn handle_create_key(&mut self, k: KeyEvent, double_esc: bool) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let (is_content, is_line_text) = match &self.overlay {
             Overlay::Create(f) => (f.is_content_row(), f.is_line_text_row()),
@@ -1292,7 +1299,10 @@ impl App {
             }
             return;
         }
-        if (ctrl && k.code == KeyCode::Char('c')) || (k.code == KeyCode::Esc && !is_content) {
+        if (ctrl && k.code == KeyCode::Char('c'))
+            || double_esc
+            || (k.code == KeyCode::Esc && !is_content)
+        {
             let editing = matches!(&self.overlay, Overlay::Create(f) if f.is_editing());
             self.overlay = Overlay::None;
             self.notification = Some(if editing {
@@ -2031,14 +2041,31 @@ impl App {
 
     // -- overlay resolution ----------------------------------------------
 
+    /// Record an `Esc` in an editor overlay and report whether it's a *rapid*
+    /// second `Esc` (within [`DOUBLE_ESC_MS`] of the previous one) — the
+    /// Ctrl-C-equivalent cancel gesture. A lone `Esc` keeps its usual meaning
+    /// (leave Insert for Normal); only the fast second press cancels.
+    fn register_double_esc(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        let double = self.last_esc.is_some_and(|t| {
+            now.duration_since(t) <= std::time::Duration::from_millis(DOUBLE_ESC_MS)
+        });
+        // Clear after a double so a third quick Esc doesn't also fire.
+        self.last_esc = if double { None } else { Some(now) };
+        double
+    }
+
     fn handle_overlay_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        // A rapid double-Esc acts as Ctrl-C (cancel) in editor overlays, so Esc
+        // can otherwise mean "leave Insert for Normal" without trapping the user.
+        let double_esc = k.code == KeyCode::Esc && self.register_double_esc();
         if matches!(self.overlay, Overlay::Drawer(_)) {
             self.handle_drawer_key(k);
             return;
         }
         if matches!(self.overlay, Overlay::Create(_)) {
-            self.handle_create_key(k);
+            self.handle_create_key(k, double_esc);
             return;
         }
         if matches!(self.overlay, Overlay::Help(_)) {
@@ -2173,7 +2200,9 @@ impl App {
             let esc_cancels = ed.single_line
                 && k.code == KeyCode::Esc
                 && (!ed.vim || ed.state.borrow().mode == EditorMode::Normal);
-            let cancel = (ctrl && k.code == KeyCode::Char('c')) || esc_cancels;
+            // A rapid double-Esc cancels too — the only Esc-based way out of a
+            // multiline editor, where a lone Esc always just drops to Normal.
+            let cancel = (ctrl && k.code == KeyCode::Char('c')) || esc_cancels || double_esc;
             if commit {
                 if let Overlay::Edit(ed) = std::mem::replace(&mut self.overlay, Overlay::None) {
                     self.commit_edit(ed);
@@ -5269,6 +5298,44 @@ mod tests {
                 body.trim().is_empty(),
                 "body empty after deletion: {body:?}"
             );
+        }
+
+        #[test]
+        fn lone_esc_stays_in_the_comment_editor() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "M");
+            press(&mut app, "draft");
+            esc(&mut app); // multiline: Esc drops to Normal, does NOT cancel
+            assert!(matches!(app.overlay, Overlay::Edit(_)), "editor stays open");
+        }
+
+        #[test]
+        fn double_esc_cancels_the_comment_editor() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "M");
+            press(&mut app, "draft");
+            esc(&mut app); // -> Normal
+            esc(&mut app); // rapid second Esc == Ctrl-C -> cancel
+            assert!(matches!(app.overlay, Overlay::None));
+            assert_eq!(app.notification.as_deref(), Some("cancelled"));
+            assert!(app.task("t0").unwrap().body.is_empty(), "comment not saved");
+        }
+
+        #[test]
+        fn double_esc_cancels_the_edit_form_from_a_content_row() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "E");
+            for _ in 0..4 {
+                tab(&mut app); // title -> ... -> description (a content row)
+            }
+            esc(&mut app); // content row: Esc drops to Normal, form stays
+            assert!(matches!(app.overlay, Overlay::Create(_)), "form stays open");
+            esc(&mut app); // rapid second Esc cancels the whole edit
+            assert!(matches!(app.overlay, Overlay::None));
+            assert_eq!(app.notification.as_deref(), Some("edit cancelled"));
         }
 
         fn with_deps(id: &str, status: Status, deps: &[&str]) -> Task {
