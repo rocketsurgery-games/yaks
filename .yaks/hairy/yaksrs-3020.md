@@ -1,0 +1,19 @@
+---
+id: yaksrs-3020
+title: Embedded language highlighting inside fenced code blocks
+type: feature
+priority: 3
+created: '2026-08-26T02:40:36Z'
+updated: '2026-08-26T02:40:36Z'
+labels:
+- ui
+---
+
+Stretch goal split out of yaksrs-2956 (render-time markdown highlighting). Our hand-rolled highlighter in src/tui/markdown.rs currently colors a fenced code block as one flat code style. Extend it to detect the fence info string (the language after the opening fence) and run a small per-language tokenizer over the block body so embedded code gets real syntax coloring in BOTH surfaces (detail read-pane and the editor via EditorState.highlights).
+
+Design notes:
+- The Highlighter already tracks fence state across lines; thread the info-string language through that state.
+- Add tiny, pure-Rust tokenizers per language (start with rust, maybe json/sh/toml) that emit MdSpan runs; keep them C-free (no syntect/onig).
+- Fall back to the flat code style for unknown languages.
+- Spans stay in char coords so they compose with wrap/link/find just like the existing markdown spans.
+- Fully our choice of palette.

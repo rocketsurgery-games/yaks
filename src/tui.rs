@@ -41,7 +41,7 @@ use ratatui::crossterm::terminal::{
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 
 use crate::filter::{self, FilterSpec};
@@ -2896,7 +2896,11 @@ fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
             text
         };
         frame.render_widget(
-            Paragraph::new(shown).style(Style::new().fg(Color::DarkGray)),
+            Paragraph::new(shown)
+                .style(Style::new().fg(Color::DarkGray))
+                // Soft-wrap so the dimmed preview reads the same as the focused
+                // editor (`trim: false` keeps leading indentation intact).
+                .wrap(Wrap { trim: false }),
             rows[6],
         );
     }
@@ -4053,6 +4057,27 @@ mod tests {
         typ(&mut app, "# Heading");
         let out = draw(&app, 72, 14);
         assert!(out.contains("Heading"));
+    }
+
+    #[test]
+    fn unfocused_description_preview_wraps() {
+        // The edit form opens on the title row, so the description shows as the
+        // dimmed preview. A long logical line must soft-wrap (like the focused
+        // editor and the detail view) rather than truncate at the pane edge, so
+        // its tail word stays visible.
+        let mut t = task("e0", "Editable", Status::Hairy, 3, None);
+        t.body = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda".into();
+        let mut app = App::new(vec![t]);
+        app.open_edit();
+        assert!(
+            !matches!(app.overlay, Overlay::None),
+            "edit form should open"
+        );
+        let out = draw(&app, 40, 20);
+        assert!(
+            out.contains("lambda"),
+            "wrapped tail word should be visible:\n{out}"
+        );
     }
 
     #[test]
