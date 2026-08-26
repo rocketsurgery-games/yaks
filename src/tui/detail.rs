@@ -325,6 +325,30 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
     out
 }
 
+/// For each display line, the content-block index it belongs to (0 =
+/// description, 1.. = comments), or `None` for non-body lines. A comment starts
+/// at a Body `---` line immediately followed by a `▸ …` line (the on-disk
+/// comment marker), letting the detail pane map its line cursor to a content
+/// block for block navigation and context-sensitive editing.
+pub fn block_index_per_line(lines: &[DLine]) -> Vec<Option<usize>> {
+    let mut out = vec![None; lines.len()];
+    let mut block = 0usize;
+    for i in 0..lines.len() {
+        if lines[i].kind != Kind::Body {
+            continue;
+        }
+        let is_sep = lines[i].text.trim() == "---"
+            && lines
+                .get(i + 1)
+                .is_some_and(|n| n.kind == Kind::Body && n.text.trim_start().starts_with('▸'));
+        if is_sep {
+            block += 1;
+        }
+        out[i] = Some(block);
+    }
+    out
+}
+
 /// Display width of a char (wide glyphs like status emoji count as 2).
 fn char_disp(c: char) -> usize {
     use unicode_width::UnicodeWidthChar;

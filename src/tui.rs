@@ -6,6 +6,7 @@
 //! mutates `App`; mutating keys route through the `Herd` facade and then reload.
 
 mod cache;
+mod content;
 mod detail;
 mod headless;
 mod markdown;
@@ -125,6 +126,19 @@ enum EditAction {
     Attach(String),
     SaveView,
     RenameView { index: usize },
+}
+
+/// What a context-sensitive `E` in the detail pane should edit, derived from
+/// the line the cursor sits on.
+#[derive(Clone, Copy)]
+enum EditTarget {
+    Title,
+    Type,
+    Priority,
+    Labels,
+    Status,
+    /// A content block: `0` = description, `1..` = comments.
+    Content(usize),
 }
 
 fn make_handler(vim: bool) -> EditorEventHandler {
@@ -337,21 +351,29 @@ impl Drawer {
     }
 }
 
-// Task-form layout: title, type, priority, labels, description (a multi-line
-// content zone). The last row index is the description.
-const CREATE_ROWS: usize = 5;
-const DESC_ROW: usize = 4;
+// Task-form fixed rows: title, type, priority, labels. Content blocks (a
+// description, plus one per comment when editing) follow as rows `HEADER_ROWS +
+// block_index`, so the total row count is dynamic (`CreateForm::row_count`).
+const HEADER_ROWS: usize = 4;
+
+/// One editable content block in the form: the task's description, or a single
+/// comment (carrying its original timestamp so it round-trips unchanged).
+struct ContentBlock {
+    kind: content::BlockKind,
+    editor: RefCell<EditorState>,
+}
 
 /// The create/edit task form: a right-pane form modeled on `Drawer`. Two chip
 /// rows (type/priority) are **single-select** — the cursor *is* the value —
-/// plus single-line title/labels rows and a multi-line **description** content
-/// zone. `Ctrl-S` commits (create or update), `Esc`/`Ctrl-C` cancels. Shared by
-/// `c`/`C` (create) and `E` (edit); the reusable multi-line zone will also back
-/// comment editing later.
+/// plus single-line title/labels rows and a stack of multi-line **content**
+/// blocks (description + comments). `Ctrl-N/P`/Tab walk every row; the focused
+/// block expands to a live editor (accordion). `Ctrl-S` commits (create or
+/// update), `Esc`/`Ctrl-C` cancels. Shared by `c`/`C` (create) and `E` (edit).
 struct CreateForm {
     title: RefCell<EditorState>,
     labels: RefCell<EditorState>,
-    description: RefCell<EditorState>,
+    /// `blocks[0]` is always the description; `blocks[1..]` are comments.
+    blocks: Vec<ContentBlock>,
     /// Index into `TYPE_CHOICES` (single-select cursor==value).
     kind_idx: usize,
     /// Index into `PRI_CHOICES` (single-select cursor==value; default → p3).
@@ -378,7 +400,10 @@ impl CreateForm {
         CreateForm {
             title: text_field("", vim),
             labels: text_field("", vim),
-            description: multiline_field("", vim),
+            blocks: vec![ContentBlock {
+                kind: content::BlockKind::Description,
+                editor: multiline_field("", vim),
+            }],
             kind_idx: 0,           // task
             pri_idx: pri_index(3), // p3
             row: 0,
@@ -388,12 +413,20 @@ impl CreateForm {
         }
     }
 
-    /// Seed the form from an existing task for editing.
+    /// Seed the form from an existing task for editing: the body is split into a
+    /// description block plus one block per comment.
     fn for_edit(vim: bool, task: &Task) -> Self {
+        let blocks = content::parse(&task.body)
+            .into_iter()
+            .map(|b| ContentBlock {
+                kind: b.kind,
+                editor: multiline_field(&b.text, vim),
+            })
+            .collect();
         CreateForm {
             title: text_field(&task.title, vim),
             labels: text_field(&task.labels.join(", "), vim),
-            description: multiline_field(&task.body, vim),
+            blocks,
             kind_idx: kind_index(&task.kind),
             pri_idx: pri_index(task.priority),
             row: 0,
@@ -407,11 +440,22 @@ impl CreateForm {
         self.edit_id.is_some()
     }
 
-    fn is_description_row(&self) -> bool {
-        self.row == DESC_ROW
+    fn row_count(&self) -> usize {
+        HEADER_ROWS + self.blocks.len()
     }
 
-    /// Single-line text rows (title, labels); the description is multi-line and
+    /// The content-block index for the current row, when the cursor is on one.
+    fn content_index(&self) -> Option<usize> {
+        self.row
+            .checked_sub(HEADER_ROWS)
+            .filter(|&i| i < self.blocks.len())
+    }
+
+    fn is_content_row(&self) -> bool {
+        self.content_index().is_some()
+    }
+
+    /// Single-line text rows (title, labels); content blocks are multi-line and
     /// handled separately.
     fn is_line_text_row(&self) -> bool {
         matches!(self.row, 0 | 3)
@@ -448,15 +492,25 @@ impl CreateForm {
             .collect()
     }
 
-    /// The raw description text (preserving newlines/formatting).
-    fn description_text(&self) -> String {
-        self.description.borrow().lines.to_string()
+    /// Reassemble the full body from the description + comment blocks (emptied
+    /// comments are dropped, so saving an emptied comment deletes it).
+    fn assembled_body(&self) -> String {
+        let blocks: Vec<content::Block> = self
+            .blocks
+            .iter()
+            .map(|b| content::Block {
+                kind: b.kind.clone(),
+                text: b.editor.borrow().lines.to_string(),
+            })
+            .collect();
+        content::assemble(&blocks)
     }
 
-    /// Description for a *create* (empty → no body).
-    fn description_opt(&self) -> Option<String> {
-        let d = self.description_text();
-        if d.trim().is_empty() { None } else { Some(d) }
+    /// Body for a *create* (empty → no body). A create form only has the one
+    /// description block.
+    fn body_opt(&self) -> Option<String> {
+        let b = self.assembled_body();
+        if b.trim().is_empty() { None } else { Some(b) }
     }
 }
 
@@ -1130,19 +1184,106 @@ impl App {
 
     /// Open the shared form seeded from the selected task, for editing (E).
     fn open_edit(&mut self) {
+        self.open_edit_focus(None);
+    }
+
+    /// `E` from the detail pane: open the edit form focused on whatever the line
+    /// cursor sits on — a header field, the description, or a specific comment.
+    /// Status routes to its own picker (it isn't a form field).
+    fn open_edit_at_cursor(&mut self) {
+        match self.edit_target_at(self.detail_line) {
+            Some(EditTarget::Status) => self.open_state_picker(),
+            other => self.open_edit_focus(other),
+        }
+    }
+
+    /// Open the edit form, optionally pre-focusing a row derived from `target`.
+    fn open_edit_focus(&mut self, target: Option<EditTarget>) {
         let Some(id) = self.selected_id() else { return };
-        let Some(task) = self.task(&id) else { return };
-        self.overlay = Overlay::Create(CreateForm::for_edit(self.editor_vim, task));
+        let mut form = match self.task(&id) {
+            Some(task) => CreateForm::for_edit(self.editor_vim, task),
+            None => return,
+        };
+        if let Some(t) = target {
+            let last_block = form.blocks.len().saturating_sub(1);
+            form.row = match t {
+                EditTarget::Title => 0,
+                EditTarget::Type => 1,
+                EditTarget::Priority => 2,
+                EditTarget::Labels => 3,
+                EditTarget::Status => 0, // handled by open_edit_at_cursor
+                EditTarget::Content(i) => HEADER_ROWS + i.min(last_block),
+            };
+        }
+        self.overlay = Overlay::Create(form);
+    }
+
+    /// Map a detail line to what `E` should edit there.
+    fn edit_target_at(&self, line: usize) -> Option<EditTarget> {
+        let lines = self.detail_dlines();
+        let dl = lines.get(line)?;
+        if dl.kind == detail::Kind::Field {
+            let t = dl.text.as_str();
+            for (label, target) in [
+                ("Title:", EditTarget::Title),
+                ("Type:", EditTarget::Type),
+                ("Priority:", EditTarget::Priority),
+                ("Labels:", EditTarget::Labels),
+                ("Status:", EditTarget::Status),
+            ] {
+                if t.starts_with(label) {
+                    return Some(target);
+                }
+            }
+        }
+        if dl.kind == detail::Kind::Body {
+            if let Some(Some(b)) = detail::block_index_per_line(&lines).get(line) {
+                return Some(EditTarget::Content(*b));
+            }
+        }
+        None
+    }
+
+    /// The detail rows where each content block starts (description + comments),
+    /// for `Ctrl-N/P` block navigation in the detail pane.
+    fn block_starts(&self) -> Vec<usize> {
+        let lines = self.detail_dlines();
+        let mut starts = Vec::new();
+        let mut last: Option<usize> = None;
+        for (i, b) in detail::block_index_per_line(&lines).into_iter().enumerate() {
+            if let Some(b) = b {
+                if Some(b) != last {
+                    starts.push(i);
+                    last = Some(b);
+                }
+            }
+        }
+        starts
+    }
+
+    /// Move the line cursor to the next/prev content block start.
+    fn jump_block(&mut self, delta: i32) {
+        let starts = self.block_starts();
+        if starts.is_empty() {
+            return;
+        }
+        let cur = starts
+            .iter()
+            .rposition(|&s| s <= self.detail_line)
+            .unwrap_or(0);
+        let next = (cur as i32 + delta).clamp(0, starts.len() as i32 - 1) as usize;
+        self.detail_line = starts[next];
+        self.scroll_line_into_view(self.detail_line as u16);
     }
 
     fn handle_create_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
-        let (is_desc, is_line_text) = match &self.overlay {
-            Overlay::Create(f) => (f.is_description_row(), f.is_line_text_row()),
+        let (is_content, is_line_text) = match &self.overlay {
+            Overlay::Create(f) => (f.is_content_row(), f.is_line_text_row()),
             _ => return,
         };
-        // Commit (Ctrl-S) / cancel (Ctrl-C, or Esc outside the description zone —
-        // inside it Esc belongs to the editor, e.g. vim normal mode).
+        // Commit (Ctrl-S) / cancel (Ctrl-C, or Esc outside a content block —
+        // inside one Esc belongs to the editor, e.g. vim normal mode).
         if ctrl && k.code == KeyCode::Char('s') {
             let has_title =
                 matches!(&self.overlay, Overlay::Create(f) if !f.title_text().is_empty());
@@ -1151,7 +1292,7 @@ impl App {
             }
             return;
         }
-        if (ctrl && k.code == KeyCode::Char('c')) || (k.code == KeyCode::Esc && !is_desc) {
+        if (ctrl && k.code == KeyCode::Char('c')) || (k.code == KeyCode::Esc && !is_content) {
             let editing = matches!(&self.overlay, Overlay::Create(f) if f.is_editing());
             self.overlay = Overlay::None;
             self.notification = Some(if editing {
@@ -1163,8 +1304,8 @@ impl App {
         }
         // Row navigation: Tab / Shift-Tab / Ctrl-N / Ctrl-P always move rows.
         // On chip rows j/k also navigate; on single-line text rows Up/Down do;
-        // the description zone keeps Up/Down for its own cursor.
-        let is_chip = !is_desc && !is_line_text;
+        // content blocks keep Up/Down for their own cursor.
+        let is_chip = !is_content && !is_line_text;
         let nav_down = matches!(k.code, KeyCode::Tab)
             || (ctrl && k.code == KeyCode::Char('n'))
             || (is_line_text && k.code == KeyCode::Down)
@@ -1175,25 +1316,30 @@ impl App {
             || (is_chip && matches!(k.code, KeyCode::Up | KeyCode::Char('k')));
         if nav_down || nav_up {
             if let Overlay::Create(f) = &mut self.overlay {
+                let n = f.row_count();
                 f.row = if nav_down {
-                    (f.row + 1) % CREATE_ROWS
+                    (f.row + 1) % n
                 } else {
-                    (f.row + CREATE_ROWS - 1) % CREATE_ROWS
+                    (f.row + n - 1) % n
                 };
             }
             return;
         }
-        // Enter on a single-line/chip row advances to the next row; in the
-        // description zone it inserts a newline (handled by the editor below).
-        if k.code == KeyCode::Enter && !is_desc {
+        // Enter on a single-line/chip row advances to the next row; in a content
+        // block it inserts a newline (handled by the editor below).
+        if k.code == KeyCode::Enter && !is_content {
             if let Overlay::Create(f) = &mut self.overlay {
-                f.row = (f.row + 1) % CREATE_ROWS;
+                let n = f.row_count();
+                f.row = (f.row + 1) % n;
             }
             return;
         }
-        if is_desc {
+        if is_content {
             if let Overlay::Create(f) = &mut self.overlay {
-                f.handler.on_key_event(k, &mut f.description.borrow_mut());
+                if let Some(i) = f.content_index() {
+                    f.handler
+                        .on_key_event(k, &mut f.blocks[i].editor.borrow_mut());
+                }
             }
             return;
         }
@@ -1236,7 +1382,7 @@ impl App {
                 labels: f.labels_vec(),
                 depends_on: vec![],
                 source: None,
-                description: f.description_opt(),
+                description: f.body_opt(),
             },
             other => {
                 self.overlay = other;
@@ -1272,7 +1418,7 @@ impl App {
         let title = f.title_text();
         let kind = TYPE_CHOICES[f.kind_idx].to_string();
         let priority = PRI_CHOICES[f.pri_idx];
-        let desc = f.description_text();
+        let body = f.assembled_body();
         let new_labels = f.labels_vec();
         let mut edit = TaskEdit::default();
         if title != cur.title {
@@ -1284,8 +1430,8 @@ impl App {
         if priority != cur.priority {
             edit.priority = Some(priority);
         }
-        if desc != cur.body {
-            edit.description = Some(desc);
+        if body != cur.body {
+            edit.description = Some(body);
         }
         edit.add_labels = new_labels
             .iter()
@@ -2441,6 +2587,12 @@ fn handle_key(app: &mut App, k: KeyEvent) {
                 app.extend_selection(if k.code == KeyCode::Down { 1 } else { -1 });
                 return;
             }
+            // Ctrl-N/P jump the line cursor between content blocks (description
+            // and each comment), mirroring the edit form's field navigation.
+            if ctrl && matches!(k.code, KeyCode::Char('n') | KeyCode::Char('p')) {
+                app.jump_block(if k.code == KeyCode::Char('n') { 1 } else { -1 });
+                return;
+            }
             match k.code {
                 KeyCode::Char('q') => app.quit = true,
                 KeyCode::Char('h') | KeyCode::Left => app.focus = Focus::List,
@@ -2477,7 +2629,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
                 KeyCode::Char('T') => app.open_type_picker(),
                 KeyCode::Char('L') => app.open_labels(),
                 KeyCode::Char('X') => app.open_slaughter_confirm(),
-                KeyCode::Char('E') => app.open_edit(),
+                KeyCode::Char('E') => app.open_edit_at_cursor(),
                 KeyCode::Char('D') => app.open_dep_picker(),
                 KeyCode::Char('R') => app.open_reparent_picker(),
                 KeyCode::Char('c') => app.open_create(false),
@@ -2652,13 +2804,14 @@ fn help_content() -> Vec<Line<'static>> {
         entry("Enter", "Follow link"),
         entry("i / o", "Nav forward / back"),
         entry("J / K", "Next / prev task (stay in detail)"),
+        entry("Ctrl-N / Ctrl-P", "Next / prev content block"),
         entry("v , Shift-↑↓", "Visual select lines"),
         entry("y / Enter", "Copy selection / follow link"),
         entry("/ , n / N", "Find, next / prev match"),
         blank(),
         section("Edit"),
         entry("c / C", "New root / child yak"),
-        entry("E", "Edit description"),
+        entry("E", "Edit field/desc/comment at cursor"),
         entry("P / T / L / S", "Priority / type / labels / state"),
         entry("D / R", "Add dependency / reparent"),
         entry("M", "Add a comment (note)"),
@@ -2791,16 +2944,15 @@ fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
 /// rows, a `─ description ─` separator, then a multi-line description content
 /// zone filling the rest. Laid out like `render_drawer`, inset by `right_divider`.
 fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
-    let rows = Layout::vertical([
+    let [header_r, title_r, type_r, pri_r, labels_r, content_r] = Layout::vertical([
         Constraint::Length(1), // header
         Constraint::Length(1), // title
         Constraint::Length(1), // type chips
         Constraint::Length(1), // priority chips
         Constraint::Length(1), // labels
-        Constraint::Length(1), // description separator
-        Constraint::Min(0),    // description content zone
+        Constraint::Min(0),    // content-block stack
     ])
-    .split(area);
+    .areas(area);
     let header = match (&f.edit_id, &f.parent) {
         (Some(id), _) => format!("Edit {id}"),
         (None, Some(p)) => format!("New task (child of {p})"),
@@ -2811,7 +2963,7 @@ fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
             header,
             Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         )),
-        rows[0],
+        header_r,
     );
     let types: Vec<(String, bool)> = TYPE_CHOICES
         .iter()
@@ -2830,7 +2982,7 @@ fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
         &f.title,
         "",
         frame,
-        rows[1],
+        title_r,
     );
     render_chip_row(
         f.row == 1,
@@ -2839,7 +2991,7 @@ fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
         "type",
         &types,
         frame,
-        rows[2],
+        type_r,
     );
     render_chip_row(
         f.row == 2,
@@ -2848,7 +3000,7 @@ fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
         "priority",
         &pris,
         frame,
-        rows[3],
+        pri_r,
     );
     render_text_row(
         f.row == 3,
@@ -2857,53 +3009,88 @@ fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
         &f.labels,
         "",
         frame,
-        rows[4],
+        labels_r,
     );
-    // Description separator: `▸ description ───` (marker cyan when focused).
-    let desc_focused = f.row == DESC_ROW;
-    let sep_w = rows[5].width as usize;
-    let head = if desc_focused {
-        "▸ description "
-    } else {
-        "  description "
+    render_content_stack(f, frame, content_r);
+}
+
+/// Render the description + comment blocks as an accordion: one labeled
+/// separator per block, with the "expanded" block's body beneath its separator.
+/// The focused block (cursor on a content row) shows a live editor; otherwise
+/// the description shows as a dimmed, wrapped preview so it's visible at a
+/// glance while the cursor sits on a header field.
+fn render_content_stack(f: &CreateForm, frame: &mut Frame, area: Rect) {
+    let focused = f.content_index();
+    let expand = focused.unwrap_or(0); // description is shown by default
+    let mut constraints = Vec::new();
+    for i in 0..f.blocks.len() {
+        constraints.push(Constraint::Length(1)); // separator
+        if i == expand {
+            constraints.push(Constraint::Min(0)); // block body
+        }
+    }
+    let rects = Layout::vertical(constraints).split(area);
+    let mut ri = 0;
+    for (i, block) in f.blocks.iter().enumerate() {
+        let is_focused = focused == Some(i);
+        render_block_separator(block, is_focused, frame, rects[ri]);
+        ri += 1;
+        if i != expand {
+            continue;
+        }
+        let body = rects[ri];
+        ri += 1;
+        if is_focused {
+            let mut st = block.editor.borrow_mut();
+            let mode = st.mode;
+            set_md_highlights(&mut st);
+            frame.render_widget(EditorView::new(&mut st).theme(editor_theme(mode)), body);
+        } else {
+            let placeholder = match &block.kind {
+                content::BlockKind::Description => "(no description)",
+                content::BlockKind::Comment { .. } => "(empty)",
+            };
+            let text = block.editor.borrow().lines.to_string();
+            let shown = if text.trim().is_empty() {
+                placeholder.to_string()
+            } else {
+                text
+            };
+            frame.render_widget(
+                Paragraph::new(shown)
+                    .style(Style::new().fg(Color::DarkGray))
+                    .wrap(Wrap { trim: false }),
+                body,
+            );
+        }
+    }
+}
+
+/// One accordion separator: `▸ label ───` (cyan marker when focused, dim
+/// otherwise). Comment blocks label with their date.
+fn render_block_separator(block: &ContentBlock, focused: bool, frame: &mut Frame, area: Rect) {
+    let label = match &block.kind {
+        content::BlockKind::Description => "description".to_string(),
+        content::BlockKind::Comment { timestamp } => {
+            let date = timestamp.get(..10).unwrap_or(timestamp);
+            format!("comment · {date}")
+        }
     };
-    let dashes = sep_w.saturating_sub(disp_width(head));
+    let marker = if focused { "▸ " } else { "  " };
+    let head = format!("{marker}{label} ");
+    let dashes = (area.width as usize).saturating_sub(disp_width(&head));
+    let color = if focused {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(
-                head.to_string(),
-                if desc_focused {
-                    Style::new().fg(Color::Cyan)
-                } else {
-                    Style::new().fg(Color::DarkGray)
-                },
-            ),
+            Span::styled(head, Style::new().fg(color)),
             Span::styled("─".repeat(dashes), Style::new().fg(Color::DarkGray)),
         ])),
-        rows[5],
+        area,
     );
-    if desc_focused {
-        let mut st = f.description.borrow_mut();
-        let mode = st.mode;
-        set_md_highlights(&mut st);
-        let view = EditorView::new(&mut st).theme(editor_theme(mode));
-        frame.render_widget(view, rows[6]);
-    } else {
-        let text = f.description.borrow().lines.to_string();
-        let shown = if text.trim().is_empty() {
-            "(no description)".to_string()
-        } else {
-            text
-        };
-        frame.render_widget(
-            Paragraph::new(shown)
-                .style(Style::new().fg(Color::DarkGray))
-                // Soft-wrap so the dimmed preview reads the same as the focused
-                // editor (`trim: false` keeps leading indentation intact).
-                .wrap(Wrap { trim: false }),
-            rows[6],
-        );
-    }
 }
 
 /// Label-column widths (gutter marker excluded): the drawer's longest label is
@@ -4059,6 +4246,65 @@ mod tests {
         assert!(out.contains("Heading"));
     }
 
+    fn body_with_comments() -> Task {
+        let mut t = task("c0", "Commented", Status::Hairy, 3, None);
+        let b = crate::store::append_note("The description.", "2026-01-01T00:00:00Z", "first note");
+        t.body = crate::store::append_note(&b, "2026-01-02T00:00:00Z", "second note");
+        t
+    }
+
+    #[test]
+    fn e_on_comment_line_opens_form_focused_on_that_comment() {
+        let mut app = App::new(vec![body_with_comments()]);
+        handle_key(&mut app, key('l')); // enter the detail pane
+        let starts = app.block_starts();
+        assert_eq!(starts.len(), 3); // description + two comments
+        app.detail_line = starts[2]; // second comment
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+        );
+        match &app.overlay {
+            Overlay::Create(f) => assert_eq!(f.content_index(), Some(2)),
+            _ => panic!("E should open the edit form"),
+        }
+    }
+
+    #[test]
+    fn e_on_title_line_opens_form_on_the_title_row() {
+        let mut app = App::new(vec![body_with_comments()]);
+        handle_key(&mut app, key('l'));
+        let lines = app.detail_dlines();
+        let ln = lines
+            .iter()
+            .position(|l| l.text.starts_with("Title:"))
+            .unwrap();
+        app.detail_line = ln;
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+        );
+        match &app.overlay {
+            Overlay::Create(f) => assert_eq!(f.row, 0),
+            _ => panic!("E should open the edit form"),
+        }
+    }
+
+    #[test]
+    fn ctrl_n_p_navigate_content_blocks_in_detail() {
+        let mut app = App::new(vec![body_with_comments()]);
+        handle_key(&mut app, key('l')); // detail; line cursor at top
+        let starts = app.block_starts();
+        let cn = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL);
+        let cp = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        handle_key(&mut app, cn);
+        assert_eq!(app.detail_line, starts[1]); // first comment
+        handle_key(&mut app, cn);
+        assert_eq!(app.detail_line, starts[2]); // second comment
+        handle_key(&mut app, cp);
+        assert_eq!(app.detail_line, starts[1]); // back to first
+    }
+
     #[test]
     fn unfocused_description_preview_wraps() {
         // The edit form opens on the title row, so the description shows as the
@@ -4963,6 +5209,66 @@ mod tests {
             assert!(matches!(app.overlay, Overlay::None));
             assert_eq!(app.task("t0").unwrap().title, "solo");
             assert_eq!(app.notification.as_deref(), Some("edit cancelled"));
+        }
+
+        #[test]
+        fn edit_form_edits_a_comment_in_place() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "M"); // add a comment
+            press(&mut app, "original note");
+            ctrl_s(&mut app);
+            let before = app.task("t0").unwrap().body.clone();
+            assert!(before.contains('\u{25b8}'));
+            // Edit: walk title→type→priority→labels→description→comment, prepend.
+            press(&mut app, "E");
+            for _ in 0..5 {
+                tab(&mut app);
+            }
+            press(&mut app, "X");
+            ctrl_s(&mut app);
+            let body = &app.task("t0").unwrap().body;
+            assert!(
+                body.contains("Xoriginal note"),
+                "comment edited in place: {body:?}"
+            );
+            assert!(body.contains('\u{25b8}'), "timestamp preserved: {body:?}");
+        }
+
+        #[test]
+        fn edit_form_noop_preserves_comment_body() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "M");
+            press(&mut app, "keep me");
+            ctrl_s(&mut app);
+            let before = app.task("t0").unwrap().body.clone();
+            press(&mut app, "E");
+            ctrl_s(&mut app); // no edits: parse→assemble must round-trip losslessly
+            assert_eq!(app.task("t0").unwrap().body, before);
+        }
+
+        #[test]
+        fn edit_form_deletes_an_emptied_comment() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "M");
+            press(&mut app, "note to remove");
+            ctrl_s(&mut app);
+            assert!(app.task("t0").unwrap().body.contains('\u{25b8}'));
+            let vim = app.editor_vim;
+            press(&mut app, "E");
+            match &mut app.overlay {
+                Overlay::Create(f) => f.blocks[1].editor = multiline_field("", vim),
+                _ => panic!("expected edit form"),
+            }
+            ctrl_s(&mut app);
+            let body = &app.task("t0").unwrap().body;
+            assert!(!body.contains('\u{25b8}'), "comment deleted: {body:?}");
+            assert!(
+                body.trim().is_empty(),
+                "body empty after deletion: {body:?}"
+            );
         }
 
         fn with_deps(id: &str, status: Status, deps: &[&str]) -> Task {
