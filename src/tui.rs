@@ -1285,6 +1285,7 @@ impl App {
 
     fn handle_create_key(&mut self, k: KeyEvent, double_esc: bool) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
+        let vim = self.editor_vim;
         let (is_content, is_line_text) = match &self.overlay {
             Overlay::Create(f) => (f.is_content_row(), f.is_line_text_row()),
             _ => return,
@@ -1299,10 +1300,12 @@ impl App {
             }
             return;
         }
-        if (ctrl && k.code == KeyCode::Char('c'))
-            || double_esc
-            || (k.code == KeyCode::Esc && !is_content)
-        {
+        // In vim every field is modal: a lone Esc drops the focused field to
+        // Normal (or is a no-op on chip rows) and never cancels the form — use
+        // Ctrl-C or a rapid double-Esc. Emacs keeps single-Esc-cancels on the
+        // non-content rows.
+        let esc_cancels = k.code == KeyCode::Esc && !vim && !is_content;
+        if (ctrl && k.code == KeyCode::Char('c')) || double_esc || esc_cancels {
             let editing = matches!(&self.overlay, Overlay::Create(f) if f.is_editing());
             self.overlay = Overlay::None;
             self.notification = Some(if editing {
@@ -2193,13 +2196,11 @@ impl App {
         if let Overlay::Edit(ed) = &mut self.overlay {
             let commit = (ctrl && k.code == KeyCode::Char('s'))
                 || (ed.single_line && k.code == KeyCode::Enter);
-            // Esc closes a single-line field. In vim mode, though, Esc first
-            // leaves Insert for Normal (handed to edtui below) and only cancels
-            // on the second press, once already in Normal — so the whole
-            // normal-mode keymap (b/w/0/$/dd/x/yy/p/...) is reachable here too.
-            let esc_cancels = ed.single_line
-                && k.code == KeyCode::Esc
-                && (!ed.vim || ed.state.borrow().mode == EditorMode::Normal);
+            // A single-line field is fully modal in vim: a lone Esc only drops
+            // to Normal (handed to edtui below) and never cancels, so the whole
+            // normal-mode keymap (b/w/0/$/dd/x/yy/p/...) is reachable. Cancel is
+            // Ctrl-C or a rapid double-Esc. Emacs keeps plain single-Esc-cancels.
+            let esc_cancels = ed.single_line && k.code == KeyCode::Esc && !ed.vim;
             // A rapid double-Esc cancels too — the only Esc-based way out of a
             // multiline editor, where a lone Esc always just drops to Normal.
             let cancel = (ctrl && k.code == KeyCode::Char('c')) || esc_cancels || double_esc;
@@ -3933,9 +3934,16 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         } else {
             "Ctrl-S create"
         };
+        // In vim, Esc is modal (drops the field to Normal); cancel is a rapid
+        // double-Esc or Ctrl-C. In emacs, Esc cancels directly.
+        let cancel = if app.editor_vim {
+            "EscEsc/Ctrl-C cancel"
+        } else {
+            "Esc cancel"
+        };
         frame.render_widget(
             Paragraph::new(Span::styled(
-                format!("Tab/↑↓ rows · ←→ chips · {commit} · Esc cancel"),
+                format!("Tab/↑↓ rows · ←→ chips · {commit} · {cancel}"),
                 Style::new().fg(Color::DarkGray),
             )),
             area,
@@ -4225,8 +4233,9 @@ mod tests {
 
     #[test]
     fn single_line_vim_reaches_normal_mode() {
-        // In vim mode, a single-line field's first Esc switches to Normal (does
-        // not cancel), so the normal-mode keymap is usable; a second Esc cancels.
+        // In vim mode a single-line field is modal: Esc switches to Normal and
+        // never cancels, so the normal-mode keymap is usable; cancel is Ctrl-C
+        // (or a rapid double-Esc).
         let mut app = editable();
         assert!(app.editor_vim);
         handle_key(&mut app, key('L')); // single-line labels editor (starts Insert)
@@ -4239,9 +4248,12 @@ mod tests {
         typ(&mut app, "dd");
         let (_, text) = editor_state(&app);
         assert_eq!(text, "", "normal-mode dd should clear the line");
-        // Second Esc (now in Normal) cancels the overlay.
-        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(matches!(app.overlay, Overlay::None), "second Esc cancels");
+        // Esc is modal in vim and never cancels on its own; Ctrl-C cancels.
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+        assert!(matches!(app.overlay, Overlay::None), "Ctrl-C cancels");
     }
 
     #[test]
@@ -5144,7 +5156,12 @@ mod tests {
             let mut app = App::with_herd(herd).unwrap();
             press(&mut app, "c");
             press(&mut app, "foo");
-            esc(&mut app); // Esc cancels the form
+            esc(&mut app); // vim: a lone Esc drops the title field to Normal
+            assert!(
+                matches!(app.overlay, Overlay::Create(_)),
+                "lone Esc is modal"
+            );
+            esc(&mut app); // rapid double-Esc cancels the form
             assert!(matches!(app.overlay, Overlay::None));
             assert!(app.all.is_empty());
             assert_eq!(app.notification.as_deref(), Some("create cancelled"));
@@ -5234,7 +5251,8 @@ mod tests {
             let mut app = App::with_herd(herd).unwrap();
             press(&mut app, "E");
             press(&mut app, "zzz"); // edits the title field in place
-            esc(&mut app); // cancel (title row, not description)
+            esc(&mut app); // vim: drops the title field to Normal (no cancel)
+            esc(&mut app); // rapid double-Esc cancels the edit
             assert!(matches!(app.overlay, Overlay::None));
             assert_eq!(app.task("t0").unwrap().title, "solo");
             assert_eq!(app.notification.as_deref(), Some("edit cancelled"));
