@@ -1,10 +1,10 @@
 ---
 id: yaksrs-2c16
 title: CLI/MCP affordance to attach to a running yaks tui
-type: feature
+type: idea
 priority: 3
 created: '2026-08-23T02:49:59Z'
-updated: '2026-08-23T02:49:59Z'
+updated: '2026-08-26T13:17:10Z'
 labels:
 - cli
 ---

@@ -4,7 +4,8 @@ title: Fix up inter-yak reference rendering/linking
 type: feature
 priority: 2
 created: '2026-08-25T03:35:02Z'
-updated: '2026-08-25T03:35:02Z'
+updated: '2026-08-26T13:33:20Z'
+parent: yaksrs-688d
 labels:
 - ui
 ---

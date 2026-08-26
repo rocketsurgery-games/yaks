@@ -4,9 +4,10 @@ title: Global back/forward navigation across view states
 type: feature
 priority: 3
 created: '2026-08-23T02:49:48Z'
-updated: '2026-08-23T02:49:48Z'
+updated: '2026-08-26T13:15:18Z'
 labels:
 - ui
+- search
 ---
 
 Generalize the (shorn) detail-scoped nav stack from yak-2d13 into a global back/forward history spanning ALL view/UI states, not just yak-detail drill-down. Today nav_history/nav_pos is reset on every _enter_detail and _detail_next_task, so it only tracks navigation within a single detail context.

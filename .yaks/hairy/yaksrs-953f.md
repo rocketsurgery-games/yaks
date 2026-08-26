@@ -4,7 +4,10 @@ title: Global search context
 type: bug
 priority: 3
 created: '2026-08-23T14:38:59Z'
-updated: '2026-08-23T14:42:08Z'
+updated: '2026-08-26T13:15:57Z'
+labels:
+- ui
+- search
 ---
 
 When searching within a list, we get a "filter: ..." header, and it sticks within the current list. But when you change lists, the header persists, but the search context doesn't.

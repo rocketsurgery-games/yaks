@@ -4,7 +4,7 @@ title: Structured description / comment navigation and editing
 type: feature
 priority: 2
 created: '2026-08-25T02:44:04Z'
-updated: '2026-08-26T12:17:14Z'
+updated: '2026-08-26T13:35:10Z'
 labels:
 - ui
 ---
