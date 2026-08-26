@@ -102,6 +102,8 @@ enum PickAction {
 /// What a confirmed y/N prompt should do.
 enum ConfirmAction {
     Slaughter(String),
+    /// Discard a dirty edit/create form or comment (stashed in `App.dirty_cancel`).
+    DiscardEdit,
 }
 
 /// An embedded edtui editor plus what to do with its text on commit. The
@@ -693,6 +695,9 @@ pub struct App {
     /// Timestamp of the last `Esc` in an editor overlay, for detecting a rapid
     /// double-`Esc` (a Ctrl-C-equivalent cancel gesture). See [`App::register_double_esc`].
     last_esc: Option<std::time::Instant>,
+    /// A dirty edit/create/comment overlay stashed behind a "discard changes?"
+    /// confirmation; restored if the user declines. See [`App::request_cancel`].
+    dirty_cancel: Option<Overlay>,
     quit: bool,
 }
 
@@ -726,6 +731,7 @@ impl App {
             notification: None,
             editor_vim: true,
             last_esc: None,
+            dirty_cancel: None,
             quit: false,
         }
     }
@@ -1318,13 +1324,16 @@ impl App {
         // non-content rows.
         let esc_cancels = k.code == KeyCode::Esc && !vim && !is_content;
         if (ctrl && k.code == KeyCode::Char('c')) || double_esc || esc_cancels {
-            let editing = matches!(&self.overlay, Overlay::Create(f) if f.is_editing());
-            self.overlay = Overlay::None;
-            self.notification = Some(if editing {
-                "edit cancelled".into()
+            let (editing, dirty) = match &self.overlay {
+                Overlay::Create(f) => (f.is_editing(), self.form_is_dirty(f)),
+                _ => (false, false),
+            };
+            let msg = if editing {
+                "edit cancelled"
             } else {
-                "create cancelled".into()
-            });
+                "create cancelled"
+            };
+            self.request_cancel(dirty, msg);
             return;
         }
         // Row navigation: Tab / Shift-Tab / Ctrl-N / Ctrl-P always move rows.
@@ -2070,6 +2079,51 @@ impl App {
         double
     }
 
+    /// Cancel the current edit overlay. When `dirty`, stash it behind a "discard
+    /// changes?" confirmation (restored if declined) instead of dropping the work;
+    /// otherwise cancel immediately with `msg`.
+    fn request_cancel(&mut self, dirty: bool, msg: &str) {
+        if dirty {
+            let stashed = std::mem::replace(&mut self.overlay, Overlay::None);
+            self.dirty_cancel = Some(stashed);
+            self.overlay = Overlay::Confirm {
+                prompt: "Discard changes? (y/N): ".into(),
+                action: ConfirmAction::DiscardEdit,
+            };
+        } else {
+            self.overlay = Overlay::None;
+            self.notification = Some(msg.to_string());
+        }
+    }
+
+    /// Whether the create/edit form differs from its starting point (the seeded
+    /// task when editing, or the empty defaults when creating).
+    fn form_is_dirty(&self, f: &CreateForm) -> bool {
+        match &f.edit_id {
+            Some(id) => match self.task(id) {
+                Some(cur) => {
+                    let mut a = f.labels_vec();
+                    let mut b = cur.labels.clone();
+                    a.sort();
+                    b.sort();
+                    f.title_text() != cur.title
+                        || TYPE_CHOICES[f.kind_idx] != cur.kind
+                        || PRI_CHOICES[f.pri_idx] != cur.priority
+                        || a != b
+                        || f.assembled_body() != cur.body
+                }
+                None => true,
+            },
+            None => {
+                !f.title_text().is_empty()
+                    || !f.assembled_body().is_empty()
+                    || !f.labels_vec().is_empty()
+                    || f.kind_idx != 0
+                    || f.pri_idx != pri_index(3)
+            }
+        }
+    }
+
     fn handle_overlay_key(&mut self, k: KeyEvent) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         // A rapid double-Esc acts as Ctrl-C (cancel) in editor overlays, so Esc
@@ -2205,26 +2259,39 @@ impl App {
         }
         // Editors are handled in place (most keys flow to edtui); only the
         // Pick/Confirm variants move their action out on resolution.
-        if let Overlay::Edit(ed) = &mut self.overlay {
-            let commit = (ctrl && k.code == KeyCode::Char('s'))
-                || (ed.single_line && k.code == KeyCode::Enter);
-            // A single-line field is fully modal in vim: a lone Esc only drops
-            // to Normal (handed to edtui below) and never cancels, so the whole
-            // normal-mode keymap (b/w/0/$/dd/x/yy/p/...) is reachable. Cancel is
-            // Ctrl-C or a rapid double-Esc. Emacs keeps plain single-Esc-cancels.
-            let esc_cancels = ed.single_line && k.code == KeyCode::Esc && !ed.vim;
-            // A rapid double-Esc cancels too — the only Esc-based way out of a
-            // multiline editor, where a lone Esc always just drops to Normal.
-            let cancel = (ctrl && k.code == KeyCode::Char('c')) || esc_cancels || double_esc;
-            if commit {
+        if matches!(self.overlay, Overlay::Edit(_)) {
+            // Decide within a short borrow, then act once it's released.
+            let (do_commit, do_cancel, dirty) = {
+                let Overlay::Edit(ed) = &mut self.overlay else {
+                    unreachable!()
+                };
+                let commit = (ctrl && k.code == KeyCode::Char('s'))
+                    || (ed.single_line && k.code == KeyCode::Enter);
+                // A single-line field is fully modal in vim: a lone Esc only
+                // drops to Normal (handed to edtui) and never cancels, so the
+                // whole normal-mode keymap (b/w/0/$/dd/x/yy/p/...) is reachable.
+                // Cancel is Ctrl-C or a rapid double-Esc; emacs keeps plain
+                // single-Esc-cancels. In a multiline editor a lone Esc always
+                // just drops to Normal, so double-Esc is the only Esc-way out.
+                let esc_cancels = ed.single_line && k.code == KeyCode::Esc && !ed.vim;
+                let cancel = (ctrl && k.code == KeyCode::Char('c')) || esc_cancels || double_esc;
+                if commit {
+                    (true, false, false)
+                } else if cancel {
+                    // Only the multiline comment editor guards unsaved work.
+                    let dirty = !ed.single_line && !ed.text().trim().is_empty();
+                    (false, true, dirty)
+                } else {
+                    ed.handler.on_key_event(k, &mut ed.state.borrow_mut());
+                    (false, false, false)
+                }
+            };
+            if do_commit {
                 if let Overlay::Edit(ed) = std::mem::replace(&mut self.overlay, Overlay::None) {
                     self.commit_edit(ed);
                 }
-            } else if cancel {
-                self.overlay = Overlay::None;
-                self.notification = Some("cancelled".into());
-            } else {
-                ed.handler.on_key_event(k, &mut ed.state.borrow_mut());
+            } else if do_cancel {
+                self.request_cancel(dirty, "cancelled");
             }
             return;
         }
@@ -2256,7 +2323,14 @@ impl App {
             Overlay::Confirm { prompt, action } => match k.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => self.resolve_confirm(action),
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Enter => {
-                    self.notification = Some("cancelled".into())
+                    // Declining a discard-confirm returns to the stashed editor.
+                    if matches!(action, ConfirmAction::DiscardEdit) {
+                        if let Some(ov) = self.dirty_cancel.take() {
+                            self.overlay = ov;
+                        }
+                    } else {
+                        self.notification = Some("cancelled".into());
+                    }
                 }
                 _ => self.overlay = Overlay::Confirm { prompt, action },
             },
@@ -2459,6 +2533,10 @@ impl App {
 
     fn resolve_confirm(&mut self, action: ConfirmAction) {
         match action {
+            ConfirmAction::DiscardEdit => {
+                self.dirty_cancel = None; // drop the stashed editor
+                self.notification = Some("changes discarded".into());
+            }
             ConfirmAction::Slaughter(id) => {
                 let Some(h) = &self.herd else { return };
                 match h.transition(&id, Status::Dead) {
@@ -5206,10 +5284,13 @@ mod tests {
                 matches!(app.overlay, Overlay::Create(_)),
                 "lone Esc is modal"
             );
-            esc(&mut app); // rapid double-Esc cancels the form
+            esc(&mut app); // rapid double-Esc requests cancel
+            // Dirty (typed "foo"), so a discard confirmation appears first.
+            assert!(matches!(app.overlay, Overlay::Confirm { .. }));
+            press(&mut app, "y"); // confirm discard
             assert!(matches!(app.overlay, Overlay::None));
             assert!(app.all.is_empty());
-            assert_eq!(app.notification.as_deref(), Some("create cancelled"));
+            assert_eq!(app.notification.as_deref(), Some("changes discarded"));
         }
 
         #[test]
@@ -5297,10 +5378,15 @@ mod tests {
             press(&mut app, "E");
             press(&mut app, "zzz"); // edits the title field in place
             esc(&mut app); // vim: drops the title field to Normal (no cancel)
-            esc(&mut app); // rapid double-Esc cancels the edit
+            esc(&mut app); // rapid double-Esc requests cancel
+            assert!(
+                matches!(app.overlay, Overlay::Confirm { .. }),
+                "dirty -> confirm"
+            );
+            press(&mut app, "y"); // confirm discard
             assert!(matches!(app.overlay, Overlay::None));
             assert_eq!(app.task("t0").unwrap().title, "solo");
-            assert_eq!(app.notification.as_deref(), Some("edit cancelled"));
+            assert_eq!(app.notification.as_deref(), Some("changes discarded"));
         }
 
         #[test]
@@ -5381,9 +5467,12 @@ mod tests {
             press(&mut app, "M");
             press(&mut app, "draft");
             esc(&mut app); // -> Normal
-            esc(&mut app); // rapid second Esc == Ctrl-C -> cancel
+            esc(&mut app); // rapid second Esc == Ctrl-C -> request cancel
+            // The draft is dirty, so a discard confirmation appears first.
+            assert!(matches!(app.overlay, Overlay::Confirm { .. }));
+            press(&mut app, "y"); // confirm discard
             assert!(matches!(app.overlay, Overlay::None));
-            assert_eq!(app.notification.as_deref(), Some("cancelled"));
+            assert_eq!(app.notification.as_deref(), Some("changes discarded"));
             assert!(app.task("t0").unwrap().body.is_empty(), "comment not saved");
         }
 
@@ -5399,6 +5488,38 @@ mod tests {
             assert!(matches!(app.overlay, Overlay::Create(_)), "form stays open");
             esc(&mut app); // rapid second Esc cancels the whole edit
             assert!(matches!(app.overlay, Overlay::None));
+            assert_eq!(app.notification.as_deref(), Some("edit cancelled"));
+        }
+
+        #[test]
+        fn declining_the_discard_confirm_returns_to_the_editor() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "c");
+            press(&mut app, "foo");
+            esc(&mut app);
+            esc(&mut app); // dirty -> discard confirm
+            assert!(matches!(app.overlay, Overlay::Confirm { .. }));
+            press(&mut app, "n"); // decline -> back to the form, work intact
+            match &app.overlay {
+                Overlay::Create(f) => assert_eq!(f.title_text(), "foo", "draft preserved"),
+                _ => panic!("expected the form to be restored"),
+            }
+        }
+
+        #[test]
+        fn clean_cancel_skips_the_confirm() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "E"); // open edit, make no changes
+            handle_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            );
+            assert!(
+                matches!(app.overlay, Overlay::None),
+                "clean cancel is immediate"
+            );
             assert_eq!(app.notification.as_deref(), Some("edit cancelled"));
         }
 
