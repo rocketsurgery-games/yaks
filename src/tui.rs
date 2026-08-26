@@ -153,8 +153,14 @@ impl Editor {
     fn new(vim: bool, single_line: bool, label: String, initial: &str, action: EditAction) -> Self {
         let mut state = EditorState::new(Lines::from(initial));
         state.set_single_line(single_line);
-        // Start in Insert so the user can type immediately (vim `i` is implied).
-        state.mode = EditorMode::Insert;
+        // Vim users expect to land in Normal when reviewing existing multiline
+        // content; an empty editor (and every single-line field) opens in Insert
+        // so you can type immediately.
+        state.mode = if vim && !single_line && !initial.is_empty() {
+            EditorMode::Normal
+        } else {
+            EditorMode::Insert
+        };
         Editor {
             state: RefCell::new(state),
             handler: make_handler(vim),
@@ -232,12 +238,18 @@ fn text_field(seed: &str, vim: bool) -> RefCell<EditorState> {
     RefCell::new(st)
 }
 
-/// A multi-line edtui field (content zone for descriptions, and later comments).
+/// A multi-line edtui field (content zone for descriptions/comments). In vim,
+/// a field seeded with existing content opens in Normal mode (the common vi
+/// expectation when reviewing text); an empty one opens in Insert to type
+/// straight away.
 fn multiline_field(seed: &str, vim: bool) -> RefCell<EditorState> {
     let mut st = EditorState::new(Lines::from(seed));
     st.set_single_line(false);
-    st.mode = EditorMode::Insert;
-    let _ = vim;
+    st.mode = if vim && !seed.is_empty() {
+        EditorMode::Normal
+    } else {
+        EditorMode::Insert
+    };
     RefCell::new(st)
 }
 
@@ -4295,6 +4307,39 @@ mod tests {
     }
 
     #[test]
+    fn vim_seeded_content_opens_in_normal_mode() {
+        // Editing existing description/comment content lands in Normal (the vi
+        // expectation when reviewing text).
+        let mut app = App::new(vec![body_with_comments()]);
+        assert!(app.editor_vim);
+        app.open_edit();
+        match &app.overlay {
+            Overlay::Create(f) => {
+                assert_eq!(f.blocks[0].editor.borrow().mode, EditorMode::Normal);
+                assert_eq!(f.blocks[1].editor.borrow().mode, EditorMode::Normal);
+            }
+            _ => panic!("expected edit form"),
+        }
+    }
+
+    #[test]
+    fn vim_new_content_opens_in_insert_mode() {
+        // Fresh, empty content (new yak description, new comment) opens in Insert
+        // so you can type immediately.
+        let mut app = App::new(vec![task("t0", "t", Status::Hairy, 3, None)]);
+        app.open_create(false);
+        match &app.overlay {
+            Overlay::Create(f) => assert_eq!(f.blocks[0].editor.borrow().mode, EditorMode::Insert),
+            _ => panic!("expected create form"),
+        }
+        app.open_comment();
+        match &app.overlay {
+            Overlay::Edit(ed) => assert_eq!(ed.state.borrow().mode, EditorMode::Insert),
+            _ => panic!("expected comment editor"),
+        }
+    }
+
+    #[test]
     fn e_on_comment_line_opens_form_focused_on_that_comment() {
         let mut app = App::new(vec![body_with_comments()]);
         handle_key(&mut app, key('l')); // enter the detail pane
@@ -5267,12 +5312,13 @@ mod tests {
             ctrl_s(&mut app);
             let before = app.task("t0").unwrap().body.clone();
             assert!(before.contains('\u{25b8}'));
-            // Edit: walk title→type→priority→labels→description→comment, prepend.
+            // Edit: walk title→type→priority→labels→description→comment. The
+            // seeded comment opens in Normal (921a), so `i` to insert, then type.
             press(&mut app, "E");
             for _ in 0..5 {
                 tab(&mut app);
             }
-            press(&mut app, "X");
+            press(&mut app, "iX");
             ctrl_s(&mut app);
             let body = &app.task("t0").unwrap().body;
             assert!(
