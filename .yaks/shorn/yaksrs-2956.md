@@ -4,7 +4,7 @@ title: Render-time markdown highlighting (detail + editor), hand-rolled
 type: feature
 priority: 2
 created: '2026-08-25T03:26:25Z'
-updated: '2026-08-25T03:26:25Z'
+updated: '2026-08-26T01:43:31Z'
 labels:
 - ui
 ---
@@ -21,3 +21,7 @@ Plan:
 - Stretch: embedded language highlighting inside fenced code blocks (our own small tokenizers, or an optional scoped highlighter) - fully our choice.
 
 Obviates d635 (edtui fancy-regex PR) and f640 (enable md-syntax by default) since we drop syntect entirely.
+
+---
+▸ 2026-08-26T01:43:31Z
+Implemented. New src/tui/markdown.rs: hand-rolled, pure-Rust markdown highlighter (headings, bold/italic with dimmed markers, inline code, fenced code blocks tracked across lines, list bullets, blockquotes; flanking rules keep snake_case and spaced-asterisk arithmetic from being emphasized). Emits char-coord spans reused by BOTH surfaces. Detail pane: DLine gains an md span vec, computed per body line in build() and remapped through wrap(); render_dline paints it beneath the link/find layers. Editor: set_md_highlights() converts spans to edtui Highlights (logical row/col) set on state each render, so coloring shows in Normal AND Insert and survives edtui wrapping. Removed the md-syntax feature, apply_syntax(), and all editor_syntax config/App plumbing -- Cargo.lock now drops syntect/onig/onig_sys entirely (C-free). Tests: 11 span-level + 2 detail-integration + reworked editor render smoke test; full workspace green, 0 warnings. Stretch (embedded code-block languages) left for later.

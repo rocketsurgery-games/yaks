@@ -8,6 +8,7 @@
 mod cache;
 mod detail;
 mod headless;
+mod markdown;
 mod tree;
 mod view;
 mod views_store;
@@ -620,8 +621,6 @@ pub struct App {
     notification: Option<String>,
     /// Editor keybinding profile (vim vs emacs), from herd config.
     editor_vim: bool,
-    /// Syntect theme name for markdown coloring in the editor; `None` = off.
-    editor_syntax: Option<String>,
     quit: bool,
 }
 
@@ -654,7 +653,6 @@ impl App {
             overlay: Overlay::None,
             notification: None,
             editor_vim: true,
-            editor_syntax: None,
             quit: false,
         }
     }
@@ -670,7 +668,6 @@ impl App {
         let working_set = views_store::load_working_set(herd.root());
         let mut app = App::new(all);
         app.editor_vim = vim;
-        app.editor_syntax = cfg.editor_syntax;
         app.collapsed = collapsed;
         app.filter = clone_spec(&views[0].spec);
         app.views = views;
@@ -2544,12 +2541,10 @@ fn render(app: &App, frame: &mut Frame) {
         render_list(app, frame, left);
         let inner = right_divider(frame, right, true);
         match &app.overlay {
-            Overlay::Edit(ed) if !ed.single_line => {
-                render_editor_panel(ed, app.editor_syntax.as_deref(), frame, inner)
-            }
+            Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, inner),
             Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, inner),
             Overlay::Drawer(d) => render_drawer(d, frame, inner),
-            Overlay::Create(f) => render_create(f, app.editor_syntax.as_deref(), frame, inner),
+            Overlay::Create(f) => render_create(f, frame, inner),
             Overlay::Help(scroll) => render_help(*scroll, frame, inner),
             Overlay::ViewPicker(sel) => render_view_picker(app, *sel, frame, inner),
             _ => render_detail(app, frame, inner),
@@ -2795,7 +2790,7 @@ fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
 /// The create/edit task form: header + title / type / priority / labels meta
 /// rows, a `─ description ─` separator, then a multi-line description content
 /// zone filling the rest. Laid out like `render_drawer`, inset by `right_divider`.
-fn render_create(f: &CreateForm, syntax: Option<&str>, frame: &mut Frame, area: Rect) {
+fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
     let rows = Layout::vertical([
         Constraint::Length(1), // header
         Constraint::Length(1), // title
@@ -2890,7 +2885,8 @@ fn render_create(f: &CreateForm, syntax: Option<&str>, frame: &mut Frame, area: 
     if desc_focused {
         let mut st = f.description.borrow_mut();
         let mode = st.mode;
-        let view = apply_syntax(EditorView::new(&mut st).theme(editor_theme(mode)), syntax);
+        set_md_highlights(&mut st);
+        let view = EditorView::new(&mut st).theme(editor_theme(mode));
         frame.render_widget(view, rows[6]);
     } else {
         let text = f.description.borrow().lines.to_string();
@@ -3025,20 +3021,27 @@ fn mode_style(mode: EditorMode) -> Style {
     Style::new().fg(color).add_modifier(Modifier::BOLD)
 }
 
-/// Attach a markdown syntax highlighter (foreground colors only, so a theme
-/// mismatch never paints over the terminal background) when built with the
-/// `md-syntax` feature and a valid theme is configured. A no-op otherwise.
-#[cfg(feature = "md-syntax")]
-fn apply_syntax<'a, 'b>(view: EditorView<'a, 'b>, theme: Option<&str>) -> EditorView<'a, 'b> {
-    match theme.and_then(|t| edtui::SyntaxHighlighter::new(t, "md").ok()) {
-        Some(sh) => view.syntax_highlighter(Some(sh)),
-        None => view,
+/// Recompute markdown highlights for a multi-line editor buffer and stash them
+/// on the state so edtui paints them at render (Normal *and* Insert), in logical
+/// coords so they survive edtui's own wrapping. Our own hand-rolled highlighter
+/// — no syntect, no C deps. Cheap enough to redo every frame.
+fn set_md_highlights(state: &mut EditorState) {
+    let text = state.lines.to_string();
+    let mut hl = markdown::Highlighter::new();
+    let mut highlights = Vec::new();
+    for (row, line) in text.split('\n').enumerate() {
+        for sp in hl.line(line) {
+            if sp.len == 0 {
+                continue;
+            }
+            highlights.push(edtui::Highlight::new(
+                edtui::Index2::new(row, sp.start),
+                edtui::Index2::new(row, sp.start + sp.len - 1),
+                sp.style,
+            ));
+        }
     }
-}
-
-#[cfg(not(feature = "md-syntax"))]
-fn apply_syntax<'a, 'b>(view: EditorView<'a, 'b>, _theme: Option<&str>) -> EditorView<'a, 'b> {
-    view
+    state.set_highlights(highlights);
 }
 
 /// Theme for embedded editors. The cursor cell is styled per mode so Normal vs
@@ -3055,7 +3058,7 @@ fn editor_theme(mode: EditorMode) -> EditorTheme<'static> {
         .cursor_style(cursor)
 }
 
-fn render_editor_panel(ed: &Editor, syntax: Option<&str>, frame: &mut Frame, area: Rect) {
+fn render_editor_panel(ed: &Editor, frame: &mut Frame, area: Rect) {
     let [head, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
     let mode = ed.state.borrow().mode;
     let label_style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
@@ -3084,10 +3087,8 @@ fn render_editor_panel(ed: &Editor, syntax: Option<&str>, frame: &mut Frame, are
         );
     }
     let mut state = ed.state.borrow_mut();
-    let view = apply_syntax(
-        EditorView::new(&mut state).theme(editor_theme(mode)),
-        syntax,
-    );
+    set_md_highlights(&mut state);
+    let view = EditorView::new(&mut state).theme(editor_theme(mode));
     frame.render_widget(view, body);
 }
 
@@ -3541,6 +3542,18 @@ fn render_dline<'a>(
             }
         })
         .collect();
+    // Markdown highlight layer (body lines): sits beneath links/find so a link
+    // inside emphasis still wins. Keep the line's cursor/selection background.
+    for sp in &dl.md {
+        let end = (sp.start + sp.len).min(n);
+        let st = match line_bg {
+            Some(bg) => sp.style.bg(bg),
+            None => sp.style,
+        };
+        for s in styles.iter_mut().take(end).skip(sp.start) {
+            *s = st;
+        }
+    }
     for (col, len, _) in &dl.links {
         let is_current = cur.is_some_and(|j| j.line == line_idx && j.col == *col);
         let mut st = if is_current {
@@ -4031,19 +4044,11 @@ mod tests {
         assert_eq!(editor_state(&app).1, "Yllo");
     }
 
-    #[cfg(feature = "md-syntax")]
     #[test]
-    fn syntax_highlighter_builds_for_valid_theme_only() {
-        assert!(edtui::SyntaxHighlighter::new("base16-ocean-dark", "md").is_ok());
-        assert!(edtui::SyntaxHighlighter::new("not-a-real-theme", "md").is_err());
-    }
-
-    #[test]
-    fn editor_renders_with_syntax_theme_set() {
-        // With md-syntax off this is a plain render; on, it colors. Either way
-        // it must not panic and still shows the text.
+    fn editor_renders_markdown_highlights() {
+        // Our hand-rolled highlighter runs at render for the editor; it must not
+        // panic and must still show the text.
         let mut app = editable();
-        app.editor_syntax = Some("base16-ocean-dark".into());
         app.open_comment();
         typ(&mut app, "# Heading");
         let out = draw(&app, 72, 14);

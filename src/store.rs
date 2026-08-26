@@ -348,10 +348,6 @@ pub struct Config {
     pub default_priority: u8,
     /// When true, embedded editors use vim keybindings; otherwise emacs.
     pub vim_mode: bool,
-    /// Syntect theme name for markdown coloring in the editor (foreground only).
-    /// `None` disables highlighting. See edtui's `SyntaxHighlighter::theme` for
-    /// the available names; set `editor_syntax: off` in config to turn it off.
-    pub editor_syntax: Option<String>,
 }
 
 /// Read `.yaks/config.yaml`; missing file/keys fall back to the built-in
@@ -362,7 +358,6 @@ pub fn read_config(root: &Path) -> Config {
         default_type: "task".to_string(),
         default_priority: 3,
         vim_mode: true,
-        editor_syntax: Some("base16-ocean-dark".to_string()),
     };
     if let Ok(text) = fs::read_to_string(root.join("config.yaml")) {
         for line in text.lines() {
@@ -379,12 +374,6 @@ pub fn read_config(root: &Path) -> Config {
                     }
                 }
                 "vim_mode" => c.vim_mode = matches!(v.as_str(), "true" | "True" | "yes" | "1"),
-                "editor_syntax" => {
-                    c.editor_syntax = match v.as_str() {
-                        "" | "off" | "none" | "false" | "no" | "0" => None,
-                        other => Some(other.to_string()),
-                    };
-                }
                 _ => {}
             }
         }

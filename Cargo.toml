@@ -18,14 +18,6 @@ default-run = "yaks"
 name = "yaks"
 path = "src/main.rs"
 
-[features]
-# Markdown syntax coloring in the editor. Opt-in because edtui's
-# syntax-highlighting pulls syntect with the Oniguruma C dep (onig_sys), which
-# would add a C toolchain requirement to the otherwise pure-Rust cross-compiled
-# release matrix. Build locally with `--features md-syntax` to try it. Making it
-# default is blocked on edtui switching syntect to pure-Rust fancy-regex.
-md-syntax = ["edtui/syntax-highlighting"]
-
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"

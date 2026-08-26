@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::markdown::{self, MdSpan};
 use crate::model::{Status, Task};
 
 /// Where a link points.
@@ -32,6 +33,9 @@ pub struct DLine {
     pub text: String,
     pub kind: Kind,
     pub links: Vec<(usize, usize, Target)>,
+    /// Markdown highlight spans (char col + len) for body lines. Rendered
+    /// beneath the link/find layers so a link inside emphasis still wins.
+    pub md: Vec<MdSpan>,
     /// True when this line is a wrapped continuation of the previous one (set by
     /// [`wrap`]). Lets yank rejoin a soft-wrapped line back into one logical line.
     pub cont: bool,
@@ -130,6 +134,7 @@ fn field(label: &str, value: &str) -> DLine {
         text: format!("{label:<13}{value}"),
         kind: Kind::Field,
         links: vec![],
+        md: vec![],
         cont: false,
     }
 }
@@ -139,6 +144,7 @@ fn section(text: &str) -> DLine {
         text: text.into(),
         kind: Kind::Section,
         links: vec![],
+        md: vec![],
         cont: false,
     }
 }
@@ -148,6 +154,7 @@ fn empty() -> DLine {
         text: String::new(),
         kind: Kind::Empty,
         links: vec![],
+        md: vec![],
         cont: false,
     }
 }
@@ -193,6 +200,7 @@ fn ref_line(prefix: String, glyph: &str, id: &str, title: &str, exists: bool) ->
         text,
         kind: Kind::Field,
         links,
+        md: vec![],
         cont: false,
     }
 }
@@ -292,6 +300,7 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
             text: format!("{head}{s}"),
             kind: Kind::Field,
             links,
+            md: vec![],
             cont: false,
         });
     }
@@ -299,13 +308,16 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
     let body = task.body.trim();
     if !body.is_empty() {
         out.push(empty());
+        let mut hl = markdown::Highlighter::new();
         for raw in body.lines() {
             let line = strip_brackets(raw);
             let links = scan_body_links(&line, &known);
+            let md = hl.line(&line);
             out.push(DLine {
                 text: line,
                 kind: Kind::Body,
                 links,
+                md,
                 cont: false,
             });
         }
@@ -401,10 +413,25 @@ pub fn wrap(lines: Vec<DLine>, width: usize) -> Vec<DLine> {
                     (ls < le).then(|| (ls - s, le - ls, t.clone()))
                 })
                 .collect();
+            // Remap markdown spans onto this row the same way.
+            let md = dl
+                .md
+                .iter()
+                .filter_map(|sp| {
+                    let ls = sp.start.max(s);
+                    let le = (sp.start + sp.len).min(e);
+                    (ls < le).then(|| MdSpan {
+                        start: ls - s,
+                        len: le - ls,
+                        style: sp.style,
+                    })
+                })
+                .collect();
             out.push(DLine {
                 text,
                 kind: dl.kind,
                 links,
+                md,
                 cont: ri > 0,
             });
         }
@@ -530,6 +557,44 @@ mod tests {
     }
 
     #[test]
+    fn build_attaches_markdown_spans_to_body_lines() {
+        let all = vec![task("yak-0001", None, &[], "# Heading\nplain line")];
+        let lines = build(&all[0], &all);
+        let body: Vec<&DLine> = lines.iter().filter(|l| l.kind == Kind::Body).collect();
+        // The heading line carries a whole-line span; the plain line carries none.
+        let heading = body.iter().find(|l| l.text == "# Heading").unwrap();
+        assert_eq!(heading.md.len(), 1);
+        assert_eq!((heading.md[0].start, heading.md[0].len), (0, 9));
+        let plain = body.iter().find(|l| l.text == "plain line").unwrap();
+        assert!(plain.md.is_empty());
+    }
+
+    #[test]
+    fn wrap_remaps_markdown_spans_onto_rows() {
+        let dl = DLine {
+            text: "aaaa `code here` bbbb".into(),
+            kind: Kind::Body,
+            links: vec![],
+            md: vec![MdSpan {
+                start: 5,
+                len: 11,
+                style: ratatui::style::Style::new(),
+            }],
+            cont: false,
+        };
+        // Width 10 splits the line; the code span (cols 5..16) must be clipped to
+        // whatever falls on each row and re-based to that row's columns.
+        let rows = wrap(vec![dl], 10);
+        let covered: usize = rows.iter().flat_map(|r| &r.md).map(|s| s.len).sum();
+        assert!(covered > 0 && covered <= 11);
+        for r in &rows {
+            for s in &r.md {
+                assert!(s.start + s.len <= r.text.chars().count());
+            }
+        }
+    }
+
+    #[test]
     fn body_link_span_points_at_the_id() {
         let all = vec![task("yak-0001", None, &[], "x yak-0001 y")];
         // self-id still scans in body (resolution is the caller's concern here).
@@ -548,6 +613,7 @@ mod tests {
             text: "aaaa bbbb cccc dddd".into(),
             kind: Kind::Body,
             links: vec![],
+            md: vec![],
             cont: false,
         };
         let rows = wrap(vec![dl], 10);
@@ -563,6 +629,7 @@ mod tests {
             text: "see yak-0001 now".into(),
             kind: Kind::Body,
             links: vec![(4, 8, Target::Task("yak-0001".into()))],
+            md: vec![],
             cont: false,
         };
         let rows = wrap(vec![dl], 8);
@@ -578,6 +645,7 @@ mod tests {
             text: "  alpha beta gamma".into(),
             kind: Kind::Body,
             links: vec![],
+            md: vec![],
             cont: false,
         };
         assert_eq!(wrap(vec![dl], 10)[0].text, "  alpha");
@@ -586,6 +654,7 @@ mod tests {
             text: "abcdefghij".into(),
             kind: Kind::Body,
             links: vec![],
+            md: vec![],
             cont: false,
         };
         let texts: Vec<String> = wrap(vec![dl2], 4).iter().map(|r| r.text.clone()).collect();
@@ -598,6 +667,7 @@ mod tests {
             text: "long line here".into(),
             kind: Kind::Body,
             links: vec![],
+            md: vec![],
             cont: false,
         };
         assert_eq!(wrap(vec![dl], 0).len(), 1);
