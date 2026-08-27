@@ -7,7 +7,7 @@ exclude = [".edtui"]
 
 [package]
 name = "yaks"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 description = "Filesystem-native task tracker: a fast single-binary CLI + TUI over markdown task files"
 license = "Apache-2.0"
