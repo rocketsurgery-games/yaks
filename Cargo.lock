@@ -542,7 +542,7 @@ dependencies = [
 [[package]]
 name = "edtui"
 version = "0.11.7"
-source = "git+https://github.com/rocketsurgery-games/edtui?branch=yaks-integration#93c06d31ee29855926e454bbbbef63aa6eaf3a8e"
+source = "git+https://github.com/rocketsurgery-games/edtui?branch=yaks-integration#9fbee79dc580f7fdb2a34c2fec64227358ea1303"
 dependencies = [
  "arboard",
  "crossterm",
@@ -2342,7 +2342,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

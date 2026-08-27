@@ -4347,6 +4347,30 @@ mod tests {
     }
 
     #[test]
+    fn change_line_routes_through_editor() {
+        // cc (change whole line) reaches edtui via the fork.
+        let mut app = editable();
+        app.open_comment();
+        typ(&mut app, "hello");
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)); // Normal
+        typ(&mut app, "cc"); // clear the line, enter Insert
+        typ(&mut app, "bye");
+        assert_eq!(editor_state(&app).1, "bye");
+    }
+
+    #[test]
+    fn substitute_routes_through_editor() {
+        // s (substitute char) reaches edtui via the fork.
+        let mut app = editable();
+        app.open_comment();
+        typ(&mut app, "abc");
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)); // Normal
+        typ(&mut app, "0s"); // start of line, substitute 'a'
+        typ(&mut app, "X");
+        assert_eq!(editor_state(&app).1, "Xbc");
+    }
+
+    #[test]
     fn tilde_x_and_r_route_through_editor() {
         let mut app = editable();
         app.open_comment();
