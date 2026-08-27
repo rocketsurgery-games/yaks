@@ -698,6 +698,9 @@ pub struct App {
     /// A dirty edit/create/comment overlay stashed behind a "discard changes?"
     /// confirmation; restored if the user declines. See [`App::request_cancel`].
     dirty_cancel: Option<Overlay>,
+    /// The in-progress `:` command line (vim `:w`/`:q`/...), layered over the
+    /// active editor overlay while `Some`. See [`App::handle_cmdline_key`].
+    cmdline: Option<String>,
     quit: bool,
 }
 
@@ -732,6 +735,7 @@ impl App {
             editor_vim: true,
             last_esc: None,
             dirty_cancel: None,
+            cmdline: None,
             quit: false,
         }
     }
@@ -1369,6 +1373,16 @@ impl App {
             return;
         }
         if is_content {
+            // `:` in a content block's Normal mode opens the command line.
+            let open_cmd = vim
+                && k.code == KeyCode::Char(':')
+                && matches!(&self.overlay, Overlay::Create(f)
+                    if f.content_index().is_some_and(|i|
+                        f.blocks[i].editor.borrow().mode == EditorMode::Normal));
+            if open_cmd {
+                self.cmdline = Some(String::new());
+                return;
+            }
             if let Overlay::Create(f) = &mut self.overlay {
                 if let Some(i) = f.content_index() {
                     f.handler
@@ -2124,7 +2138,91 @@ impl App {
         }
     }
 
+    /// Edit the active `:` command line. Enter runs it, Esc dismisses it,
+    /// Backspace deletes, and printable chars are appended.
+    fn handle_cmdline_key(&mut self, k: KeyEvent) {
+        match k.code {
+            KeyCode::Esc => self.cmdline = None,
+            KeyCode::Enter => {
+                let cmd = self.cmdline.take().unwrap_or_default();
+                self.run_command(&cmd);
+            }
+            KeyCode::Backspace => {
+                if let Some(s) = &mut self.cmdline {
+                    s.pop();
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(s) = &mut self.cmdline {
+                    s.push(c);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Run a `:` command against the active editor overlay. The verb set is
+    /// deliberately small (`w`/`q`/`wq`/`x`/`q!`); the match's catch-all is the
+    /// extension point for any future `:` commands.
+    fn run_command(&mut self, cmd: &str) {
+        match cmd.trim() {
+            "" => {}
+            "w" | "wq" | "x" => self.cmd_write(),
+            "q" => self.cmd_quit(false),
+            "q!" => self.cmd_quit(true),
+            other => self.notification = Some(format!("unknown command: :{other}")),
+        }
+    }
+
+    /// `:w` / `:wq` / `:x` — commit the active overlay (a modal editor saves and
+    /// closes, so all three behave alike).
+    fn cmd_write(&mut self) {
+        match &self.overlay {
+            Overlay::Create(f) => {
+                if f.title_text().is_empty() {
+                    self.notification = Some("need a title".into());
+                } else {
+                    self.commit_form();
+                }
+            }
+            Overlay::Edit(_) => {
+                if let Overlay::Edit(ed) = std::mem::replace(&mut self.overlay, Overlay::None) {
+                    self.commit_edit(ed);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `:q` — cancel the active overlay (respecting the dirty-discard confirm);
+    /// `:q!` force-cancels, discarding unsaved work outright.
+    fn cmd_quit(&mut self, force: bool) {
+        if force {
+            self.overlay = Overlay::None;
+            self.notification = Some("cancelled".into());
+            return;
+        }
+        let (dirty, msg) = match &self.overlay {
+            Overlay::Create(f) => (
+                self.form_is_dirty(f),
+                if f.is_editing() {
+                    "edit cancelled"
+                } else {
+                    "create cancelled"
+                },
+            ),
+            Overlay::Edit(ed) => (!ed.single_line && !ed.text().trim().is_empty(), "cancelled"),
+            _ => (false, "cancelled"),
+        };
+        self.request_cancel(dirty, msg);
+    }
+
     fn handle_overlay_key(&mut self, k: KeyEvent) {
+        // An active `:` command line intercepts everything until it resolves.
+        if self.cmdline.is_some() {
+            self.handle_cmdline_key(k);
+            return;
+        }
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         // A rapid double-Esc acts as Ctrl-C (cancel) in editor overlays, so Esc
         // can otherwise mean "leave Insert for Normal" without trapping the user.
@@ -2261,12 +2359,17 @@ impl App {
         // Pick/Confirm variants move their action out on resolution.
         if matches!(self.overlay, Overlay::Edit(_)) {
             // Decide within a short borrow, then act once it's released.
-            let (do_commit, do_cancel, dirty) = {
+            let (do_commit, do_cancel, dirty, open_cmd) = {
                 let Overlay::Edit(ed) = &mut self.overlay else {
                     unreachable!()
                 };
                 let commit = (ctrl && k.code == KeyCode::Char('s'))
                     || (ed.single_line && k.code == KeyCode::Enter);
+                // `:` in a multiline editor's Normal mode opens the command line.
+                let open_cmd = !ed.single_line
+                    && ed.vim
+                    && k.code == KeyCode::Char(':')
+                    && ed.state.borrow().mode == EditorMode::Normal;
                 // A single-line field is fully modal in vim: a lone Esc only
                 // drops to Normal (handed to edtui) and never cancels, so the
                 // whole normal-mode keymap (b/w/0/$/dd/x/yy/p/...) is reachable.
@@ -2276,20 +2379,24 @@ impl App {
                 let esc_cancels = ed.single_line && k.code == KeyCode::Esc && !ed.vim;
                 let cancel = (ctrl && k.code == KeyCode::Char('c')) || esc_cancels || double_esc;
                 if commit {
-                    (true, false, false)
+                    (true, false, false, false)
+                } else if open_cmd {
+                    (false, false, false, true)
                 } else if cancel {
                     // Only the multiline comment editor guards unsaved work.
                     let dirty = !ed.single_line && !ed.text().trim().is_empty();
-                    (false, true, dirty)
+                    (false, true, dirty, false)
                 } else {
                     ed.handler.on_key_event(k, &mut ed.state.borrow_mut());
-                    (false, false, false)
+                    (false, false, false, false)
                 }
             };
             if do_commit {
                 if let Overlay::Edit(ed) = std::mem::replace(&mut self.overlay, Overlay::None) {
                     self.commit_edit(ed);
                 }
+            } else if open_cmd {
+                self.cmdline = Some(String::new());
             } else if do_cancel {
                 self.request_cancel(dirty, "cancelled");
             }
@@ -2935,6 +3042,10 @@ fn help_content() -> Vec<Line<'static>> {
         entry("P / T / L / S", "Priority / type / labels / state"),
         entry("D / R", "Add dependency / reparent"),
         entry("M", "Add a comment (note)"),
+        entry(
+            ":w / :q / :wq",
+            "Save / cancel / save+close (editor Normal)",
+        ),
         entry("A / O", "Attach artifact / open it"),
         entry("X", "Slaughter (delete, confirm)"),
         blank(),
@@ -3960,6 +4071,17 @@ fn detail_scan(lines: &[detail::DLine], q: &str) -> Vec<(usize, usize, usize)> {
 }
 
 fn render_status(app: &App, frame: &mut Frame, area: Rect) {
+    // An active `:` command line owns the status line.
+    if let Some(cmd) = &app.cmdline {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                format!(":{cmd}"),
+                Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            )),
+            area,
+        );
+        return;
+    }
     // A single-line editor field owns the status line while active.
     if let Overlay::Edit(ed) = &app.overlay {
         if ed.single_line {
@@ -5545,6 +5667,60 @@ mod tests {
                 "clean cancel is immediate"
             );
             assert_eq!(app.notification.as_deref(), Some("edit cancelled"));
+        }
+
+        #[test]
+        fn colon_wq_commits_the_comment() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "M");
+            press(&mut app, "a note");
+            esc(&mut app); // Normal
+            press(&mut app, ":wq"); // open cmdline + type
+            enter(&mut app); // run
+            assert!(matches!(app.overlay, Overlay::None));
+            assert!(app.task("t0").unwrap().body.contains("a note"));
+        }
+
+        #[test]
+        fn colon_q_bang_discards_the_comment() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "M");
+            press(&mut app, "draft");
+            esc(&mut app); // Normal
+            press(&mut app, ":q!"); // force-quit, no discard confirm
+            enter(&mut app);
+            assert!(matches!(app.overlay, Overlay::None));
+            assert!(app.task("t0").unwrap().body.is_empty());
+        }
+
+        #[test]
+        fn colon_w_saves_the_edit_form() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "E");
+            for _ in 0..4 {
+                tab(&mut app); // -> description content row (empty -> Insert)
+            }
+            press(&mut app, "hello");
+            esc(&mut app); // Normal
+            press(&mut app, ":w");
+            enter(&mut app);
+            assert!(matches!(app.overlay, Overlay::None));
+            assert_eq!(app.task("t0").unwrap().body, "hello");
+        }
+
+        #[test]
+        fn colon_unknown_command_notifies_and_stays_open() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "M");
+            esc(&mut app); // empty comment -> Normal
+            press(&mut app, ":nope");
+            enter(&mut app);
+            assert!(matches!(app.overlay, Overlay::Edit(_)), "editor stays open");
+            assert_eq!(app.notification.as_deref(), Some("unknown command: :nope"));
         }
 
         fn with_deps(id: &str, status: Status, deps: &[&str]) -> Task {
