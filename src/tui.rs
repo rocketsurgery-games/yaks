@@ -285,6 +285,16 @@ impl Drawer {
         matches!(self.row, 3 | 4 | 5)
     }
 
+    /// The editor backing the current text row (labels/search/parent), if on one.
+    fn text_editor(&self) -> Option<&RefCell<EditorState>> {
+        match self.row {
+            3 => Some(&self.labels),
+            4 => Some(&self.search),
+            5 => Some(&self.parent),
+            _ => None,
+        }
+    }
+
     fn chip_count(&self) -> usize {
         match self.row {
             0 => STATUS_CHOICES.len(),
@@ -476,6 +486,15 @@ impl CreateForm {
     /// handled separately.
     fn is_line_text_row(&self) -> bool {
         matches!(self.row, 0 | 3)
+    }
+
+    /// The editor backing the current single-line text row (title/labels).
+    fn line_editor(&self) -> Option<&RefCell<EditorState>> {
+        match self.row {
+            0 => Some(&self.title),
+            3 => Some(&self.labels),
+            _ => None,
+        }
     }
 
     /// Move the single-select chip cursor on a chip row (wrapping).
@@ -1403,15 +1422,25 @@ impl App {
         // On chip rows j/k also navigate; on single-line text rows Up/Down do;
         // content blocks keep Up/Down for their own cursor.
         let is_chip = !is_content && !is_line_text;
+        // In Normal mode a single-line field's j/k are free (no vertical motion
+        // within one line), so they move between rows like Tab does on chips.
+        let line_normal = is_line_text
+            && matches!(&self.overlay, Overlay::Create(f)
+                if f.line_editor().is_some_and(|e| e.borrow().mode == EditorMode::Normal));
         let nav_down = matches!(k.code, KeyCode::Tab)
             || (ctrl && k.code == KeyCode::Char('n'))
             || (is_line_text && k.code == KeyCode::Down)
+            || (line_normal && k.code == KeyCode::Char('j'))
             || (is_chip && matches!(k.code, KeyCode::Down | KeyCode::Char('j')));
         let nav_up = matches!(k.code, KeyCode::BackTab)
             || (ctrl && k.code == KeyCode::Char('p'))
             || (is_line_text && k.code == KeyCode::Up)
+            || (line_normal && k.code == KeyCode::Char('k'))
             || (is_chip && matches!(k.code, KeyCode::Up | KeyCode::Char('k')));
         if nav_down || nav_up {
+            // Carry Normal across a j/k field-nav so it keeps moving instead of
+            // dropping back to Insert (typing) on the next single-line row.
+            let carry = line_normal && matches!(k.code, KeyCode::Char('j') | KeyCode::Char('k'));
             if let Overlay::Create(f) = &mut self.overlay {
                 let n = f.row_count();
                 f.row = if nav_down {
@@ -1419,6 +1448,11 @@ impl App {
                 } else {
                     (f.row + n - 1) % n
                 };
+                if carry {
+                    if let Some(e) = f.line_editor() {
+                        e.borrow_mut().mode = EditorMode::Normal;
+                    }
+                }
             }
             return;
         }
@@ -1791,13 +1825,20 @@ impl App {
         }
         // Row navigation. On text rows only Tab/arrows/Ctrl move rows (so j/k
         // remain typeable); on chip rows j/k also navigate.
+        // On a text row in Normal mode, j/k are free, so they move rows too.
+        let text_normal = is_text
+            && matches!(&self.overlay, Overlay::Drawer(d)
+                if d.text_editor().is_some_and(|e| e.borrow().mode == EditorMode::Normal));
         let nav_down = matches!(k.code, KeyCode::Down | KeyCode::Tab)
             || (ctrl && k.code == KeyCode::Char('n'))
-            || (!is_text && k.code == KeyCode::Char('j'));
+            || (!is_text && k.code == KeyCode::Char('j'))
+            || (text_normal && k.code == KeyCode::Char('j'));
         let nav_up = matches!(k.code, KeyCode::Up | KeyCode::BackTab)
             || (ctrl && k.code == KeyCode::Char('p'))
-            || (!is_text && k.code == KeyCode::Char('k'));
+            || (!is_text && k.code == KeyCode::Char('k'))
+            || (text_normal && k.code == KeyCode::Char('k'));
         if nav_down || nav_up {
+            let carry = text_normal && matches!(k.code, KeyCode::Char('j') | KeyCode::Char('k'));
             if let Overlay::Drawer(d) = &mut self.overlay {
                 d.row = if nav_down {
                     (d.row + 1) % DRAWER_ROWS
@@ -1805,6 +1846,11 @@ impl App {
                     (d.row + DRAWER_ROWS - 1) % DRAWER_ROWS
                 };
                 d.chip_idx = 0;
+                if carry {
+                    if let Some(e) = d.text_editor() {
+                        e.borrow_mut().mode = EditorMode::Normal;
+                    }
+                }
             }
             return;
         }
@@ -2321,9 +2367,16 @@ impl App {
         // The fuzzy picker: nav/commit/cancel are intercepted; everything else
         // edits the query (and resets the selection to the top match).
         if matches!(self.overlay, Overlay::Fuzzy(_)) {
-            let up = k.code == KeyCode::Up || (ctrl && k.code == KeyCode::Char('p'));
+            // In Normal mode j/k move the result selection (the query's own j/k
+            // have no single-line meaning).
+            let q_normal = matches!(&self.overlay, Overlay::Fuzzy(fp)
+                if fp.query.borrow().mode == EditorMode::Normal);
+            let up = k.code == KeyCode::Up
+                || (ctrl && k.code == KeyCode::Char('p'))
+                || (q_normal && k.code == KeyCode::Char('k'));
             let down = matches!(k.code, KeyCode::Down | KeyCode::Tab)
-                || (ctrl && k.code == KeyCode::Char('n'));
+                || (ctrl && k.code == KeyCode::Char('n'))
+                || (q_normal && k.code == KeyCode::Char('j'));
             if self.field_cancel(k, double_esc) {
                 self.overlay = Overlay::None;
                 self.notification = Some("cancelled".into());
@@ -4905,6 +4958,52 @@ mod tests {
         }
     }
 
+    #[test]
+    fn drawer_normal_jk_navigates_and_carries_mode() {
+        let mut app = sample();
+        handle_key(&mut app, key('f'));
+        for _ in 0..3 {
+            handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        }
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)); // labels -> Normal
+        handle_key(&mut app, key('j')); // next text row, carrying Normal
+        if let Overlay::Drawer(d) = &app.overlay {
+            assert_eq!(d.row, 4);
+            assert_eq!(d.search.borrow().mode, EditorMode::Normal);
+        } else {
+            panic!("drawer closed");
+        }
+        handle_key(&mut app, key('k')); // back up to labels, still Normal
+        if let Overlay::Drawer(d) = &app.overlay {
+            assert_eq!(d.row, 3);
+            assert_eq!(d.labels.borrow().mode, EditorMode::Normal);
+        }
+    }
+
+    #[test]
+    fn create_form_normal_j_navigates_rows() {
+        let mut app = sample();
+        handle_key(&mut app, key('c')); // create form, title row (Insert)
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)); // title -> Normal
+        handle_key(&mut app, key('j')); // moves off the title row
+        if let Overlay::Create(f) = &app.overlay {
+            assert_eq!(f.row, 1);
+        } else {
+            panic!("form closed");
+        }
+        // In Insert, j types instead of navigating.
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+        ); // back to title (chip k-nav)
+        handle_key(&mut app, key('i')); // ensure Insert on title
+        handle_key(&mut app, key('j'));
+        if let Overlay::Create(f) = &app.overlay {
+            assert_eq!(f.row, 0, "j types in Insert, does not navigate");
+            assert!(f.title_text().contains('j'));
+        }
+    }
+
     fn enter_key(app: &mut App) {
         handle_key(app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     }
@@ -5509,6 +5608,34 @@ mod tests {
                 KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
             );
             assert!(matches!(app.overlay, Overlay::None));
+        }
+
+        #[test]
+        fn fuzzy_normal_jk_moves_selection() {
+            let (_dir, herd) = temp_herd(&[
+                task("t0", "solo", Status::Hairy, 3, None),
+                task("t1", "aaa", Status::Hairy, 3, None),
+                task("t2", "bbb", Status::Hairy, 3, None),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "D"); // dependency picker on t0
+            esc(&mut app); // Normal
+            let sel0 = match &app.overlay {
+                Overlay::Fuzzy(fp) => fp.sel,
+                _ => panic!("picker closed"),
+            };
+            press(&mut app, "j");
+            let sel1 = match &app.overlay {
+                Overlay::Fuzzy(fp) => fp.sel,
+                _ => panic!("picker closed"),
+            };
+            assert_eq!(sel1, sel0 + 1, "j moves the selection down");
+            press(&mut app, "k");
+            let sel2 = match &app.overlay {
+                Overlay::Fuzzy(fp) => fp.sel,
+                _ => panic!("picker closed"),
+            };
+            assert_eq!(sel2, sel0, "k moves it back up");
         }
 
         #[test]
