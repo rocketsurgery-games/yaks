@@ -1765,23 +1765,29 @@ impl App {
         }
     }
 
-    fn handle_drawer_key(&mut self, k: KeyEvent) {
+    fn handle_drawer_key(&mut self, k: KeyEvent, double_esc: bool) {
         let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
         let (row, is_text) = match &self.overlay {
             Overlay::Drawer(d) => (d.row, d.is_text_row()),
             _ => return,
         };
-        // Global apply / cancel / clear.
-        match k.code {
-            KeyCode::Enter => return self.close_drawer(true),
-            KeyCode::Esc => return self.close_drawer(false),
-            KeyCode::Char('C') => {
-                if let Overlay::Drawer(d) = &mut self.overlay {
-                    d.clear();
-                }
-                return self.drawer_live_preview();
+        // Global apply / cancel / clear. Esc closes the drawer, except on a text
+        // row in vim, where a lone Esc drops the field to Normal (motions); a
+        // Ctrl-C or a rapid double-Esc always closes.
+        let close = (ctrl && k.code == KeyCode::Char('c'))
+            || double_esc
+            || (k.code == KeyCode::Esc && !(self.editor_vim && is_text));
+        if k.code == KeyCode::Enter {
+            return self.close_drawer(true);
+        }
+        if close {
+            return self.close_drawer(false);
+        }
+        if k.code == KeyCode::Char('C') {
+            if let Overlay::Drawer(d) = &mut self.overlay {
+                d.clear();
             }
-            _ => {}
+            return self.drawer_live_preview();
         }
         // Row navigation. On text rows only Tab/arrows/Ctrl move rows (so j/k
         // remain typeable); on chip rows j/k also navigate.
@@ -2276,6 +2282,16 @@ impl App {
         self.request_cancel(dirty, msg);
     }
 
+    /// Whether a key should trigger a single-line field overlay's cancel/close
+    /// path. In vim a lone Esc instead drops the field to Normal (so the
+    /// normal-mode motions are reachable) and only Ctrl-C or a rapid double-Esc
+    /// cancels; emacs keeps the familiar single-Esc-cancels.
+    fn field_cancel(&self, k: KeyEvent, double_esc: bool) -> bool {
+        (k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c'))
+            || double_esc
+            || (k.code == KeyCode::Esc && !self.editor_vim)
+    }
+
     fn handle_overlay_key(&mut self, k: KeyEvent) {
         // An active `:` command line intercepts everything until it resolves.
         if self.cmdline.is_some() {
@@ -2287,7 +2303,7 @@ impl App {
         // can otherwise mean "leave Insert for Normal" without trapping the user.
         let double_esc = k.code == KeyCode::Esc && self.register_double_esc();
         if matches!(self.overlay, Overlay::Drawer(_)) {
-            self.handle_drawer_key(k);
+            self.handle_drawer_key(k, double_esc);
             return;
         }
         if matches!(self.overlay, Overlay::Create(_)) {
@@ -2308,108 +2324,93 @@ impl App {
             let up = k.code == KeyCode::Up || (ctrl && k.code == KeyCode::Char('p'));
             let down = matches!(k.code, KeyCode::Down | KeyCode::Tab)
                 || (ctrl && k.code == KeyCode::Char('n'));
-            match k.code {
-                KeyCode::Esc => {
-                    self.overlay = Overlay::None;
-                    self.notification = Some("cancelled".into());
+            if self.field_cancel(k, double_esc) {
+                self.overlay = Overlay::None;
+                self.notification = Some("cancelled".into());
+            } else if k.code == KeyCode::Enter {
+                if let Overlay::Fuzzy(fp) = std::mem::replace(&mut self.overlay, Overlay::None) {
+                    self.commit_fuzzy(fp);
                 }
-                KeyCode::Enter => {
-                    if let Overlay::Fuzzy(fp) = std::mem::replace(&mut self.overlay, Overlay::None)
-                    {
-                        self.commit_fuzzy(fp);
+            } else if up {
+                if let Overlay::Fuzzy(fp) = &mut self.overlay {
+                    fp.sel = fp.sel.saturating_sub(1);
+                }
+            } else if down {
+                let total = match &self.overlay {
+                    Overlay::Fuzzy(fp) => fuzzy_total(&self.all, fp),
+                    _ => 0,
+                };
+                if let Overlay::Fuzzy(fp) = &mut self.overlay {
+                    if total > 0 {
+                        fp.sel = (fp.sel + 1).min(total - 1);
                     }
                 }
-                _ if up => {
-                    if let Overlay::Fuzzy(fp) = &mut self.overlay {
-                        fp.sel = fp.sel.saturating_sub(1);
-                    }
-                }
-                _ if down => {
-                    let total = match &self.overlay {
-                        Overlay::Fuzzy(fp) => fuzzy_total(&self.all, fp),
-                        _ => 0,
-                    };
-                    if let Overlay::Fuzzy(fp) = &mut self.overlay {
-                        if total > 0 {
-                            fp.sel = (fp.sel + 1).min(total - 1);
-                        }
-                    }
-                }
-                _ => {
-                    if let Overlay::Fuzzy(fp) = &mut self.overlay {
-                        fp.handler.on_key_event(k, &mut fp.query.borrow_mut());
-                        fp.sel = 0;
-                    }
-                }
+            } else if let Overlay::Fuzzy(fp) = &mut self.overlay {
+                fp.handler.on_key_event(k, &mut fp.query.borrow_mut());
+                fp.sel = 0;
             }
             return;
         }
         // Inline search: every keystroke edits the live filter for instant
         // preview; Enter keeps it, Esc restores the pre-search query.
         if matches!(self.overlay, Overlay::Search(_)) {
-            match k.code {
-                KeyCode::Esc => {
-                    let saved = match &self.overlay {
-                        Overlay::Search(sb) => sb.saved.clone(),
-                        _ => None,
-                    };
-                    self.filter.search = saved;
-                    self.overlay = Overlay::None;
-                    self.clamp_cursor();
-                    self.notification = Some("search cleared".into());
+            if self.field_cancel(k, double_esc) {
+                let saved = match &self.overlay {
+                    Overlay::Search(sb) => sb.saved.clone(),
+                    _ => None,
+                };
+                self.filter.search = saved;
+                self.overlay = Overlay::None;
+                self.clamp_cursor();
+                self.notification = Some("search cleared".into());
+            } else if k.code == KeyCode::Enter {
+                let q = match &self.overlay {
+                    Overlay::Search(sb) => sb.query_text(),
+                    _ => String::new(),
+                };
+                self.overlay = Overlay::None;
+                self.notification = Some(if q.is_empty() {
+                    "search cleared".into()
+                } else {
+                    format!("filter: {q}")
+                });
+            } else {
+                if let Overlay::Search(sb) = &mut self.overlay {
+                    sb.handler.on_key_event(k, &mut sb.query.borrow_mut());
                 }
-                KeyCode::Enter => {
-                    let q = match &self.overlay {
-                        Overlay::Search(sb) => sb.query_text(),
-                        _ => String::new(),
-                    };
-                    self.overlay = Overlay::None;
-                    self.notification = Some(if q.is_empty() {
-                        "search cleared".into()
-                    } else {
-                        format!("filter: {q}")
-                    });
-                }
-                _ => {
-                    if let Overlay::Search(sb) = &mut self.overlay {
-                        sb.handler.on_key_event(k, &mut sb.query.borrow_mut());
-                    }
-                    let q = match &self.overlay {
-                        Overlay::Search(sb) => sb.query_text(),
-                        _ => String::new(),
-                    };
-                    self.filter.search = if q.is_empty() { None } else { Some(q) };
-                    self.clamp_cursor();
-                }
+                let q = match &self.overlay {
+                    Overlay::Search(sb) => sb.query_text(),
+                    _ => String::new(),
+                };
+                self.filter.search = if q.is_empty() { None } else { Some(q) };
+                self.clamp_cursor();
             }
             return;
         }
         // Detail-pane find: live-highlight matches; Enter keeps, Esc restores.
         if matches!(self.overlay, Overlay::DetailFind(_)) {
-            match k.code {
-                KeyCode::Esc => {
-                    let saved = match &self.overlay {
-                        Overlay::DetailFind(sb) => sb.saved.clone(),
-                        _ => None,
-                    };
-                    self.detail_find = saved;
-                    self.overlay = Overlay::None;
+            if self.field_cancel(k, double_esc) {
+                let saved = match &self.overlay {
+                    Overlay::DetailFind(sb) => sb.saved.clone(),
+                    _ => None,
+                };
+                self.detail_find = saved;
+                self.overlay = Overlay::None;
+            } else if k.code == KeyCode::Enter {
+                self.overlay = Overlay::None;
+            } else {
+                if let Overlay::DetailFind(sb) = &mut self.overlay {
+                    sb.handler.on_key_event(k, &mut sb.query.borrow_mut());
                 }
-                KeyCode::Enter => self.overlay = Overlay::None,
-                _ => {
-                    if let Overlay::DetailFind(sb) = &mut self.overlay {
-                        sb.handler.on_key_event(k, &mut sb.query.borrow_mut());
-                    }
-                    let q = match &self.overlay {
-                        Overlay::DetailFind(sb) => sb.query_text(),
-                        _ => String::new(),
-                    };
-                    self.detail_find = if q.is_empty() { None } else { Some(q) };
-                    self.detail_match = 0;
-                    let m = self.detail_find_matches();
-                    if let Some(first) = m.first() {
-                        self.detail_scroll = first.0 as u16;
-                    }
+                let q = match &self.overlay {
+                    Overlay::DetailFind(sb) => sb.query_text(),
+                    _ => String::new(),
+                };
+                self.detail_find = if q.is_empty() { None } else { Some(q) };
+                self.detail_match = 0;
+                let m = self.detail_find_matches();
+                if let Some(first) = m.first() {
+                    self.detail_scroll = first.0 as u16;
                 }
             }
             return;
@@ -4193,11 +4194,17 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         );
         return;
     }
-    // Drawer help hint.
+    // Drawer help hint. In vim a lone Esc on a text row drops it to Normal, so
+    // cancel is a double-Esc or Ctrl-C; emacs cancels on a plain Esc.
     if matches!(&app.overlay, Overlay::Drawer(_)) {
+        let cancel = if app.editor_vim {
+            "EscEsc/Ctrl-C cancel"
+        } else {
+            "Esc cancel"
+        };
         frame.render_widget(
             Paragraph::new(Span::styled(
-                "↑↓/Tab rows · ←→ chips · Space toggle · C clear · Enter apply · Esc cancel",
+                format!("↑↓/Tab rows · ←→ chips · Space toggle · C clear · Enter apply · {cancel}"),
                 Style::new().fg(Color::DarkGray),
             )),
             area,
@@ -4852,14 +4859,50 @@ mod tests {
     }
 
     #[test]
-    fn inline_search_esc_restores_previous() {
+    fn inline_search_ctrl_c_restores_previous() {
+        // In vim a lone Esc enters Normal, so cancel-and-restore is Ctrl-C.
         let mut app = sample();
         handle_key(&mut app, key('/'));
         typ(&mut app, "zzz");
         assert_eq!(app.filter.search.as_deref(), Some("zzz"));
-        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
         assert!(matches!(app.overlay, Overlay::None));
         assert!(app.filter.search.is_none());
+    }
+
+    #[test]
+    fn inline_search_esc_enters_normal_in_vim() {
+        let mut app = sample();
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "zz");
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        // Still open, now modal: the live filter is untouched.
+        assert!(matches!(app.overlay, Overlay::Search(_)));
+        if let Overlay::Search(sb) = &app.overlay {
+            assert_eq!(sb.query.borrow().mode, EditorMode::Normal);
+        }
+        assert_eq!(app.filter.search.as_deref(), Some("zz"));
+    }
+
+    #[test]
+    fn drawer_text_row_esc_enters_normal_in_vim() {
+        let mut app = sample();
+        handle_key(&mut app, key('f')); // open filter drawer
+        for _ in 0..3 {
+            handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        }
+        typ(&mut app, "ui"); // into the labels text row
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(
+            matches!(app.overlay, Overlay::Drawer(_)),
+            "a lone Esc on a text row stays in the drawer"
+        );
+        if let Overlay::Drawer(d) = &app.overlay {
+            assert_eq!(d.labels.borrow().mode, EditorMode::Normal);
+        }
     }
 
     fn enter_key(app: &mut App) {
@@ -5265,15 +5308,31 @@ mod tests {
     }
 
     #[test]
-    fn detail_find_esc_restores() {
+    fn detail_find_ctrl_c_restores() {
         let mut app = linked();
         enter_key(&mut app);
         handle_key(&mut app, key('/'));
         typ(&mut app, "zzz");
         assert_eq!(app.detail_find.as_deref(), Some("zzz"));
-        esc_key(&mut app);
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
         assert!(matches!(app.overlay, Overlay::None));
         assert!(app.detail_find.is_none());
+    }
+
+    #[test]
+    fn detail_find_esc_enters_normal_in_vim() {
+        let mut app = linked();
+        enter_key(&mut app);
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "zz");
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(app.overlay, Overlay::DetailFind(_)));
+        if let Overlay::DetailFind(sb) = &app.overlay {
+            assert_eq!(sb.query.borrow().mode, EditorMode::Normal);
+        }
     }
 
     #[test]
@@ -5429,6 +5488,27 @@ mod tests {
             app.set_view(3);
             assert_eq!(app.active_view().key, "recent");
             assert!(app.rows().iter().all(|r| r.task.id != "t1"));
+        }
+
+        #[test]
+        fn fuzzy_picker_esc_enters_normal_then_ctrl_c_cancels() {
+            let (_dir, herd) = temp_herd(&[
+                task("t0", "solo", Status::Hairy, 3, None),
+                task("t1", "other", Status::Hairy, 3, None),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "D"); // dependency picker on the selected task
+            assert!(matches!(app.overlay, Overlay::Fuzzy(_)));
+            esc(&mut app); // a lone Esc drops the query to Normal, not cancel
+            assert!(matches!(app.overlay, Overlay::Fuzzy(_)));
+            if let Overlay::Fuzzy(fp) = &app.overlay {
+                assert_eq!(fp.query.borrow().mode, EditorMode::Normal);
+            }
+            handle_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            );
+            assert!(matches!(app.overlay, Overlay::None));
         }
 
         #[test]
