@@ -748,7 +748,11 @@ impl App {
     /// Live constructor: loads the current herd view and keeps the handle so
     /// mutations can re-query after each change.
     pub fn with_herd(herd: Herd) -> Result<Self> {
-        let all = herd.list(FilterSpec::default(), false)?;
+        // Load every status incl. dead. The tree/flat views scope down to what
+        // each shows, but keeping dead in the model lets the ancestor walk root
+        // a live yak beneath a slaughtered parent, lets a Dead filter surface
+        // slaughtered yaks, and treats a dep on a dead yak as resolved (fe00).
+        let all = herd.list(FilterSpec::default(), true)?;
         let cfg = herd.config();
         let vim = cfg.vim_mode;
         let ui = cache::load(herd.root());
@@ -818,7 +822,7 @@ impl App {
     /// Re-query the herd view after a mutation and keep the cursor in range.
     fn reload(&mut self) {
         if let Some(h) = &self.herd {
-            if let Ok(all) = h.list(FilterSpec::default(), false) {
+            if let Ok(all) = h.list(FilterSpec::default(), true) {
                 self.all = all;
             }
         }
@@ -836,7 +840,7 @@ impl App {
     fn reload_preserving_selection(&mut self) {
         let sel = self.selected_id();
         if let Some(h) = &self.herd {
-            if let Ok(all) = h.list(FilterSpec::default(), false) {
+            if let Ok(all) = h.list(FilterSpec::default(), true) {
                 self.all = all;
             }
         }
@@ -900,10 +904,16 @@ impl App {
     fn flat_rows(&self) -> Vec<tree::Row<'_>> {
         let v = self.active_view();
         let resolved = filter::resolved_ids(&self.all);
+        // Flat views (Recent/custom) span all statuses, so exclude dead unless
+        // the live filter explicitly asks for it (fe00): the model now carries
+        // dead, but a working list shouldn't surface slaughtered yaks by default.
+        let want_dead = self.filter.statuses.contains(&Status::Dead);
         let mut matched: Vec<&Task> = self
             .all
             .iter()
-            .filter(|t| self.filter.matches(t, &resolved))
+            .filter(|t| {
+                (want_dead || t.status != Status::Dead) && self.filter.matches(t, &resolved)
+            })
             .collect();
         let sort_by = v.sort_by.unwrap_or(view::SortField::Updated);
         matched.sort_by(|a, b| sort_key(a, sort_by).cmp(&sort_key(b, sort_by)));
@@ -5394,9 +5404,31 @@ mod tests {
             let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
             let mut app = App::with_herd(herd).unwrap();
             press(&mut app, "Xy");
-            // Dead is excluded from the default view, so it drops out of `all`.
-            assert!(app.task("t0").is_none());
+            // Dead stays in the model (so deps/ancestors still resolve) but is
+            // hidden from the default Hairy view.
+            assert_eq!(app.task("t0").unwrap().status, Status::Dead);
+            assert!(app.rows().iter().all(|r| r.task.id != "t0"));
             assert_eq!(app.notification.as_deref(), Some("slaughtered t0"));
+        }
+
+        #[test]
+        fn dead_is_loaded_but_hidden_until_filtered() {
+            let (_dir, herd) = temp_herd(&[
+                task("t0", "alive", Status::Hairy, 3, None),
+                task("t1", "slain", Status::Dead, 3, None),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            // Loaded into the model, but not shown on the default Hairy view.
+            assert_eq!(app.task("t1").unwrap().status, Status::Dead);
+            assert!(app.rows().iter().all(|r| r.task.id != "t1"));
+            // Filtering to Dead surfaces it in the tree.
+            app.filter.statuses = vec![Status::Dead];
+            let ids: Vec<&str> = app.rows().iter().map(|r| r.task.id.as_str()).collect();
+            assert_eq!(ids, vec!["t1"]);
+            // Recent (flat) also hides dead by default.
+            app.set_view(3);
+            assert_eq!(app.active_view().key, "recent");
+            assert!(app.rows().iter().all(|r| r.task.id != "t1"));
         }
 
         #[test]
