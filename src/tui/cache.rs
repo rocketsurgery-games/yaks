@@ -1,15 +1,28 @@
-//! Per-user, per-herd UI-state cache. This is *rebuildable* state (currently
-//! the set of collapsed tree ids), so it lives under `$XDG_CACHE_HOME`
-//! (default `~/.cache`) at `yaks/<slug>.json`, never in the herd and never
-//! committed.
+//! Per-user, per-herd UI-state cache. This is *rebuildable* state (the set of
+//! collapsed tree ids, plus per-view herd-scope overrides), so it lives under
+//! `$XDG_CACHE_HOME` (default `~/.cache`) at `yaks/<slug>.json`, never in the
+//! herd and never committed.
 //!
 //! The slug is a stable hash of the absolute herd root. A slug change merely
-//! resets the cache (collapsed rows re-expand), which is harmless for
-//! rebuildable state.
+//! resets the cache (collapsed rows re-expand, herd overrides revert to auto),
+//! which is harmless for rebuildable state.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::tui::view::HerdScope;
+
+/// The full rebuildable UI state persisted per herd. Fields are independent;
+/// both are written together so neither clobbers the other.
+#[derive(Default, Clone, PartialEq, Debug)]
+pub struct UiState {
+    /// Ids of collapsed tree parents.
+    pub collapsed: HashSet<String>,
+    /// Per-view herd-scope overrides, keyed by `View::key`. A missing entry
+    /// means the view inherits [`HerdScope::DEFAULT`] ("auto").
+    pub herd: HashMap<String, HerdScope>,
+}
 
 /// FNV-1a 64-bit over the absolute root path → 12 hex chars.
 fn slug(root: &Path) -> String {
@@ -41,39 +54,59 @@ pub fn ui_state_path(root: &Path) -> PathBuf {
         .join(format!("{}.json", slug(root)))
 }
 
-pub fn load_collapsed(root: &Path) -> HashSet<String> {
+pub fn load(root: &Path) -> UiState {
     load_from(&ui_state_path(root))
 }
 
-pub fn save_collapsed(root: &Path, collapsed: &HashSet<String>) {
-    save_to(&ui_state_path(root), collapsed);
+pub fn save(root: &Path, state: &UiState) {
+    save_to(&ui_state_path(root), state);
 }
 
-fn load_from(path: &Path) -> HashSet<String> {
+fn load_from(path: &Path) -> UiState {
     let Ok(text) = fs::read_to_string(path) else {
-        return HashSet::new();
+        return UiState::default();
     };
-    match serde_json::from_str::<serde_json::Value>(&text) {
-        Ok(v) => v
-            .get("collapsed")
-            .and_then(|c| c.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|x| x.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        Err(_) => HashSet::new(),
-    }
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return UiState::default();
+    };
+    let collapsed = v
+        .get("collapsed")
+        .and_then(|c| c.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let herd = v
+        .get("herd")
+        .and_then(|h| h.as_object())
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, val)| {
+                    val.as_str()
+                        .and_then(HerdScope::parse)
+                        .map(|s| (k.clone(), s))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    UiState { collapsed, herd }
 }
 
-fn save_to(path: &Path, collapsed: &HashSet<String>) {
+fn save_to(path: &Path, state: &UiState) {
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    let mut ids: Vec<&String> = collapsed.iter().collect();
+    let mut ids: Vec<&String> = state.collapsed.iter().collect();
     ids.sort();
-    let payload = serde_json::json!({ "collapsed": ids });
+    let mut keys: Vec<&String> = state.herd.keys().collect();
+    keys.sort();
+    let mut herd = serde_json::Map::new();
+    for k in keys {
+        herd.insert(k.clone(), serde_json::Value::from(state.herd[k].as_str()));
+    }
+    let payload = serde_json::json!({ "collapsed": ids, "herd": herd });
     let _ = fs::write(path, payload.to_string());
 }
 
@@ -94,17 +127,30 @@ mod tests {
     #[test]
     fn round_trip_collapsed() {
         let path = temp_file();
-        let mut set = HashSet::new();
-        set.insert("yak-0001".to_string());
-        set.insert("yak-0002".to_string());
-        save_to(&path, &set);
-        assert_eq!(load_from(&path), set);
+        let mut st = UiState::default();
+        st.collapsed.insert("yak-0001".to_string());
+        st.collapsed.insert("yak-0002".to_string());
+        save_to(&path, &st);
+        assert_eq!(load_from(&path), st);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn round_trip_herd_overrides() {
+        let path = temp_file();
+        let mut st = UiState::default();
+        st.herd.insert("status:hairy".to_string(), HerdScope::All);
+        st.herd
+            .insert("status:shaving".to_string(), HerdScope::Lone);
+        save_to(&path, &st);
+        assert_eq!(load_from(&path).herd, st.herd);
         let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn missing_file_is_empty() {
-        assert!(load_from(Path::new("/nonexistent/yaksrs/cache.json")).is_empty());
+        let st = load_from(Path::new("/nonexistent/yaksrs/cache.json"));
+        assert!(st.collapsed.is_empty() && st.herd.is_empty());
     }
 
     #[test]

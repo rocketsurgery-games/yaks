@@ -6,7 +6,7 @@ expression: "draw(&app, 72, 14)"
 
  a0   p2 task     🦬  Ro │ Add dependency to a0  (3 matches)
    a1 p3 task     🦬  Ch │ 🪒   b0 Root B shaving
-   a2 p3 task     🐑  Ch │ 🦬   a1 Child A1
+                        │ 🦬   a1 Child A1
                         │ 🐑   a2 Child A2 done
                         │
                         │

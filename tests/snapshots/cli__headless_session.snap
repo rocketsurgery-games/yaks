@@ -14,7 +14,7 @@ expression: out
 
 
 
-Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state
+Tab:view  j/k:move  l:detail  h:herd  v:views  c/C:new  E:edit  X:del  S
 === end ===
 === frame 1 · 72x12 · focus=list · view=🦬 Hairy · cursor=1 · rows=4 · sel=fix-0003 · blocked=[fix-0004] · collapsed=0 · filter=(all) · overlay=none ===
  🦬  Hairy (3)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (5)   ⭐  Starr
@@ -28,5 +28,5 @@ Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state
 
 
 
-Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state
+Tab:view  j/k:move  l:detail  h:herd  v:views  c/C:new  E:edit  X:del  S
 === end ===

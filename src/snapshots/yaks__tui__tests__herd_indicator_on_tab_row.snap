@@ -1,0 +1,12 @@
+---
+source: src/tui.rs
+expression: "draw(&sample(), 100, 8)"
+---
+ 🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starred (0)      herd: ~remaining
+
+ a0   p2 task     🦬  Root A
+   a1 p3 task     🦬  Child A1
+
+
+
+Tab:view  j/k:move  l:detail  h:herd  v:views  c/C:new  E:edit  X:del  S:state  D:dep  f:filter  /:s

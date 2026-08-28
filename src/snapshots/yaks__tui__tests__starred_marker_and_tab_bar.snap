@@ -6,7 +6,6 @@ expression: "draw(&app, 72, 14)"
 
  a0   p2 task     🦬  Root A                                           ⭐
    a1 p3 task     🦬  Child A1
-   a2 p3 task     🐑  Child A2 done
 
 
 
@@ -15,4 +14,5 @@ expression: "draw(&app, 72, 14)"
 
 
 
-Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state
+
+Tab:view  j/k:move  l:detail  h:herd  v:views  c/C:new  E:edit  X:del  S

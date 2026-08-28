@@ -46,6 +46,54 @@ pub enum SortDir {
     Desc,
 }
 
+/// How much of an anchor yak's family a tree view pulls in *below* the anchor.
+/// (Ancestors are always shown to root the chain; this governs descendants.)
+/// A per-view override of this is persisted in the UI-state cache; the absence
+/// of an override means "auto" — inherit [`HerdScope::DEFAULT`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HerdScope {
+    /// No non-anchor descendants: just the anchors and the ancestors rooting them.
+    Lone,
+    /// Descendants with open work (hairy/shaving), plus the completed nodes that
+    /// connect them back to their anchor. Fully-shorn subtrees are dropped.
+    Remaining,
+    /// Every descendant, any status (completed ones shown dimmed).
+    All,
+}
+
+impl HerdScope {
+    /// The global default applied to any view without an explicit override.
+    pub const DEFAULT: HerdScope = HerdScope::Remaining;
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HerdScope::Lone => "lone",
+            HerdScope::Remaining => "remaining",
+            HerdScope::All => "all",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<HerdScope> {
+        Some(match s {
+            "lone" => HerdScope::Lone,
+            "remaining" => HerdScope::Remaining,
+            "all" => HerdScope::All,
+            _ => return None,
+        })
+    }
+
+    /// The `h`-key cycle: `auto` (None) -> lone -> remaining -> all -> `auto`.
+    /// `None` means "clear the override and inherit the global default".
+    pub fn cycle(cur: Option<HerdScope>) -> Option<HerdScope> {
+        match cur {
+            None => Some(HerdScope::Lone),
+            Some(HerdScope::Lone) => Some(HerdScope::Remaining),
+            Some(HerdScope::Remaining) => Some(HerdScope::All),
+            Some(HerdScope::All) => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct View {
     pub name: String,

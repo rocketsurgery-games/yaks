@@ -6,7 +6,7 @@ expression: "draw(&app, 72, 16)"
 
  a0   p2 task     🦬  Ro │ Views
    a1 p3 task     🦬  Ch │ ▸ 📌  🦬  Hairy  (2)  🔒
-   a2 p3 task     🐑  Ch │   📌  🪒  Shaving  (1)  🔒
+                        │   📌  🪒  Shaving  (1)  🔒
                         │   📌  🐑  Shorn  (1)  🔒
                         │   📌  🕒  Recent  (4)  🔒
                         │   📌  ⭐  Starred  (0)  🔒

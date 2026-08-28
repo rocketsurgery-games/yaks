@@ -18,7 +18,7 @@ mod views_store;
 // (the headless driver lives in the `toque` crate, invoked from `main`).
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
@@ -677,6 +677,10 @@ pub struct App {
     nav_back: Vec<String>,
     nav_fwd: Vec<String>,
     collapsed: HashSet<String>,
+    /// Per-view herd-scope overrides, keyed by `View::key` (persisted in the
+    /// UI-state cache). A missing entry means the view inherits the global
+    /// default ("auto"). See [`view::HerdScope`].
+    herd_scope: HashMap<String, view::HerdScope>,
     /// The live view filter applied by the tree (re-colors + prunes).
     filter: FilterSpec,
     /// Approx. list viewport height, refreshed each loop for paging math.
@@ -726,6 +730,7 @@ impl App {
             nav_back: Vec::new(),
             nav_fwd: Vec::new(),
             collapsed: HashSet::new(),
+            herd_scope: HashMap::new(),
             filter,
             page: 10,
             detail_page: 10,
@@ -746,12 +751,13 @@ impl App {
         let all = herd.list(FilterSpec::default(), false)?;
         let cfg = herd.config();
         let vim = cfg.vim_mode;
-        let collapsed = cache::load_collapsed(herd.root());
+        let ui = cache::load(herd.root());
         let views = views_store::load_views(herd.root());
         let working_set = views_store::load_working_set(herd.root());
         let mut app = App::new(all);
         app.editor_vim = vim;
-        app.collapsed = collapsed;
+        app.collapsed = ui.collapsed;
+        app.herd_scope = ui.herd;
         app.filter = clone_spec(&views[0].spec);
         app.views = views;
         app.working_set = working_set;
@@ -760,11 +766,53 @@ impl App {
         Ok(app)
     }
 
-    /// Persist the (rebuildable) collapsed-tree state to the per-user cache.
-    fn save_collapsed(&self) {
+    /// Persist the (rebuildable) UI state — collapsed rows and herd-scope
+    /// overrides — to the per-user cache.
+    fn save_ui_state(&self) {
         if let Some(h) = &self.herd {
-            cache::save_collapsed(h.root(), &self.collapsed);
+            cache::save(
+                h.root(),
+                &cache::UiState {
+                    collapsed: self.collapsed.clone(),
+                    herd: self.herd_scope.clone(),
+                },
+            );
         }
+    }
+
+    /// The herd scope in effect for `v`: its persisted override, else the global
+    /// default. Only meaningful for tree views.
+    fn resolved_herd_scope(&self, v: &view::View) -> view::HerdScope {
+        self.herd_scope
+            .get(&v.key)
+            .copied()
+            .unwrap_or(view::HerdScope::DEFAULT)
+    }
+
+    /// Cycle the active view's herd scope (the `h` key): auto -> lone ->
+    /// remaining -> all -> auto. Flat/working-set views have no tree, so it's a
+    /// no-op there with a hint.
+    fn cycle_herd_scope(&mut self) {
+        let v = self.active_view();
+        if v.is_flat() || v.key == "working-set" {
+            self.notification = Some("herd scope applies to tree views".into());
+            return;
+        }
+        let key = v.key.clone();
+        let next = view::HerdScope::cycle(self.herd_scope.get(&key).copied());
+        match next {
+            Some(s) => {
+                self.herd_scope.insert(key, s);
+            }
+            None => {
+                self.herd_scope.remove(&key);
+            }
+        }
+        self.save_ui_state();
+        self.notification = Some(match next {
+            Some(s) => format!("herd: {}", s.as_str()),
+            None => format!("herd: ~{}", view::HerdScope::DEFAULT.as_str()),
+        });
     }
 
     /// Re-query the herd view after a mutation and keep the cursor in range.
@@ -812,7 +860,7 @@ impl App {
                 .filter(|id| self.task(id).is_some())
                 .count();
         }
-        tree::build(&self.all, &v.spec)
+        tree::build(&self.all, &v.spec, self.resolved_herd_scope(v))
             .iter()
             .filter(|r| !r.ghost)
             .count()
@@ -877,7 +925,8 @@ impl App {
         if v.is_flat() {
             return self.flat_rows();
         }
-        let flat = tree::build(&self.all, &self.filter);
+        let scope = self.resolved_herd_scope(v);
+        let flat = tree::build(&self.all, &self.filter, scope);
         tree::apply_collapse(flat, &self.collapsed)
     }
 
@@ -1124,7 +1173,7 @@ impl App {
                 if !self.collapsed.remove(&id) {
                     self.collapsed.insert(id);
                 }
-                self.save_collapsed();
+                self.save_ui_state();
             }
         }
     }
@@ -1804,7 +1853,7 @@ impl App {
             cur = self.task(&pid).and_then(|t| t.parent.clone());
         }
         if changed {
-            self.save_collapsed();
+            self.save_ui_state();
         }
     }
 
@@ -2793,6 +2842,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
                     app.notification = Some("reverted to view".into());
                 }
             }
+            KeyCode::Char('h') => app.cycle_herd_scope(),
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
                 if app.selected().is_some() {
                     app.focus = Focus::Detail;
@@ -3688,10 +3738,34 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
             Style::new().fg(Color::Yellow),
         ));
     }
+    let tabs_w = disp_width(&spans.iter().map(|s| s.content.as_ref()).collect::<String>());
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
-    // Notification, right-aligned on the tab row (Python placement).
-    if let Some(n) = &app.notification {
-        let w = (disp_width(n) as u16).min(area.width);
+    // Right-aligned slot on the tab row: a transient notification takes it when
+    // present (Python placement); otherwise the persistent herd-scope indicator
+    // for tree views. `~` marks a view inheriting the global default (auto) vs
+    // an explicit per-view override. The indicator yields rather than overwrite
+    // tabs when the strip is too wide to fit it.
+    let right: Option<(String, Style)> = if let Some(n) = &app.notification {
+        Some((
+            n.clone(),
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ))
+    } else {
+        let av = app.active_view();
+        if av.is_flat() || av.key == "working-set" {
+            None
+        } else {
+            let (marker, val) = match app.herd_scope.get(&av.key) {
+                Some(s) => ("", s.as_str()),
+                None => ("~", view::HerdScope::DEFAULT.as_str()),
+            };
+            let label = format!("herd: {marker}{val}");
+            let fits = tabs_w + disp_width(&label) < area.width as usize;
+            fits.then(|| (label, Style::new().fg(Color::DarkGray)))
+        }
+    };
+    if let Some((text, style)) = right {
+        let w = (disp_width(&text) as u16).min(area.width);
         if w > 0 {
             let rect = Rect {
                 x: area.x + area.width - w,
@@ -3699,13 +3773,7 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
                 width: w,
                 height: 1,
             };
-            frame.render_widget(
-                Paragraph::new(Span::styled(
-                    n.clone(),
-                    Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                )),
-                rect,
-            );
+            frame.render_widget(Paragraph::new(Span::styled(text, style)), rect);
         }
     }
 }
@@ -4221,7 +4289,7 @@ fn help_hint(app: &App) -> String {
     };
     match app.focus {
         Focus::List => format!(
-            "Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state  D:dep  {filter_hint}  ?:help"
+            "Tab:view  j/k:move  l:detail  h:herd  v:views  c/C:new  E:edit  X:del  S:state  D:dep  {filter_hint}  ?:help"
         ),
         Focus::Detail => format!(
             "h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S:state  {filter_hint}  q:quit"
@@ -4320,8 +4388,19 @@ mod tests {
 
     #[test]
     fn tree_with_ghost_family() {
-        // Hairy tab: Root A + A1 (focus), A2 (ghost, shorn) pulled in as family.
-        insta::assert_snapshot!(draw(&sample(), 72, 14));
+        // Hairy tab under `all` scope: Root A + A1 (focus), A2 (ghost, shorn)
+        // pulled in as family.
+        let mut app = sample();
+        app.herd_scope
+            .insert("status:hairy".into(), view::HerdScope::All);
+        insta::assert_snapshot!(draw(&app, 72, 14));
+    }
+
+    #[test]
+    fn herd_indicator_on_tab_row() {
+        // Wide enough for the right-aligned herd indicator to sit past the tabs.
+        // The default Hairy view inherits the global default: shown as `~remaining`.
+        insta::assert_snapshot!(draw(&sample(), 100, 8));
     }
 
     #[test]
@@ -4333,7 +4412,10 @@ mod tests {
 
     #[test]
     fn build_universe_pulls_ghost_descendants() {
-        let app = sample();
+        let mut app = sample();
+        // `all` scope pulls in every descendant, including the completed a2.
+        app.herd_scope
+            .insert("status:hairy".into(), view::HerdScope::All);
         let rows = app.rows();
         let ids: Vec<&str> = rows.iter().map(|r| r.task.id.as_str()).collect();
         assert_eq!(ids, vec!["a0", "a1", "a2"]); // b0 (shaving) excluded from Hairy tab
@@ -4341,6 +4423,14 @@ mod tests {
         assert!(a2.ghost, "shorn child should be a ghost in the Hairy tab");
         let a0 = rows.iter().find(|r| r.task.id == "a0").unwrap();
         assert!(a0.has_children && !a0.ghost);
+    }
+
+    #[test]
+    fn herd_remaining_default_hides_completed_leaf() {
+        // The default scope (remaining) drops the shorn leaf a2; open a1 stays.
+        let app = sample();
+        let ids: Vec<&str> = app.rows().iter().map(|r| r.task.id.as_str()).collect();
+        assert_eq!(ids, vec!["a0", "a1"]);
     }
 
     // -- overlay rendering (herd-less; opening only needs `selected`) ------

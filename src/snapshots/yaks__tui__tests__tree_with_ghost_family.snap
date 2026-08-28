@@ -1,6 +1,6 @@
 ---
 source: src/tui.rs
-expression: "draw(&sample(), 72, 14)"
+expression: "draw(&app, 72, 14)"
 ---
  🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starr
 
@@ -15,4 +15,4 @@ expression: "draw(&sample(), 72, 14)"
 
 
 
-Tab:view  j/k:move  l:detail  v:views  c/C:new  E:edit  X:del  S:state
+Tab:view  j/k:move  l:detail  h:herd  v:views  c/C:new  E:edit  X:del  S

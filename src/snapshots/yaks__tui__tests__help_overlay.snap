@@ -6,7 +6,7 @@ expression: "draw(&app, 72, 16)"
 
  a0   p2 task     🦬  Ro │ Help — keys
    a1 p3 task     🦬  Ch │ Movement
-   a2 p3 task     🐑  Ch │   j / k  ↓ / ↑  Move cursor
+                        │   j / k  ↓ / ↑  Move cursor
                         │   d / u         Half-page down / up
                         │   PgDn / PgUp   Full-page down / up
                         │   g / G         Top / bottom

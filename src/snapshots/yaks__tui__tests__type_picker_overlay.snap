@@ -6,7 +6,7 @@ expression: "draw(&app, 72, 14)"
 
  a0   p2 task     🦬  Root A
    a1 p3 task     🦬  Child A1
-   a2 p3 task     🐑  Child A2 done
+
 
 
 

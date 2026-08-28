@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::filter::{self, FilterSpec};
 use crate::model::{Status, Task};
+use crate::tui::view::HerdScope;
 
 pub struct Row<'a> {
     pub task: &'a Task,
@@ -64,7 +65,7 @@ fn cmp_child(a: &Task, b: &Task) -> Ordering {
 /// their family is dimmed context. With a content filter, matches anywhere in
 /// that family become the focus and non-matching ancestors are dimmed to root
 /// them; everything else is pruned. Mirrors Python `tree.build_tree`.
-pub fn build<'a>(all: &'a [Task], spec: &FilterSpec) -> Vec<Row<'a>> {
+pub fn build<'a>(all: &'a [Task], spec: &FilterSpec, herd: HerdScope) -> Vec<Row<'a>> {
     let by_id: HashMap<&str, &Task> = all.iter().map(|t| (t.id.as_str(), t)).collect();
 
     let mut children_of: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -108,7 +109,9 @@ pub fn build<'a>(all: &'a [Task], spec: &FilterSpec) -> Vec<Row<'a>> {
         out
     };
 
-    // universe = anchors + ancestors (up) + descendants (down), any status.
+    // universe = anchors + ancestors (up) + all descendants (down), any status.
+    // It's the search space for content matches; herd scope then decides how
+    // much of it actually renders.
     let mut universe: HashSet<&str> = anchors.clone();
     for &a in &anchors {
         universe.extend(ancestors_of(a));
@@ -124,23 +127,27 @@ pub fn build<'a>(all: &'a [Task], spec: &FilterSpec) -> Vec<Row<'a>> {
         }
     }
 
-    // Content filter re-colors within the universe: matches become the focus,
-    // their ancestors join as dimmed context, and non-members are pruned.
-    let (focus, members): (HashSet<&str>, HashSet<&str>) = if spec.content_active() {
+    // Seeds (the bright focus): content matches anywhere in the family when a
+    // filter is active, else the anchors themselves.
+    let focus: HashSet<&str> = if spec.content_active() {
         let resolved = filter::resolved_ids(all);
-        let focus: HashSet<&str> = universe
+        universe
             .iter()
             .copied()
             .filter(|&tid| spec.matches(by_id[tid], &resolved))
-            .collect();
-        let mut members = focus.clone();
-        for &tid in &focus {
-            members.extend(ancestors_of(tid));
-        }
-        (focus, members)
+            .collect()
     } else {
-        (anchors.clone(), universe.clone())
+        anchors.clone()
     };
+
+    // members = seeds + ancestors (always, to root the chain) + herd-scoped
+    // descendants. One rule for both the filtered and unfiltered paths, so
+    // turning on a filter no longer silently drops descendant context.
+    let mut members: HashSet<&str> = focus.clone();
+    for &s in &focus {
+        members.extend(ancestors_of(s));
+    }
+    members.extend(herd_descendants(&focus, herd, &children_of, &by_id));
 
     // roots = members whose parent is not itself a member.
     let mut roots: Vec<&str> = members
@@ -170,6 +177,51 @@ pub fn build<'a>(all: &'a [Task], spec: &FilterSpec) -> Vec<Row<'a>> {
         flatten(r, 0, &by_id, &children_of, &members, &focus, &mut out);
     }
     out
+}
+
+/// The descendant rows a tree view pulls in under its `seeds`, per herd scope.
+/// `Lone` yields nothing; `All` yields the full descendant closure; `Remaining`
+/// keeps descendants with open work (hairy/shaving) plus the completed nodes
+/// that connect them back to a seed, dropping fully-shorn subtrees.
+fn herd_descendants<'a>(
+    seeds: &HashSet<&'a str>,
+    herd: HerdScope,
+    children_of: &HashMap<&'a str, Vec<&'a str>>,
+    by_id: &HashMap<&'a str, &'a Task>,
+) -> HashSet<&'a str> {
+    if herd == HerdScope::Lone {
+        return HashSet::new();
+    }
+    // Full descendant closure of the seeds (any status).
+    let mut full: HashSet<&str> = HashSet::new();
+    let mut stack: Vec<&str> = seeds.iter().copied().collect();
+    while let Some(cur) = stack.pop() {
+        if let Some(kids) = children_of.get(cur) {
+            for &c in kids {
+                if !seeds.contains(c) && full.insert(c) {
+                    stack.push(c);
+                }
+            }
+        }
+    }
+    if herd == HerdScope::All {
+        return full;
+    }
+    // Remaining: start from the open descendants, then walk each one up toward
+    // its seed, keeping the completed nodes in between as (dim) connectors.
+    let is_open = |id: &str| matches!(by_id[id].status, Status::Hairy | Status::Shaving);
+    let mut keep: HashSet<&str> = full.iter().copied().filter(|&d| is_open(d)).collect();
+    let open: Vec<&str> = keep.iter().copied().collect();
+    for od in open {
+        let mut pid = by_id[od].parent.as_deref();
+        while let Some(p) = pid {
+            if seeds.contains(p) || !full.contains(p) || !keep.insert(p) {
+                break;
+            }
+            pid = by_id[p].parent.as_deref();
+        }
+    }
+    keep
 }
 
 fn flatten<'a>(
@@ -267,7 +319,7 @@ mod tests {
             statuses: vec![Status::Hairy],
             ..Default::default()
         };
-        let flat = build(&all, &spec);
+        let flat = build(&all, &spec, HerdScope::All);
         assert_eq!(flat.len(), 3);
         let collapsed: HashSet<String> = ["a".to_string()].into_iter().collect();
         let vis = apply_collapse(flat, &collapsed);
@@ -294,11 +346,83 @@ mod tests {
             search: Some("needle".into()),
             ..Default::default()
         };
-        let flat = build(&all, &spec);
+        let flat = build(&all, &spec, HerdScope::All);
         let ids: Vec<&str> = flat.iter().map(|r| r.task.id.as_str()).collect();
         assert_eq!(ids, vec!["a", "a1", "a2"]); // b pruned
         let ghost = |id: &str| flat.iter().find(|r| r.task.id == id).unwrap().ghost;
         assert!(ghost("a") && ghost("a1"), "non-matching ancestors dim");
         assert!(!ghost("a2"), "the match is the focus");
+    }
+
+    #[test]
+    fn herd_scope_governs_descendants() {
+        // a(hairy anchor) with a shorn leaf b and a shaving child c. On the
+        // Hairy view b and c are non-anchor descendants, governed by the scope.
+        let all = vec![
+            t("a", Status::Hairy, None),
+            t("b", Status::Shorn, Some("a")),
+            t("c", Status::Shaving, Some("a")),
+        ];
+        let spec = FilterSpec {
+            statuses: vec![Status::Hairy],
+            ..Default::default()
+        };
+        let ids = |scope| {
+            let mut v: Vec<String> = build(&all, &spec, scope)
+                .iter()
+                .map(|r| r.task.id.clone())
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(ids(HerdScope::Lone), vec!["a"]);
+        assert_eq!(ids(HerdScope::Remaining), vec!["a", "c"]); // shorn leaf b dropped
+        assert_eq!(ids(HerdScope::All), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn remaining_keeps_completed_connectors_to_open_work() {
+        // a(hairy) > b(shorn) > c(shaving): b is completed but connects open c,
+        // so "remaining" must keep it (never show a child without its chain).
+        let all = vec![
+            t("a", Status::Hairy, None),
+            t("b", Status::Shorn, Some("a")),
+            t("c", Status::Shaving, Some("b")),
+        ];
+        let spec = FilterSpec {
+            statuses: vec![Status::Hairy],
+            ..Default::default()
+        };
+        let flat = build(&all, &spec, HerdScope::Remaining);
+        let mut ids: Vec<String> = flat.iter().map(|r| r.task.id.clone()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["a", "b", "c"]);
+        let ghost = |id: &str| flat.iter().find(|r| r.task.id == id).unwrap().ghost;
+        assert!(
+            ghost("b") && ghost("c"),
+            "connector + open descendant are dim"
+        );
+        assert!(!ghost("a"), "the anchor is bright");
+    }
+
+    #[test]
+    fn content_filter_includes_descendants_of_matches() {
+        // a matches; its open child a1 now comes along as descendant context.
+        // (The old filter path dropped descendants of a match — yaksrs-3331.)
+        let mut a = t("a", Status::Hairy, None);
+        a.title = "needle root".into();
+        let a1 = t("a1", Status::Hairy, Some("a"));
+        let all = vec![a, a1];
+        let spec = FilterSpec {
+            statuses: vec![Status::Hairy],
+            search: Some("needle".into()),
+            ..Default::default()
+        };
+        let flat = build(&all, &spec, HerdScope::Remaining);
+        let ids: Vec<&str> = flat.iter().map(|r| r.task.id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "a1"]);
+        let ghost = |id: &str| flat.iter().find(|r| r.task.id == id).unwrap().ghost;
+        assert!(!ghost("a"), "the match is bright");
+        assert!(ghost("a1"), "its descendant is dim context");
     }
 }
