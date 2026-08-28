@@ -4,7 +4,7 @@ title: 'id to path resolution: yaks path'
 type: feature
 priority: 3
 created: '2026-08-23T03:43:37Z'
-updated: '2026-08-23T03:43:37Z'
+updated: '2026-08-28T04:21:37Z'
 parent: yaksrs-8d53
 labels:
 - cli

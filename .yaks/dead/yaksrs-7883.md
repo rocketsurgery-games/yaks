@@ -4,7 +4,7 @@ title: test child
 type: task
 priority: 3
 created: '2026-08-26T12:45:54Z'
-updated: '2026-08-26T13:00:08Z'
+updated: '2026-08-28T03:05:31Z'
 labels:
 - ignore
 ---

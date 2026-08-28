@@ -4,7 +4,7 @@ title: CLI ergonomics for agent-driven bulk & refactor operations
 type: task
 priority: 2
 created: '2026-08-23T03:43:20Z'
-updated: '2026-08-23T03:43:20Z'
+updated: '2026-08-28T04:21:41Z'
 labels:
 - cli
 - agent

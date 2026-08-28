@@ -4,7 +4,7 @@ title: Bulk and filtered field updates & reparents
 type: feature
 priority: 2
 created: '2026-08-23T03:43:29Z'
-updated: '2026-08-23T03:43:29Z'
+updated: '2026-08-28T04:20:51Z'
 parent: yaksrs-8d53
 labels:
 - cli
