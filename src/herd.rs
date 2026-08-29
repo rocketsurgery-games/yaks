@@ -13,6 +13,7 @@ use anyhow::Result;
 
 use crate::filter::{self, FilterSpec};
 use crate::model::{Status, Task};
+use crate::refs;
 use crate::rollup;
 use crate::store::{self, SchemaStatus};
 
@@ -90,6 +91,34 @@ pub struct Stats {
 pub struct Show {
     pub task: Task,
     pub children: Vec<Task>,
+}
+
+/// What kind of pointer an outgoing reference is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefKind {
+    Parent,
+    Depends,
+    Mention,
+}
+
+/// One outgoing reference from a task to another yak.
+pub struct RefEntry {
+    pub kind: RefKind,
+    pub id: String,
+    /// False only for a formal parent/dependency pointing at an id that no
+    /// longer exists (a dangling reference). Informal mentions are
+    /// validation-gated by the resolver, so they are always resolved.
+    pub resolved: bool,
+    /// 1-based body line for a mention; `None` for formal refs and title mentions.
+    pub line: Option<usize>,
+}
+
+/// Every outgoing reference a task carries, formal and informal — the
+/// integrity-inspection view over the shared resolver.
+pub struct TaskRefs {
+    pub id: String,
+    pub title: String,
+    pub entries: Vec<RefEntry>,
 }
 
 impl Herd {
@@ -206,6 +235,60 @@ impl Herd {
     pub fn rollup(&self, spec: &FilterSpec) -> Result<(Vec<rollup::Group>, usize)> {
         let tasks = store::load(&self.root, &NON_DEAD)?;
         Ok(rollup::build(&tasks, spec))
+    }
+
+    /// List every yak this task points at — formal (parent, dependencies) and
+    /// informal (id mentions in the title/body) — each flagged resolved or
+    /// dangling. Both the TUI and this share the same resolver in `refs`, so
+    /// what links here is exactly what lights up in the detail pane.
+    pub fn refs(&self, id: &str) -> Result<Option<TaskRefs>> {
+        let all = store::load(&self.root, &EVERY)?;
+        let Some(task) = all.iter().find(|t| t.id == id).cloned() else {
+            return Ok(None);
+        };
+        let ids: std::collections::HashSet<&str> = all.iter().map(|t| t.id.as_str()).collect();
+        let known = refs::known_from(&ids);
+        let mut entries = Vec::new();
+        if let Some(p) = &task.parent {
+            entries.push(RefEntry {
+                kind: RefKind::Parent,
+                id: p.clone(),
+                resolved: known(p),
+                line: None,
+            });
+        }
+        for d in &task.depends_on {
+            entries.push(RefEntry {
+                kind: RefKind::Depends,
+                id: d.clone(),
+                resolved: known(d),
+                line: None,
+            });
+        }
+        for m in refs::scan(&refs::strip_wikilinks(&task.title), &known) {
+            entries.push(RefEntry {
+                kind: RefKind::Mention,
+                id: m.id,
+                resolved: true,
+                line: None,
+            });
+        }
+        for (n, raw) in task.body.lines().enumerate() {
+            let line = refs::strip_wikilinks(raw);
+            for m in refs::scan(&line, &known) {
+                entries.push(RefEntry {
+                    kind: RefKind::Mention,
+                    id: m.id,
+                    resolved: true,
+                    line: Some(n + 1),
+                });
+            }
+        }
+        Ok(Some(TaskRefs {
+            id: task.id,
+            title: task.title,
+            entries,
+        }))
     }
 
     // -- mutations (each a whole operation) -------------------------------
@@ -348,4 +431,86 @@ fn fold_counts<K: std::hash::Hash + Eq, I: Iterator<Item = K>>(it: I) -> Vec<(K,
         *m.entry(k).or_insert(0) += 1;
     }
     m.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    /// A temp herd (a `.yaks/` under a fresh parent dir) plus an open handle.
+    fn temp_herd() -> (PathBuf, Herd) {
+        let mut parent = std::env::temp_dir();
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        parent.push(format!("yaksrs-herd-refs-{}-{}", std::process::id(), n));
+        let root = parent.join(".yaks");
+        for st in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
+            std::fs::create_dir_all(root.join(st.dir())).unwrap();
+        }
+        let herd = match Herd::open(&parent) {
+            Ok(h) => h,
+            Err(_) => panic!("failed to open temp herd at {parent:?}"),
+        };
+        (root, herd)
+    }
+
+    fn task(id: &str, status: Status) -> Task {
+        Task {
+            id: id.into(),
+            title: format!("title {id}"),
+            kind: "task".into(),
+            priority: 3,
+            status,
+            created: Some("2026-01-01T00:00:00Z".into()),
+            updated: Some("2026-01-01T00:00:00Z".into()),
+            parent: None,
+            labels: vec![],
+            depends_on: vec![],
+            source: None,
+            body: String::new(),
+        }
+    }
+
+    /// `refs` reports formal parent/deps (flagging danglers) and validated body
+    /// mentions, and never invents a mention for an id-shaped token that is not
+    /// a real yak.
+    #[test]
+    fn refs_flags_danglers_and_validated_mentions() {
+        let (root, herd) = temp_herd();
+        store::write::save(&root, &task("yak-0002", Status::Shorn)).unwrap();
+        store::write::save(&root, &task("yak-0003", Status::Hairy)).unwrap();
+        let mut subject = task("yak-0001", Status::Hairy);
+        subject.title = "subject without an id token".into();
+        subject.parent = Some("yak-0007".into()); // missing -> dangling
+        subject.depends_on = vec!["yak-0002".into(), "yak-9999".into()]; // one dangling
+        subject.body = "see yak-0002 and [[yak-0003]] but not yak-9999".into();
+        store::write::save(&root, &subject).unwrap();
+
+        let r = herd.refs("yak-0001").unwrap().expect("subject exists");
+        let got: Vec<(RefKind, &str, bool, Option<usize>)> = r
+            .entries
+            .iter()
+            .map(|e| (e.kind, e.id.as_str(), e.resolved, e.line))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (RefKind::Parent, "yak-0007", false, None),
+                (RefKind::Depends, "yak-0002", true, None),
+                (RefKind::Depends, "yak-9999", false, None),
+                (RefKind::Mention, "yak-0002", true, Some(1)),
+                (RefKind::Mention, "yak-0003", true, Some(1)),
+            ],
+            "yak-9999 in the body must not become a mention (validation-gated)"
+        );
+    }
+
+    #[test]
+    fn refs_none_for_missing_task() {
+        let (_root, herd) = temp_herd();
+        assert!(herd.refs("yak-dead").unwrap().is_none());
+    }
 }

@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::markdown::{self, MdSpan};
 use crate::model::{Status, Task};
+use crate::refs;
 
 /// Where a link points.
 #[derive(Clone, PartialEq, Debug)]
@@ -50,16 +51,6 @@ pub struct Jump {
 
 fn is_url(s: &str) -> bool {
     s.starts_with("http://") || s.starts_with("https://")
-}
-
-/// A char is part of a bare-id/URL token run.
-fn is_tok(c: char) -> bool {
-    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.'
-}
-
-/// Rewrite `[[yak-abcd]]` wiki-links to bare `yak-abcd` for uniform handling.
-fn strip_brackets(s: &str) -> String {
-    s.replace("[[", "").replace("]]", "")
 }
 
 /// Scan a body line for known task ids and URLs, returning (col, len, target).
@@ -113,14 +104,14 @@ fn scan_body_links(line: &str, known: &HashSet<&str>) -> Vec<(usize, usize, Targ
             ));
             continue;
         }
-        if is_tok(chars[i]) {
+        if refs::is_ref_char(chars[i]) {
             let start = i;
-            while i < chars.len() && is_tok(chars[i]) {
+            while i < chars.len() && refs::is_ref_char(chars[i]) {
                 i += 1;
             }
             let tok: String = chars[start..i].iter().collect();
-            if known.contains(tok.as_str()) {
-                out.push((start, i - start, Target::Task(tok)));
+            if let Some(id) = refs::resolve(&tok, |t| known.contains(t)) {
+                out.push((start, i - start, Target::Task(id)));
             }
             continue;
         }
@@ -310,7 +301,7 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
         out.push(empty());
         let mut hl = markdown::Highlighter::new();
         for raw in body.lines() {
-            let line = strip_brackets(raw);
+            let line = refs::strip_wikilinks(raw);
             let links = scan_body_links(&line, &known);
             let md = hl.line(&line);
             out.push(DLine {

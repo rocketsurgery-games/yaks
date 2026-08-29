@@ -1,0 +1,7 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"refs\", \"fix-0004\"])"
+---
+fix-0004  Delta child
+  parent   fix-0003       ok
+  depends  fix-0002       ok

@@ -75,6 +75,11 @@ fn list_all() {
     snap!("list_all", &["list", "--all"]);
 }
 #[test]
+fn refs() {
+    // fix-0004 points at a resolved parent (fix-0003) and dependency (fix-0002).
+    snap!("refs", &["refs", "fix-0004"]);
+}
+#[test]
 fn list_json() {
     snap!("list_json", &["list", "--json"]);
 }

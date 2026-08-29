@@ -9,6 +9,7 @@ mod filter;
 mod herd;
 mod json;
 mod model;
+mod refs;
 mod rollup;
 mod store;
 mod tui;
@@ -19,8 +20,8 @@ use std::env;
 
 use filter::FilterSpec;
 use herd::{
-    CreateOutcome, DepOutcome, Herd, MoveOutcome, NewTask, OpenError, Reparent, Show, Stats,
-    TaskEdit, UpdateOutcome,
+    CreateOutcome, DepOutcome, Herd, MoveOutcome, NewTask, OpenError, RefKind, Reparent, Show,
+    Stats, TaskEdit, TaskRefs, UpdateOutcome,
 };
 use model::{Status, Task};
 
@@ -84,6 +85,9 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// List the yaks a task points at (parent, deps, and id mentions in its
+    /// text), flagging any formal reference that dangles.
+    Refs { id: String },
     /// List hairy tasks whose dependencies are all resolved.
     #[command(visible_alias = "ready")]
     Next {
@@ -256,6 +260,13 @@ fn main() -> Result<()> {
                     render_show(&s);
                 }
             }
+        },
+        Command::Refs { id } => match herd.refs(&id)? {
+            None => {
+                eprintln!("no such task: {id}");
+                std::process::exit(1);
+            }
+            Some(r) => render_refs(&r),
         },
         Command::Next { filter, json } => {
             let rows = herd.next(build_spec(filter))?;
@@ -575,6 +586,24 @@ fn render_stats(s: &Stats) {
         for (k, v) in &s.by_priority {
             println!("  p{k}: {v}");
         }
+    }
+}
+
+fn render_refs(r: &TaskRefs) {
+    println!("{}  {}", r.id, r.title);
+    if r.entries.is_empty() {
+        println!("  (no references)");
+        return;
+    }
+    for e in &r.entries {
+        let kind = match e.kind {
+            RefKind::Parent => "parent",
+            RefKind::Depends => "depends",
+            RefKind::Mention => "mention",
+        };
+        let status = if e.resolved { "ok" } else { "DANGLING" };
+        let loc = e.line.map(|n| format!("  body:L{n}")).unwrap_or_default();
+        println!("  {kind:<8} {:<14} {status}{loc}", e.id);
     }
 }
 
