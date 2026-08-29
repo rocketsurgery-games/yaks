@@ -117,17 +117,24 @@ yaks includes an **agent skill** so assistants drive it correctly (shave before
 coding, shear when done, keep task state honest). It's a plain skill — it just
 shells out to the `yaks` CLI (or `npx`), so there's nothing to run as a plugin.
 
-Copy the skill into your agent's skills directory:
+Install the skill straight from the binary — no clone required:
 
 ```sh
-git clone https://github.com/rocketsurgery-games/yaks
-cp -r yaks/skills/yak          ~/.agents/skills/     # Zed; for other agents use their skills dir
-cp -r yaks/skills/yak-tracker  ~/.agents/skills/     # optional: external-tracker projection
+yaks skills install                          # -> ~/.agents/skills  (yak + yak-tracker)
+yaks skills install --dir ~/.claude/skills   # any agent's skills dir; --force to overwrite
 ```
 
-It activates when a `.yaks/` directory is present. The skill calls the `yaks`
+It activates when a `.yaks/` directory is present, and shells out to the `yaks`
 binary (or `npx @rocketsurgery/yaks`), so make sure one of those is on the
 agent's `PATH`.
+
+Prefer a universal, multi-agent skills manager? The skills are standard
+Anthropic-format `SKILL.md` files, so [openskills](https://github.com/numman-ali/openskills)
+installs them too:
+
+```sh
+npx openskills install rocketsurgery-games/yaks
+```
 
 ## Configuration
 

@@ -11,6 +11,7 @@ mod json;
 mod model;
 mod refs;
 mod rollup;
+mod skills;
 mod store;
 mod tui;
 
@@ -200,6 +201,12 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Install the bundled agent skills (yak, yak-tracker) into a skills
+    /// directory. Works anywhere — no herd required.
+    Skills {
+        #[command(subcommand)]
+        action: SkillsAction,
+    },
     /// Group yaks by the external issue they roll up to.
     Rollup(RollupArgs),
     /// Open the interactive terminal UI.
@@ -232,8 +239,29 @@ enum DepAction {
     Remove { id: String, dep_id: String },
 }
 
+#[derive(Subcommand)]
+enum SkillsAction {
+    /// Write the bundled SKILL.md files into a skills directory
+    /// (default: ~/.agents/skills). Works without a herd.
+    Install {
+        /// Target skills directory (e.g. ~/.claude/skills). Defaults to ~/.agents/skills.
+        #[arg(long)]
+        dir: Option<String>,
+        /// Overwrite existing SKILL.md files.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // `skills` works without a herd (it installs the skill that teaches an agent
+    // how to use yaks, likely before any herd exists), so handle it first.
+    if let Command::Skills { action } = &cli.command {
+        return run_skills(action);
+    }
+
     let herd = match Herd::open(&env::current_dir()?) {
         Ok(h) => h,
         Err(OpenError::SchemaTooNew { found, supported }) => {
@@ -283,6 +311,7 @@ fn main() -> Result<()> {
         Command::RenamePrefix { old, new, dry_run } => {
             report_rename(herd.rename_prefix(&old, &new, dry_run)?)
         }
+        Command::Skills { .. } => unreachable!("skills is handled before opening a herd"),
         Command::Refs { id } => match herd.refs(&id)? {
             None => {
                 eprintln!("no such task: {id}");
@@ -627,6 +656,33 @@ fn report_rename(out: RenameOutcome) {
         }
         RenameOutcome::NothingToRename => println!("Nothing to rename."),
         RenameOutcome::Done(plan) => render_rename(&plan),
+    }
+}
+
+fn run_skills(action: &SkillsAction) -> Result<()> {
+    match action {
+        SkillsAction::Install { dir, force } => {
+            let base = match dir {
+                Some(d) => skills::expand_tilde(d),
+                None => skills::default_dir(),
+            };
+            let installed = skills::install(&base, *force)?;
+            for i in &installed {
+                if i.skipped {
+                    println!(
+                        "skip {}: {} exists (use --force to overwrite)",
+                        i.name,
+                        i.path.display()
+                    );
+                } else {
+                    println!("installed {} -> {}", i.name, i.path.display());
+                }
+            }
+            println!(
+                "\nThe skill activates when a .yaks/ directory is present. For another agent, re-run with --dir pointing at its skills directory (e.g. --dir ~/.claude/skills)."
+            );
+            Ok(())
+        }
     }
 }
 
