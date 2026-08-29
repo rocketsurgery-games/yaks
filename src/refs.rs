@@ -41,6 +41,45 @@ pub fn strip_wikilinks(text: &str) -> String {
     text.replace("[[", "").replace("]]", "")
 }
 
+/// Cheap shape pre-filter: does `token` have the `<prefix>-<tail>` form of a
+/// yak id? Both sides must be non-empty, the prefix `[a-z0-9]` and the tail made
+/// of ref chars. This only screens *candidates* / validates a rename target; the
+/// authoritative membership test is still the real id set.
+pub fn has_ref_shape(token: &str) -> bool {
+    match token.split_once('-') {
+        Some((prefix, tail)) => {
+            !prefix.is_empty()
+                && !tail.is_empty()
+                && prefix
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                && tail.chars().all(is_ref_char)
+        }
+        None => false,
+    }
+}
+
+/// From `chars[i]` (which must be a ref char), scan the maximal ref-token, then
+/// trim any trailing `.` off it. Real yak ids never end in a dot, so a
+/// sentence-ending period (`...yak-0af1.`) is punctuation, not part of the id;
+/// a legacy dotted id keeps its interior dots (`yak-a1b2.1`). Returns
+/// `(token, token_end, run_end)`: `token_end` is just past the trimmed token,
+/// `run_end` just past the whole run including the trailing dots, so callers can
+/// re-emit those dots verbatim. The single tokenizer behind [`scan`],
+/// [`rewrite`], and the TUI detail scan, so all three agree on boundaries.
+pub fn token_at(chars: &[char], i: usize) -> (String, usize, usize) {
+    let mut run_end = i;
+    while run_end < chars.len() && is_ref_char(chars[run_end]) {
+        run_end += 1;
+    }
+    let mut end = run_end;
+    while end > i && chars[end - 1] == '.' {
+        end -= 1;
+    }
+    let tok: String = chars[i..end].iter().collect();
+    (tok, end, run_end)
+}
+
 /// Resolve a single candidate `token` to a canonical yak id. `known` reports
 /// whether a given string is a real yak id. Prefix-agnostic and
 /// validation-based: the token resolves iff `known(token)` holds.
@@ -72,18 +111,15 @@ pub fn scan(text: &str, known: impl Fn(&str) -> bool) -> Vec<RefMatch> {
             i += 1;
             continue;
         }
-        let start = i;
-        while i < chars.len() && is_ref_char(chars[i]) {
-            i += 1;
-        }
-        let tok: String = chars[start..i].iter().collect();
-        if known(&tok) {
+        let (tok, end, run_end) = token_at(&chars, i);
+        if !tok.is_empty() && known(&tok) {
             out.push(RefMatch {
-                start,
-                len: i - start,
+                start: i,
+                len: end - i,
                 id: tok,
             });
         }
+        i = run_end;
     }
     out
 }
@@ -91,6 +127,45 @@ pub fn scan(text: &str, known: impl Fn(&str) -> bool) -> Vec<RefMatch> {
 /// Convenience: build a predicate from a set of id string-slices.
 pub fn known_from<'a>(ids: &'a HashSet<&'a str>) -> impl Fn(&str) -> bool + 'a {
     move |t: &str| ids.contains(t)
+}
+
+/// Rewrite whole reference tokens in `text`: for each maximal ref-token,
+/// substitute it when `replace` returns `Some(new)`, otherwise leave it as-is.
+/// Only complete tokens are considered, so a longer id that merely contains the
+/// old one as a substring is untouched, and all non-token text — whitespace,
+/// punctuation, and surrounding `[[ ]]` — is preserved verbatim. Returns the
+/// rewritten text and whether anything changed. This is the referential-integrity
+/// primitive the rename tools rewrite references with.
+pub fn rewrite(text: &str, replace: impl Fn(&str) -> Option<String>) -> (String, bool) {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut changed = false;
+    let mut i = 0;
+    while i < chars.len() {
+        if !is_ref_char(chars[i]) {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        let (tok, end, run_end) = token_at(&chars, i);
+        match if tok.is_empty() { None } else { replace(&tok) } {
+            Some(rep) => {
+                out.push_str(&rep);
+                changed = true;
+            }
+            None => {
+                for &c in &chars[i..end] {
+                    out.push(c);
+                }
+            }
+        }
+        // Re-emit any trailing dots trimmed off the token as literal text.
+        for &c in &chars[end..run_end] {
+            out.push(c);
+        }
+        i = run_end;
+    }
+    (out, changed)
 }
 
 #[cfg(test)]
@@ -138,6 +213,56 @@ mod tests {
         let line = strip_wikilinks("a [[yak-0002]] b");
         assert_eq!(line, "a yak-0002 b");
         assert_eq!(scan(&line, known_from(&set)).len(), 1);
+    }
+
+    #[test]
+    fn has_ref_shape_screens_candidates() {
+        assert!(has_ref_shape("yak-0af1"));
+        assert!(has_ref_shape("yaksrs-15f7"));
+        assert!(!has_ref_shape("0af1")); // no prefix
+        assert!(!has_ref_shape("yak-")); // empty tail
+        assert!(!has_ref_shape("plainword"));
+    }
+
+    #[test]
+    fn rewrite_touches_only_whole_tokens_and_keeps_brackets() {
+        let repl = |t: &str| (t == "yaksrs-0001").then(|| "yak-0001".to_string());
+        let (out, changed) = rewrite("see yaksrs-0001 and [[yaksrs-0001]] not yaksrs-00019", repl);
+        assert!(changed);
+        assert_eq!(out, "see yak-0001 and [[yak-0001]] not yaksrs-00019");
+    }
+
+    #[test]
+    fn rewrite_reports_no_change_when_absent() {
+        let (out, changed) = rewrite("nothing here", |t: &str| (t == "x").then(|| "y".into()));
+        assert!(!changed);
+        assert_eq!(out, "nothing here");
+    }
+
+    #[test]
+    fn trailing_period_is_not_part_of_the_id() {
+        let set = ids(&["yaksrs-688d"]);
+        let got = scan("described in yaksrs-688d.", known_from(&set));
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, "yaksrs-688d");
+        assert_eq!(got[0].len, "yaksrs-688d".chars().count()); // span excludes the '.'
+    }
+
+    #[test]
+    fn rewrite_preserves_a_trailing_period() {
+        let (out, changed) = rewrite("Split out of yaksrs-78dc.", |t: &str| {
+            (t == "yaksrs-78dc").then(|| "yaks-78dc".to_string())
+        });
+        assert!(changed);
+        assert_eq!(out, "Split out of yaks-78dc.");
+    }
+
+    #[test]
+    fn interior_dot_in_a_legacy_id_is_kept() {
+        let set = ids(&["yak-a1b2.1"]);
+        let got = scan("see yak-a1b2.1.", known_from(&set));
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, "yak-a1b2.1");
     }
 
     #[test]

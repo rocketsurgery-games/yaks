@@ -20,8 +20,8 @@ use std::env;
 
 use filter::FilterSpec;
 use herd::{
-    CreateOutcome, DepOutcome, Herd, MoveOutcome, NewTask, OpenError, RefKind, Reparent, Show,
-    Stats, TaskEdit, TaskRefs, UpdateOutcome,
+    CreateOutcome, DepOutcome, Herd, MoveOutcome, NewTask, OpenError, RefKind, RenameOutcome,
+    RenamePlan, Reparent, Show, Stats, TaskEdit, TaskRefs, UpdateOutcome,
 };
 use model::{Status, Task};
 
@@ -182,6 +182,24 @@ enum Command {
         #[arg(long)]
         unparent: bool,
     },
+    /// Rename a yak, updating its file + id and every reference to it
+    /// (parent, depends_on, and body/title mentions) across the herd.
+    Rename {
+        old: String,
+        new: String,
+        /// Preview the change without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Migrate every yak from one id prefix to another (e.g. yaksrs -> yaks),
+    /// rewriting all references and updating the herd's configured prefix.
+    RenamePrefix {
+        old: String,
+        new: String,
+        /// Preview the change without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Group yaks by the external issue they roll up to.
     Rollup(RollupArgs),
     /// Open the interactive terminal UI.
@@ -261,6 +279,10 @@ fn main() -> Result<()> {
                 }
             }
         },
+        Command::Rename { old, new, dry_run } => report_rename(herd.rename(&old, &new, dry_run)?),
+        Command::RenamePrefix { old, new, dry_run } => {
+            report_rename(herd.rename_prefix(&old, &new, dry_run)?)
+        }
         Command::Refs { id } => match herd.refs(&id)? {
             None => {
                 eprintln!("no such task: {id}");
@@ -586,6 +608,54 @@ fn render_stats(s: &Stats) {
         for (k, v) in &s.by_priority {
             println!("  p{k}: {v}");
         }
+    }
+}
+
+fn report_rename(out: RenameOutcome) {
+    match out {
+        RenameOutcome::NotFound(id) => {
+            eprintln!("error: no such task: {id}");
+            std::process::exit(1);
+        }
+        RenameOutcome::Invalid(id) => {
+            eprintln!("error: invalid target id: {id}");
+            std::process::exit(1);
+        }
+        RenameOutcome::Collision(id) => {
+            eprintln!("error: target id already exists: {id}");
+            std::process::exit(1);
+        }
+        RenameOutcome::NothingToRename => println!("Nothing to rename."),
+        RenameOutcome::Done(plan) => render_rename(&plan),
+    }
+}
+
+fn render_rename(plan: &RenamePlan) {
+    let head = if plan.applied {
+        "Renamed"
+    } else {
+        "Dry run \u{2014} would rename"
+    };
+    println!("{head}:");
+    for (old, new) in &plan.renames {
+        println!("  {old} -> {new}");
+    }
+    println!("Reference edits: {} file(s)", plan.edits.len());
+    for e in &plan.edits {
+        let mut parts: Vec<String> = Vec::new();
+        if e.new_id.is_some() {
+            parts.push("id".to_string());
+        }
+        for f in &e.fields {
+            if *f != "body" {
+                parts.push((*f).to_string());
+            }
+        }
+        if !e.body_lines.is_empty() {
+            let lines: Vec<String> = e.body_lines.iter().map(|n| format!("L{n}")).collect();
+            parts.push(format!("body:{}", lines.join(",")));
+        }
+        println!("  {:<14} {}", e.id, parts.join(", "));
     }
 }
 

@@ -121,6 +121,41 @@ pub struct TaskRefs {
     pub entries: Vec<RefEntry>,
 }
 
+/// Outcome of a rename operation ([`Herd::rename_many`]).
+pub enum RenameOutcome {
+    /// The rename was applied, or (when `plan.applied` is false) planned.
+    Done(RenamePlan),
+    /// No requested old id matched anything (e.g. a prefix with no yaks).
+    NothingToRename,
+    /// A requested old id does not exist.
+    NotFound(String),
+    /// A target id already exists (and is not being vacated) or is requested twice.
+    Collision(String),
+    /// A target id is malformed or identical to its source.
+    Invalid(String),
+}
+
+/// What a rename changed, or would change when `applied` is false.
+pub struct RenamePlan {
+    pub applied: bool,
+    /// The subject renames, `(old, new)`, sorted.
+    pub renames: Vec<(String, String)>,
+    /// Every task file touched, sorted by current id.
+    pub edits: Vec<RenameEdit>,
+}
+
+/// One task file touched by a rename.
+pub struct RenameEdit {
+    /// The file's current on-disk id.
+    pub id: String,
+    /// Set when this file is itself a rename subject (its id becomes this).
+    pub new_id: Option<String>,
+    /// Which reference surfaces changed: any of `parent`, `depends_on`, `title`, `body`.
+    pub fields: Vec<&'static str>,
+    /// 1-based body line numbers whose mentions were rewritten.
+    pub body_lines: Vec<usize>,
+}
+
 impl Herd {
     /// Discover the nearest `.yaks/` above `cwd` and apply the schema gate.
     pub fn open(cwd: &Path) -> std::result::Result<Herd, OpenError> {
@@ -288,6 +323,149 @@ impl Herd {
             id: task.id,
             title: task.title,
             entries,
+        }))
+    }
+
+    /// Rename one yak, a convenience over [`Herd::rename_many`].
+    pub fn rename(&self, old: &str, new: &str, dry_run: bool) -> Result<RenameOutcome> {
+        self.rename_many(&[(old.to_string(), new.to_string())], dry_run)
+    }
+
+    /// Migrate every yak whose id is `{old}-<tail>` to `{new}-<tail>`, rewriting
+    /// all references (via [`Herd::rename_many`]) and, on a real successful run,
+    /// flipping the herd's configured `prefix` to `new` so future ids match.
+    /// The `{old}-` boundary means `rename_prefix("yaks", ..)` never touches a
+    /// `yaksrs-` id.
+    pub fn rename_prefix(&self, old: &str, new: &str, dry_run: bool) -> Result<RenameOutcome> {
+        let all = store::load(&self.root, &EVERY)?;
+        let marker = format!("{old}-");
+        let mut pairs = Vec::new();
+        for t in &all {
+            if let Some(tail) = t.id.strip_prefix(&marker) {
+                pairs.push((t.id.clone(), format!("{new}-{tail}")));
+            }
+        }
+        let outcome = self.rename_many(&pairs, dry_run)?;
+        if !dry_run {
+            if let RenameOutcome::Done(_) = &outcome {
+                store::set_config_prefix(&self.root, new)?;
+            }
+        }
+        Ok(outcome)
+    }
+
+    /// Rename one or more yaks in a single pass, rewriting every reference to
+    /// them across the whole herd: the file name + `id` of each subject, and the
+    /// `parent`, `depends_on`, title, and body mentions of every task that
+    /// points at one. References are matched as whole tokens validated against
+    /// real ids (via `refs`), so lookalike prose is never touched. With
+    /// `dry_run`, nothing is written and the returned plan describes what would
+    /// change. This is the shared engine behind `yaks rename` (one pair) and the
+    /// bulk prefix migration (many pairs).
+    pub fn rename_many(&self, pairs: &[(String, String)], dry_run: bool) -> Result<RenameOutcome> {
+        let all = store::load(&self.root, &EVERY)?;
+        let existing: std::collections::HashSet<&str> = all.iter().map(|t| t.id.as_str()).collect();
+
+        // Validate the requested pairs and build the old -> new map.
+        let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut targets: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (old, new) in pairs {
+            if !existing.contains(old.as_str()) {
+                return Ok(RenameOutcome::NotFound(old.clone()));
+            }
+            if new == old || !refs::has_ref_shape(new) {
+                return Ok(RenameOutcome::Invalid(new.clone()));
+            }
+            if !targets.insert(new.clone()) || map.insert(old.clone(), new.clone()).is_some() {
+                return Ok(RenameOutcome::Collision(new.clone()));
+            }
+        }
+        if map.is_empty() {
+            return Ok(RenameOutcome::NothingToRename);
+        }
+        // A target that already exists and isn't itself being vacated would
+        // clobber a live yak.
+        for new in &targets {
+            if existing.contains(new.as_str()) && !map.contains_key(new) {
+                return Ok(RenameOutcome::Collision(new.clone()));
+            }
+        }
+
+        let lookup = |t: &str| map.get(t).cloned();
+        let mut edits = Vec::new();
+        let mut writes = Vec::new();
+        for task in &all {
+            let mut edit = RenameEdit {
+                id: task.id.clone(),
+                new_id: map.get(&task.id).cloned(),
+                fields: Vec::new(),
+                body_lines: Vec::new(),
+            };
+            let mut next = task.clone();
+            if let Some(nid) = &edit.new_id {
+                next.id = nid.clone();
+            }
+            if let Some(p) = &task.parent {
+                if let Some(np) = map.get(p) {
+                    next.parent = Some(np.clone());
+                    edit.fields.push("parent");
+                }
+            }
+            if task.depends_on.iter().any(|d| map.contains_key(d)) {
+                next.depends_on = task
+                    .depends_on
+                    .iter()
+                    .map(|d| map.get(d).cloned().unwrap_or_else(|| d.clone()))
+                    .collect();
+                edit.fields.push("depends_on");
+            }
+            let (title, tchanged) = refs::rewrite(&task.title, &lookup);
+            if tchanged {
+                next.title = title;
+                edit.fields.push("title");
+            }
+            let mut body_changed = false;
+            let mut lines: Vec<String> = Vec::new();
+            for (n, line) in task.body.lines().enumerate() {
+                let (nl, ch) = refs::rewrite(line, &lookup);
+                if ch {
+                    body_changed = true;
+                    edit.body_lines.push(n + 1);
+                }
+                lines.push(nl);
+            }
+            if body_changed {
+                next.body = lines.join("\n");
+                edit.fields.push("body");
+            }
+            if edit.new_id.is_some() || !edit.fields.is_empty() {
+                writes.push((task.status, task.id.clone(), next));
+                edits.push(edit);
+            }
+        }
+
+        if !dry_run {
+            for (_st, _old, next) in &writes {
+                store::write::save(&self.root, next)?;
+            }
+            // Remove each vacated subject file, unless its id is reused as a
+            // rename target (a swap/chain, which stays put under its new writer).
+            for (st, old, _next) in &writes {
+                if map.contains_key(old) && !targets.contains(old) {
+                    let p = self.root.join(st.dir()).join(format!("{old}.md"));
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+        }
+
+        edits.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut renames: Vec<(String, String)> =
+            map.iter().map(|(o, n)| (o.clone(), n.clone())).collect();
+        renames.sort();
+        Ok(RenameOutcome::Done(RenamePlan {
+            applied: !dry_run,
+            renames,
+            edits,
         }))
     }
 
@@ -512,5 +690,121 @@ mod tests {
     fn refs_none_for_missing_task() {
         let (_root, herd) = temp_herd();
         assert!(herd.refs("yak-dead").unwrap().is_none());
+    }
+
+    fn done(out: RenameOutcome) -> RenamePlan {
+        match out {
+            RenameOutcome::Done(p) => p,
+            _ => panic!("expected RenameOutcome::Done"),
+        }
+    }
+
+    #[test]
+    fn rename_rewrites_every_reference_surface() {
+        let (root, herd) = temp_herd();
+        store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
+        let mut child = task("yaksrs-0002", Status::Hairy);
+        child.parent = Some("yaksrs-0001".into());
+        child.depends_on = vec!["yaksrs-0001".into()];
+        child.body = "blocked by yaksrs-0001, see [[yaksrs-0001]] and yaksrs-0009".into();
+        store::write::save(&root, &child).unwrap();
+
+        let plan = done(herd.rename("yaksrs-0001", "yaks-0001", false).unwrap());
+        assert!(plan.applied);
+        assert_eq!(
+            plan.renames,
+            vec![("yaksrs-0001".to_string(), "yaks-0001".to_string())]
+        );
+
+        // Subject file moved.
+        assert!(root.join("hairy/yaks-0001.md").is_file());
+        assert!(!root.join("hairy/yaksrs-0001.md").exists());
+
+        // Every referring surface updated; the non-id lookalike is left alone.
+        let c = store::load_task_by_id(&root, "yaksrs-0002")
+            .unwrap()
+            .unwrap();
+        assert_eq!(c.parent.as_deref(), Some("yaks-0001"));
+        assert_eq!(c.depends_on, vec!["yaks-0001".to_string()]);
+        assert!(c.body.contains("blocked by yaks-0001"));
+        assert!(c.body.contains("[[yaks-0001]]"));
+        assert!(
+            c.body.contains("yaksrs-0009"),
+            "a token that is not a real id must not be rewritten"
+        );
+    }
+
+    #[test]
+    fn rename_rejects_collision_with_existing_id() {
+        let (root, herd) = temp_herd();
+        store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
+        store::write::save(&root, &task("yaks-0001", Status::Hairy)).unwrap();
+        match herd.rename("yaksrs-0001", "yaks-0001", true).unwrap() {
+            RenameOutcome::Collision(id) => assert_eq!(id, "yaks-0001"),
+            _ => panic!("expected collision"),
+        }
+    }
+
+    #[test]
+    fn rename_dry_run_leaves_files_untouched() {
+        let (root, herd) = temp_herd();
+        store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
+        let plan = done(herd.rename("yaksrs-0001", "yaks-0001", true).unwrap());
+        assert!(!plan.applied);
+        assert!(root.join("hairy/yaksrs-0001.md").is_file());
+        assert!(!root.join("hairy/yaks-0001.md").exists());
+    }
+
+    #[test]
+    fn rename_many_migrates_a_prefix_batch_across_statuses() {
+        let (root, herd) = temp_herd();
+        store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
+        let mut b = task("yaksrs-0002", Status::Shorn);
+        b.depends_on = vec!["yaksrs-0001".into()];
+        store::write::save(&root, &b).unwrap();
+
+        let pairs = vec![
+            ("yaksrs-0001".to_string(), "yaks-0001".to_string()),
+            ("yaksrs-0002".to_string(), "yaks-0002".to_string()),
+        ];
+        let plan = done(herd.rename_many(&pairs, false).unwrap());
+        assert_eq!(plan.renames.len(), 2);
+        assert!(root.join("hairy/yaks-0001.md").is_file());
+        assert!(root.join("shorn/yaks-0002.md").is_file());
+        assert!(!root.join("hairy/yaksrs-0001.md").exists());
+        assert!(!root.join("shorn/yaksrs-0002.md").exists());
+        let b2 = store::load_task_by_id(&root, "yaks-0002").unwrap().unwrap();
+        assert_eq!(b2.depends_on, vec!["yaks-0001".to_string()]);
+    }
+
+    #[test]
+    fn rename_prefix_migrates_matching_ids_and_flips_config() {
+        let (root, herd) = temp_herd();
+        store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
+        let mut b = task("yaksrs-0002", Status::Hairy);
+        b.depends_on = vec!["yaksrs-0001".into()];
+        store::write::save(&root, &b).unwrap();
+        // A different-prefix id must be left alone (the boundary is `yaksrs-`).
+        store::write::save(&root, &task("yaks-abcd", Status::Hairy)).unwrap();
+
+        let plan = done(herd.rename_prefix("yaksrs", "yaks", false).unwrap());
+        let news: Vec<&str> = plan.renames.iter().map(|(_, n)| n.as_str()).collect();
+        assert_eq!(news, vec!["yaks-0001", "yaks-0002"]);
+        assert!(root.join("hairy/yaks-0001.md").is_file());
+        assert!(root.join("hairy/yaks-abcd.md").is_file()); // untouched
+        assert!(!root.join("hairy/yaksrs-0001.md").exists());
+        let b2 = store::load_task_by_id(&root, "yaks-0002").unwrap().unwrap();
+        assert_eq!(b2.depends_on, vec!["yaks-0001".to_string()]);
+        assert_eq!(store::read_config(&root).prefix, "yaks");
+    }
+
+    #[test]
+    fn rename_prefix_dry_run_does_not_flip_config_or_move_files() {
+        let (root, herd) = temp_herd();
+        store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
+        let plan = done(herd.rename_prefix("yaksrs", "yaks", true).unwrap());
+        assert!(!plan.applied);
+        assert!(!root.join("config.yaml").exists());
+        assert!(root.join("hairy/yaksrs-0001.md").is_file());
     }
 }

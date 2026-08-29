@@ -105,14 +105,13 @@ fn scan_body_links(line: &str, known: &HashSet<&str>) -> Vec<(usize, usize, Targ
             continue;
         }
         if refs::is_ref_char(chars[i]) {
-            let start = i;
-            while i < chars.len() && refs::is_ref_char(chars[i]) {
-                i += 1;
+            let (tok, end, run_end) = refs::token_at(&chars, i);
+            if !tok.is_empty() {
+                if let Some(id) = refs::resolve(&tok, |t| known.contains(t)) {
+                    out.push((i, end - i, Target::Task(id)));
+                }
             }
-            let tok: String = chars[start..i].iter().collect();
-            if let Some(id) = refs::resolve(&tok, |t| known.contains(t)) {
-                out.push((start, i - start, Target::Task(id)));
-            }
+            i = run_end;
             continue;
         }
         i += 1;

@@ -381,6 +381,36 @@ pub fn read_config(root: &Path) -> Config {
     c
 }
 
+/// Rewrite only the `prefix:` line of `config.yaml` to `new`, leaving every
+/// other line untouched (appending a `prefix:` line if none exists, and
+/// creating the file if missing). Used by the prefix-rename migration so the
+/// config and the on-disk ids agree afterwards.
+pub fn set_config_prefix(root: &Path, new: &str) -> Result<()> {
+    let path = root.join("config.yaml");
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let mut lines: Vec<String> = Vec::new();
+    let mut replaced = false;
+    for line in existing.lines() {
+        let is_prefix = line
+            .split_once(':')
+            .map(|(k, _)| k.trim() == "prefix")
+            .unwrap_or(false);
+        if is_prefix {
+            lines.push(format!("prefix: {new}"));
+            replaced = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    if !replaced {
+        lines.push(format!("prefix: {new}"));
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    fs::write(&path, out).with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
 /// Every task id present on disk (all statuses, including dead).
 pub fn all_ids(root: &Path) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
