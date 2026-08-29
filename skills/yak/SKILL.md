@@ -103,6 +103,7 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks create` | Create a new task (in hairy). `--title` required; `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description` |
 | `yaks list` | List tasks with optional filters (`--all` also includes dead) |
 | `yaks show` | Show full details of a task |
+| `yaks refs` | List what a task points at (parent, deps, id mentions), flagging danglers |
 | `yaks update` | Update fields, labels (`--add-label`/`--remove-label`), or append a `--note` |
 | `yaks shave` | Start shaving a yak (hairy → shaving) [alias: `work`] |
 | `yaks shorn` | Mark a yak shorn (shaving → shorn) [alias: `close`] |
@@ -114,6 +115,8 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks search` | Substring search over id/title/description |
 | `yaks dep` | Add/remove a dependency between tasks |
 | `yaks reparent` | Move a task under a new `--parent` (or `--unparent` to top-level) |
+| `yaks rename` | Rename a yak + rewrite every reference to it across the herd |
+| `yaks rename-prefix` | Migrate all yaks from one id prefix to another; `--dry-run` to preview |
 | `yaks stats` | Show task statistics |
 | `yaks rollup` | Group yaks by the external issue they roll up to (`--keys` for just the keys) |
 | `yaks tui` | Open the interactive terminal UI |
@@ -152,6 +155,22 @@ The prefix, default type, and default priority come from `.yaks/config.yaml` (fa
 Use `--source <url>` on create or update to link a yak to an external issue (Jira, GitHub Issues, Linear, etc.). The URL is stored in the `source` frontmatter field. The relationship is a **one-way projection**: the yak points at the external issue, never the reverse, and the external tracker stays unaware of yaks.
 
 Many yaks can roll up to one external issue. `yaks rollup` groups yaks by their source (a yak with no `source:` inherits its nearest ancestor's, so one stamp on an umbrella yak covers the subtree); `yaks rollup --keys` lists the external keys to paste into a PR body. For seeding a yak from an external issue or drafting a status update back to one, see the **yak-tracker** skill.
+
+## Referencing other yaks
+
+Beyond the structural links (`parent:`, `depends_on:`), you can mention one yak from another's title, description, or a note just by writing its **full id** — `{prefix}-{4hex}`, using **this herd's configured prefix** (in `.yaks/config.yaml`; don't hardcode a prefix you saw in another repo). A mention is recognized by matching the token against real yak ids, so:
+
+- **Always write the full id** (`yak-0af1`), never the bare 4-hex shorthand (`0af1`). Only the full form is detected and linked; a bare tail reads as ordinary prose.
+- `[[yak-0af1]]` wiki-brackets work too and render as a bare link.
+- Because matching is against real ids (not a prefix regex), mentions keep resolving even in a herd mid-migration with mixed prefixes.
+
+In `yaks tui`, a mention is highlighted and followable (Tab / `[` / `]` to cycle, Enter to follow).
+
+Use **`yaks refs <id>`** to see everything a yak points at — parent, dependencies, and id mentions in its text — with any dangling formal reference flagged. It's a quick integrity check before or after edits.
+
+### Renaming safely
+
+`yaks rename <old> <new>` renames a yak and rewrites **every** reference to it (parent, `depends_on`, and id mentions in bodies/titles) across the herd, matching whole ids only so lookalike prose is left untouched. `yaks rename-prefix <old> <new>` does the same for a whole prefix at once (e.g. migrating `yaksrs` → `yaks`) and updates `.yaks/config.yaml`. Both take **`--dry-run`** — always preview a bulk rename first.
 
 ## Filtering
 
