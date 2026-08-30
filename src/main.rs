@@ -21,8 +21,8 @@ use std::env;
 
 use filter::FilterSpec;
 use herd::{
-    CreateOutcome, DepOutcome, Herd, MoveOutcome, NewTask, OpenError, RefKind, RenameOutcome,
-    RenamePlan, Reparent, Show, Stats, TaskEdit, TaskRefs, UpdateOutcome,
+    CreateOutcome, DepOutcome, Herd, LogEntry, MoveOutcome, NewTask, OpenError, RefKind,
+    RenameOutcome, RenamePlan, Reparent, Show, Stats, TaskEdit, TaskRefs, UpdateOutcome,
 };
 use model::{Status, Task};
 
@@ -102,6 +102,17 @@ enum Command {
     Tangled {
         #[command(flatten)]
         filter: FilterFlags,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Timestamped notes across a filtered set, oldest first (an activity log).
+    Log {
+        #[command(flatten)]
+        filter: FilterFlags,
+        /// Only notes at or after this point: a duration (2h, 3d, 1w), a date
+        /// (YYYY-MM-DD), or an RFC3339 timestamp. Omit for the full log.
+        #[arg(long)]
+        since: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -293,6 +304,14 @@ fn main() -> Result<()> {
             spec.search = Some(query);
             let rows = herd.list(spec, false)?;
             render_rows(&rows, json, "No tasks found.")?;
+        }
+        Command::Log {
+            filter,
+            since,
+            json,
+        } => {
+            let entries = herd.log(build_spec(filter), since.as_deref())?;
+            render_log(&entries, json)?;
         }
         Command::Show { id, json } => match herd.show(&id)? {
             None => {
@@ -616,6 +635,22 @@ fn render_rows(rows: &[Task], json: bool, empty_msg: &str) -> Result<()> {
     } else {
         for t in rows {
             println!("{}", fmt_row(t));
+        }
+    }
+    Ok(())
+}
+
+fn render_log(entries: &[LogEntry], json: bool) -> Result<()> {
+    if json {
+        json::print(&json::log_array(entries))?;
+    } else if entries.is_empty() {
+        println!("No notes found.");
+    } else {
+        for e in entries {
+            println!("\u{25b8} {}  {}  {}", e.ts, e.id, e.title);
+            for line in e.note.lines() {
+                println!("    {line}");
+            }
         }
     }
     Ok(())

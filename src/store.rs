@@ -11,7 +11,7 @@
 
 use crate::model::{Status, Task};
 use anyhow::{Context, Result};
-use chrono::Utc;
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -526,6 +526,143 @@ pub fn append_note(body: &str, ts: &str, note: &str) -> String {
     let desc = body.trim_end();
     let sep = if desc.is_empty() { "" } else { "\n\n" };
     format!("{desc}{sep}---\n\u{25b8} {ts}\n{note}")
+}
+
+/// A single timestamped note parsed back out of a task body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteEntry {
+    pub ts: String,
+    pub text: String,
+}
+
+/// Parse the timestamped note blocks written by `append_note` out of a body. A
+/// block begins at a line `---` immediately followed by a line starting with the
+/// note marker, and its text runs to the next such delimiter or the end. Plain
+/// description prose is skipped, so this is safe to run over a whole body.
+pub fn parse_notes(body: &str) -> Vec<NoteEntry> {
+    const MARK: &str = "\u{25b8} ";
+    let lines: Vec<&str> = body.lines().collect();
+    let is_delim = |i: usize| {
+        lines[i].trim_end() == "---" && lines.get(i + 1).is_some_and(|l| l.starts_with(MARK))
+    };
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if is_delim(i) {
+            let ts = lines[i + 1][MARK.len()..].trim().to_string();
+            let mut j = i + 2;
+            while j < lines.len() && !is_delim(j) {
+                j += 1;
+            }
+            let text = lines[i + 2..j].join("\n").trim().to_string();
+            out.push(NoteEntry { ts, text });
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Parse a canonical timestamp (as written by `now_iso`) to a UTC instant.
+pub fn parse_ts(s: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.with_timezone(&Utc))
+}
+
+/// Resolve a `--since` spec to an absolute UTC instant, relative to `now`.
+/// Accepts a relative duration (an integer then `s`/`m`/`h`/`d`/`w`, e.g. `2h`,
+/// `3d`, `1w`), an `YYYY-MM-DD` date (midnight UTC), a naive
+/// `YYYY-MM-DDTHH:MM:SS` datetime (UTC), or a full RFC3339 timestamp.
+pub fn parse_since(spec: &str, now: DateTime<Utc>) -> Result<DateTime<Utc>> {
+    let s = spec.trim();
+    if let Some(dt) = parse_relative(s, now) {
+        return Ok(dt);
+    }
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S") {
+        return Ok(Utc.from_utc_datetime(&dt));
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Ok(Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0).unwrap()));
+    }
+    anyhow::bail!(
+        "could not parse --since '{spec}'; use a duration like 2h/3d/1w, a date (YYYY-MM-DD), or an RFC3339 timestamp"
+    )
+}
+
+/// A relative duration spec (`<int><unit>`), resolved against `now`. Returns
+/// `None` when `spec` is not a number-then-unit token so callers fall back to
+/// absolute parsing.
+fn parse_relative(spec: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let idx = spec.find(|c: char| c.is_ascii_alphabetic())?;
+    if idx == 0 {
+        return None;
+    }
+    let (num, unit) = spec.split_at(idx);
+    let n: i64 = num.trim().parse().ok()?;
+    let dur = match unit {
+        "s" => Duration::seconds(n),
+        "m" => Duration::minutes(n),
+        "h" => Duration::hours(n),
+        "d" => Duration::days(n),
+        "w" => Duration::weeks(n),
+        _ => return None,
+    };
+    Some(now - dur)
+}
+
+#[cfg(test)]
+mod log_parse_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn parse_notes_splits_timestamped_blocks() {
+        let body = append_note("Description.", "2026-01-01T00:00:00Z", "first note");
+        let body = append_note(&body, "2026-01-02T00:00:00Z", "second\nspans lines");
+        let notes = parse_notes(&body);
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[0].ts, "2026-01-01T00:00:00Z");
+        assert_eq!(notes[0].text, "first note");
+        assert_eq!(notes[1].ts, "2026-01-02T00:00:00Z");
+        assert_eq!(notes[1].text, "second\nspans lines");
+    }
+
+    #[test]
+    fn parse_notes_ignores_prose_without_the_marker() {
+        let body = "Just a description.\n\nWith a --- rule but no marker line.";
+        assert!(parse_notes(body).is_empty());
+    }
+
+    #[test]
+    fn parse_since_relative_and_absolute() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap();
+        assert_eq!(
+            parse_since("2h", now).unwrap(),
+            Utc.with_ymd_and_hms(2026, 1, 10, 10, 0, 0).unwrap()
+        );
+        assert_eq!(
+            parse_since("3d", now).unwrap(),
+            Utc.with_ymd_and_hms(2026, 1, 7, 12, 0, 0).unwrap()
+        );
+        assert_eq!(
+            parse_since("1w", now).unwrap(),
+            Utc.with_ymd_and_hms(2026, 1, 3, 12, 0, 0).unwrap()
+        );
+        assert_eq!(
+            parse_since("2026-01-05", now).unwrap(),
+            Utc.with_ymd_and_hms(2026, 1, 5, 0, 0, 0).unwrap()
+        );
+        assert_eq!(
+            parse_since("2026-01-05T06:30:00Z", now).unwrap(),
+            Utc.with_ymd_and_hms(2026, 1, 5, 6, 30, 0).unwrap()
+        );
+        assert!(parse_since("banana", now).is_err());
+    }
 }
 
 /// Outcome of a dependency edit.

@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use chrono::Utc;
 
 use crate::filter::{self, FilterSpec};
 use crate::model::{Status, Task};
@@ -156,6 +157,14 @@ pub struct RenameEdit {
     pub body_lines: Vec<usize>,
 }
 
+/// One timestamped note tagged with the yak it belongs to (the `log` view).
+pub struct LogEntry {
+    pub id: String,
+    pub title: String,
+    pub ts: String,
+    pub note: String,
+}
+
 impl Herd {
     /// Discover the nearest `.yaks/` above `cwd` and apply the schema gate.
     pub fn open(cwd: &Path) -> std::result::Result<Herd, OpenError> {
@@ -270,6 +279,39 @@ impl Herd {
     pub fn rollup(&self, spec: &FilterSpec) -> Result<(Vec<rollup::Group>, usize)> {
         let tasks = store::load(&self.root, &NON_DEAD)?;
         Ok(rollup::build(&tasks, spec))
+    }
+
+    /// Timestamped notes across the filtered set, oldest first. `since`, when
+    /// set, keeps only notes at or after that instant (see `store::parse_since`).
+    /// Notes live in each task body; state transitions are not timestamped, so
+    /// this is a note log, not a full audit trail.
+    pub fn log(&self, spec: FilterSpec, since: Option<&str>) -> Result<Vec<LogEntry>> {
+        let cutoff = match since {
+            Some(s) => Some(store::parse_since(s, Utc::now())?),
+            None => None,
+        };
+        let include_dead = spec.statuses.contains(&Status::Dead);
+        let tasks = store::load(&self.root, &EVERY)?;
+        let mut out = Vec::new();
+        for t in filter::apply(&tasks, &spec, include_dead) {
+            for note in store::parse_notes(&t.body) {
+                if let Some(cut) = cutoff {
+                    if let Some(ts) = store::parse_ts(&note.ts) {
+                        if ts < cut {
+                            continue;
+                        }
+                    }
+                }
+                out.push(LogEntry {
+                    id: t.id.clone(),
+                    title: t.title.clone(),
+                    ts: note.ts,
+                    note: note.text,
+                });
+            }
+        }
+        out.sort_by(|a, b| a.ts.cmp(&b.ts).then_with(|| a.id.cmp(&b.id)));
+        Ok(out)
     }
 
     /// List every yak this task points at — formal (parent, dependencies) and

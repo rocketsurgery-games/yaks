@@ -56,6 +56,15 @@ pub fn tasks_array(tasks: &[Task]) -> Value {
     Value::Array(tasks.iter().map(task_value).collect())
 }
 
+pub fn log_array(entries: &[crate::herd::LogEntry]) -> Value {
+    Value::Array(
+        entries
+            .iter()
+            .map(|e| json!({"timestamp": e.ts, "id": e.id, "title": e.title, "note": e.note}))
+            .collect(),
+    )
+}
+
 pub fn tangled_array(items: &[(Task, Vec<String>)]) -> Value {
     Value::Array(
         items
