@@ -37,6 +37,13 @@ worktrees do not see each other's shave/update until those commits merge. So
 coordinate by disjoint scopes plus merge, not by watching each other in real
 time.
 
+**Tooling gotcha (observed).** Some agent harnesses root their file-editing
+tools at the main checkout, not at the terminal's working directory, even when
+the worktree lives under the project root. A bare `src/foo.rs` edit then silently
+lands in the main tree while the terminal `cd` sees the worktree. Edit through
+the explicit worktree path (`.worktrees/<name>/src/foo.rs`), and verify against
+the worktree's own freshly built binary, not the main one.
+
 ## Disjoint scoping
 
 One writer per yak (working-a-yak). For parallel work, hand each worker a
