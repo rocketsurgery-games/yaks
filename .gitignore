@@ -1,5 +1,7 @@
 /target
 /dist
+# Local git worktrees used for parallel multi-agent experiments (yaks-8f81).
+/.worktrees
 node_modules/
 artifacts/
 # Local working clone of the forked edtui repo (rocketsurgery-games/edtui).
