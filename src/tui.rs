@@ -178,6 +178,56 @@ impl Editor {
     }
 }
 
+/// Insert `s` at the editor's cursor by replaying it as Insert-mode keystrokes,
+/// so edtui advances the cursor and records undo exactly as if the user typed
+/// it. Used by ref autocomplete to drop a picked yak id into the text.
+/// Insert `s` at an edtui cursor by replaying it as Insert-mode keystrokes, so
+/// edtui advances the cursor and records undo exactly as if the user typed it.
+/// Works on any embedded editor (the comment `Editor` and the create-form
+/// content blocks both reduce to a handler + a `RefCell<EditorState>`).
+fn insert_into(handler: &mut EditorEventHandler, state: &RefCell<EditorState>, s: &str) {
+    state.borrow_mut().mode = EditorMode::Insert;
+    for c in s.chars() {
+        let k = KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        handler.on_key_event(k, &mut state.borrow_mut());
+    }
+}
+
+/// Delete the `n` chars before the cursor by replaying Backspace. Used to drop
+/// the typed `<prefix>-` before an autocompleted id is inserted in its place.
+fn delete_into(handler: &mut EditorEventHandler, state: &RefCell<EditorState>, n: usize) {
+    state.borrow_mut().mode = EditorMode::Insert;
+    for _ in 0..n {
+        let k = KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE);
+        handler.on_key_event(k, &mut state.borrow_mut());
+    }
+}
+
+/// The run of ref-chars ending at the cursor — the partial yak id being typed —
+/// as `(token, char_len)`.
+fn token_before_cursor(state: &RefCell<EditorState>) -> (String, usize) {
+    let st = state.borrow();
+    let full = st.lines.to_string();
+    let line = full.split('\n').nth(st.cursor.row).unwrap_or("");
+    let before: Vec<char> = line.chars().take(st.cursor.col).collect();
+    let mut i = before.len();
+    while i > 0 && crate::refs::is_ref_char(before[i - 1]) {
+        i -= 1;
+    }
+    let tok: String = before[i..].iter().collect();
+    let len = before.len() - i;
+    (tok, len)
+}
+
+/// If the ref-token just before the cursor is a `<prefix>-…` completion context,
+/// return `(chars_to_replace, tail)` — the whole `<prefix>-…` length to drop on
+/// commit, and the text typed after `<prefix>-` to seed the picker query with.
+fn completion_context(state: &RefCell<EditorState>, prefix: &str) -> Option<(usize, String)> {
+    let (tok, len) = token_before_cursor(state);
+    tok.strip_prefix(&format!("{prefix}-"))
+        .map(|tail| (len, tail.to_string()))
+}
+
 /// A filter-as-you-type picker over the task set. The query is an edtui
 /// single-line editor; candidates are ranked substring matches (Python's
 /// `fuzzy_pick_task` semantics). `RefCell` for the same render-purity reason.
@@ -191,11 +241,23 @@ struct FuzzyPick {
     allow_none: bool,
     sel: usize,
     action: FuzzyAction,
+    /// The overlay to restore when this picker closes (commit or cancel). Set
+    /// when the picker is opened *over* another overlay — e.g. the editor that
+    /// ref-autocomplete inserts back into — so closing returns there instead of
+    /// to the bare board.
+    return_to: Option<Box<Overlay>>,
+    /// Chars of the already-typed partial token (e.g. `yaks-`) to delete from the
+    /// editor before inserting the chosen id, so autocomplete doesn't duplicate
+    /// the prefix. Only meaningful for [`FuzzyAction::InsertRef`].
+    replace_len: usize,
 }
 
 enum FuzzyAction {
     AddDep(String),
     Reparent(String),
+    /// Insert the picked task's id at the cursor of the editor stashed in
+    /// `FuzzyPick::return_to` (ref autocomplete while editing).
+    InsertRef,
 }
 
 /// Inline incremental search box. Editing it updates `App.filter.search` on
@@ -620,6 +682,8 @@ impl FuzzyPick {
             allow_none,
             sel: 0,
             action,
+            return_to: None,
+            replace_len: 0,
         }
     }
 
@@ -715,6 +779,9 @@ pub struct App {
     notification: Option<String>,
     /// Editor keybinding profile (vim vs emacs), from herd config.
     editor_vim: bool,
+    /// The herd's configured id prefix (e.g. `yaks`), for autocomplete: typing
+    /// `<ref_prefix>-` while editing opens the yak-ref picker.
+    ref_prefix: String,
     /// Timestamp of the last `Esc` in an editor overlay, for detecting a rapid
     /// double-`Esc` (a Ctrl-C-equivalent cancel gesture). See [`App::register_double_esc`].
     last_esc: Option<std::time::Instant>,
@@ -757,6 +824,7 @@ impl App {
             overlay: Overlay::None,
             notification: None,
             editor_vim: true,
+            ref_prefix: "yak".to_string(),
             last_esc: None,
             dirty_cancel: None,
             cmdline: None,
@@ -779,6 +847,7 @@ impl App {
         let working_set = views_store::load_working_set(herd.root());
         let mut app = App::new(all);
         app.editor_vim = vim;
+        app.ref_prefix = cfg.prefix;
         app.collapsed = ui.collapsed;
         app.herd_scope = ui.herd;
         app.filter = clone_spec(&views[0].spec);
@@ -1427,12 +1496,14 @@ impl App {
         let line_normal = is_line_text
             && matches!(&self.overlay, Overlay::Create(f)
                 if f.line_editor().is_some_and(|e| e.borrow().mode == EditorMode::Normal));
-        let nav_down = matches!(k.code, KeyCode::Tab)
+        // Tab/BackTab move fields on chip + single-line rows, but inside a
+        // content block they're normal editor keys (Ctrl-N/P still navigate).
+        let nav_down = (matches!(k.code, KeyCode::Tab) && !is_content)
             || (ctrl && k.code == KeyCode::Char('n'))
             || (is_line_text && k.code == KeyCode::Down)
             || (line_normal && k.code == KeyCode::Char('j'))
             || (is_chip && matches!(k.code, KeyCode::Down | KeyCode::Char('j')));
-        let nav_up = matches!(k.code, KeyCode::BackTab)
+        let nav_up = (matches!(k.code, KeyCode::BackTab) && !is_content)
             || (ctrl && k.code == KeyCode::Char('p'))
             || (is_line_text && k.code == KeyCode::Up)
             || (line_normal && k.code == KeyCode::Char('k'))
@@ -1474,6 +1545,22 @@ impl App {
                         f.blocks[i].editor.borrow().mode == EditorMode::Normal));
             if open_cmd {
                 self.cmdline = Some(String::new());
+                return;
+            }
+            // Tab opens the ref completer when the cursor is in a `<prefix>-…`
+            // context; otherwise Tab is a normal editor key here.
+            let complete = if k.code == KeyCode::Tab {
+                match &self.overlay {
+                    Overlay::Create(f) => f
+                        .content_index()
+                        .and_then(|i| completion_context(&f.blocks[i].editor, &self.ref_prefix)),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            if let Some((replace_len, seed)) = complete {
+                self.open_ref_picker(replace_len, &seed);
                 return;
             }
             if let Overlay::Create(f) = &mut self.overlay {
@@ -1627,6 +1714,32 @@ impl App {
             has_parent,
             FuzzyAction::Reparent(id),
         ));
+    }
+
+    /// Open the yak-ref picker over the active editor so the chosen id is
+    /// inserted at the editor's cursor (ref autocomplete, yaks-5656). The editor
+    /// is stashed in the picker's `return_to`, so both commit and cancel come
+    /// back to it with its content intact.
+    /// Open the yak-ref picker over whatever editor overlay is active (the
+    /// comment `Overlay::Edit` or the create/edit form `Overlay::Create`),
+    /// stashing it so commit/cancel return to it. `replace_len` is the typed
+    /// `<prefix>-` to drop before inserting the chosen id.
+    fn open_ref_picker(&mut self, replace_len: usize, seed: &str) {
+        let back = std::mem::replace(&mut self.overlay, Overlay::None);
+        let mut fp = FuzzyPick::new(
+            self.editor_vim,
+            "Insert yak reference".into(),
+            HashSet::new(),
+            false,
+            FuzzyAction::InsertRef,
+        );
+        fp.return_to = Some(Box::new(back));
+        fp.replace_len = replace_len;
+        // Pre-filter by whatever tail was already typed after `<prefix>-`.
+        if !seed.is_empty() {
+            insert_into(&mut fp.handler, &fp.query, seed);
+        }
+        self.overlay = Overlay::Fuzzy(fp);
     }
 
     fn open_search(&mut self) {
@@ -2377,9 +2490,25 @@ impl App {
             let down = matches!(k.code, KeyCode::Down | KeyCode::Tab)
                 || (ctrl && k.code == KeyCode::Char('n'))
                 || (q_normal && k.code == KeyCode::Char('j'));
-            if self.field_cancel(k, double_esc) {
-                self.overlay = Overlay::None;
-                self.notification = Some("cancelled".into());
+            // Once the query is in Normal mode (after the first Esc dropped it
+            // there), a single further Esc closes the picker — no rapid
+            // double-Esc needed. Ctrl-C still cancels from anywhere.
+            let esc_from_normal = q_normal && k.code == KeyCode::Esc;
+            if self.field_cancel(k, double_esc) || esc_from_normal {
+                // A picker opened over an editor (ref autocomplete) returns there;
+                // a top-level picker just closes.
+                let back = if let Overlay::Fuzzy(fp) = &mut self.overlay {
+                    fp.return_to.take()
+                } else {
+                    None
+                };
+                match back {
+                    Some(b) => self.overlay = *b,
+                    None => {
+                        self.overlay = Overlay::None;
+                        self.notification = Some("cancelled".into());
+                    }
+                }
             } else if k.code == KeyCode::Enter {
                 if let Overlay::Fuzzy(fp) = std::mem::replace(&mut self.overlay, Overlay::None) {
                     self.commit_fuzzy(fp);
@@ -2472,7 +2601,8 @@ impl App {
         // Pick/Confirm variants move their action out on resolution.
         if matches!(self.overlay, Overlay::Edit(_)) {
             // Decide within a short borrow, then act once it's released.
-            let (do_commit, do_cancel, dirty, open_cmd) = {
+            let ref_prefix = self.ref_prefix.clone();
+            let (do_commit, do_cancel, dirty, open_cmd, open_ref) = {
                 let Overlay::Edit(ed) = &mut self.overlay else {
                     unreachable!()
                 };
@@ -2491,23 +2621,34 @@ impl App {
                 // just drops to Normal, so double-Esc is the only Esc-way out.
                 let esc_cancels = ed.single_line && k.code == KeyCode::Esc && !ed.vim;
                 let cancel = (ctrl && k.code == KeyCode::Char('c')) || esc_cancels || double_esc;
+                // Tab opens the ref completer when the cursor is in a `<prefix>-…`
+                // context; otherwise it falls through as a normal editor key.
+                let complete = if k.code == KeyCode::Tab {
+                    completion_context(&ed.state, &ref_prefix)
+                } else {
+                    None
+                };
                 if commit {
-                    (true, false, false, false)
+                    (true, false, false, false, None)
+                } else if complete.is_some() {
+                    (false, false, false, false, complete)
                 } else if open_cmd {
-                    (false, false, false, true)
+                    (false, false, false, true, None)
                 } else if cancel {
                     // Only the multiline comment editor guards unsaved work.
                     let dirty = !ed.single_line && !ed.text().trim().is_empty();
-                    (false, true, dirty, false)
+                    (false, true, dirty, false, None)
                 } else {
                     ed.handler.on_key_event(k, &mut ed.state.borrow_mut());
-                    (false, false, false, false)
+                    (false, false, false, false, None)
                 }
             };
             if do_commit {
                 if let Overlay::Edit(ed) = std::mem::replace(&mut self.overlay, Overlay::None) {
                     self.commit_edit(ed);
                 }
+            } else if let Some((replace_len, seed)) = open_ref {
+                self.open_ref_picker(replace_len, &seed);
             } else if open_cmd {
                 self.cmdline = Some(String::new());
             } else if do_cancel {
@@ -2618,7 +2759,7 @@ impl App {
         }
     }
 
-    fn commit_fuzzy(&mut self, fp: FuzzyPick) {
+    fn commit_fuzzy(&mut self, mut fp: FuzzyPick) {
         let cands = fuzzy_candidates(&self.all, &fp);
         // Resolve the selection to a target: `None` = clear-parent row,
         // `Some(id)` = a task, or bail if the selection points at nothing.
@@ -2631,6 +2772,33 @@ impl App {
         } else {
             cands.get(fp.sel).map(|t| Some(t.id.clone()))
         };
+        // Ref autocomplete: insert the picked id (if any) and always return to
+        // the stashed editor — even on an empty pick, so the editor is never lost.
+        if let FuzzyAction::InsertRef = fp.action {
+            let picked = target.flatten();
+            if let Some(back) = fp.return_to.take() {
+                let mut ov = *back;
+                if let Some(id) = &picked {
+                    // Replace the typed `<prefix>-` with the chosen id, in
+                    // whichever editor the picker was opened over.
+                    match &mut ov {
+                        Overlay::Edit(ed) => {
+                            delete_into(&mut ed.handler, &ed.state, fp.replace_len);
+                            insert_into(&mut ed.handler, &ed.state, id);
+                        }
+                        Overlay::Create(f) => {
+                            if let Some(i) = f.content_index() {
+                                delete_into(&mut f.handler, &f.blocks[i].editor, fp.replace_len);
+                                insert_into(&mut f.handler, &f.blocks[i].editor, id);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                self.overlay = ov;
+            }
+            return;
+        }
         let Some(target) = target else {
             self.notification = Some("nothing selected".into());
             return;
@@ -2665,6 +2833,7 @@ impl App {
                     Err(e) => self.notification = Some(format!("error: {e}")),
                 }
             }
+            FuzzyAction::InsertRef => unreachable!("InsertRef is handled before this match"),
         }
     }
 
@@ -4236,6 +4405,26 @@ fn render_status(app: &App, frame: &mut Frame, area: Rect) {
         render_query_line("find: ", &sb.query, frame, area);
         return;
     }
+    // While editing, a `<prefix>-…` ref context surfaces a Tab-to-complete hint
+    // on the help bar (opt-in: nothing pops up until you press Tab).
+    let ref_context = match &app.overlay {
+        Overlay::Edit(ed) if !ed.single_line => {
+            completion_context(&ed.state, &app.ref_prefix).is_some()
+        }
+        Overlay::Create(f) => matches!(f.content_index(),
+            Some(i) if completion_context(&f.blocks[i].editor, &app.ref_prefix).is_some()),
+        _ => false,
+    };
+    if ref_context {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "Tab → complete yak · Esc dismiss",
+                Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            )),
+            area,
+        );
+        return;
+    }
     // View manager help hint.
     if matches!(&app.overlay, Overlay::ViewPicker(_)) {
         frame.render_widget(
@@ -4543,6 +4732,123 @@ mod tests {
         handle_key(&mut app, key('X'));
         assert!(matches!(app.overlay, Overlay::None));
         insta::assert_snapshot!(app.notification.clone().unwrap());
+    }
+
+    fn open_body_editor(app: &mut App) {
+        // A multiline comment editor, empty -> opens in Insert mode.
+        app.overlay = Overlay::Edit(Editor::new(
+            app.editor_vim,
+            false,
+            "Comment".into(),
+            "",
+            EditAction::Comment("a0".into()),
+        ));
+    }
+
+    fn tab(app: &mut App) {
+        handle_key(app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn tab_after_prefix_autocompletes_and_replaces_the_typed_token() {
+        let mut app = sample(); // default ref_prefix "yak"
+        open_body_editor(&mut app);
+        // Type a partial ref, then Tab: the picker opens seeded by the tail.
+        typ(&mut app, "yak-a1");
+        tab(&mut app);
+        assert!(matches!(app.overlay, Overlay::Fuzzy(_)));
+        // Commit; the whole "yak-a1" is replaced by the picked id.
+        handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match &app.overlay {
+            Overlay::Edit(ed) => assert_eq!(ed.text(), "a1"),
+            _ => panic!("expected to return to the editor"),
+        }
+    }
+
+    #[test]
+    fn tab_in_a_content_block_without_context_does_not_navigate() {
+        // Tab inside a content block is a normal editor key (Ctrl-N/P navigate
+        // fields); it must not jump to the next field or open the picker.
+        let mut app = sample();
+        app.open_create(false);
+        for _ in 0..8 {
+            if matches!(&app.overlay, Overlay::Create(f) if f.is_content_row()) {
+                break;
+            }
+            tab(&mut app);
+        }
+        assert!(matches!(&app.overlay, Overlay::Create(f) if f.is_content_row()));
+        typ(&mut app, "hello");
+        tab(&mut app);
+        assert!(
+            matches!(&app.overlay, Overlay::Create(f) if f.is_content_row()),
+            "Tab in a content block must stay put, not navigate fields"
+        );
+    }
+
+    #[test]
+    fn typing_prefix_dash_autocompletes_in_the_create_form_description() {
+        // Regression: the create/edit form (Overlay::Create) is a separate key
+        // path from the comment editor; the trigger must fire there too.
+        let mut app = sample(); // default ref_prefix "yak"
+        app.open_create(false);
+        // Tab to the description content block (empty -> Insert mode).
+        for _ in 0..8 {
+            if matches!(&app.overlay, Overlay::Create(f) if f.is_content_row()) {
+                break;
+            }
+            handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        }
+        assert!(
+            matches!(&app.overlay, Overlay::Create(f) if f.is_content_row()),
+            "expected to reach the description content block"
+        );
+        typ(&mut app, "yak-");
+        tab(&mut app);
+        assert!(
+            matches!(app.overlay, Overlay::Fuzzy(_)),
+            "Tab after the prefix in the create form should open the ref picker"
+        );
+    }
+
+    #[test]
+    fn single_esc_from_normal_closes_the_picker() {
+        let mut app = sample(); // vim editor profile by default
+        open_body_editor(&mut app);
+        typ(&mut app, "yak-");
+        tab(&mut app);
+        assert!(matches!(app.overlay, Overlay::Fuzzy(_)));
+        // First Esc: Insert -> Normal in the query; the picker stays open.
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(
+            matches!(app.overlay, Overlay::Fuzzy(_)),
+            "first Esc should only drop the query to Normal"
+        );
+        // A *non-rapid* second Esc (clear the double-Esc timer) still closes it.
+        app.last_esc = None;
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        match &app.overlay {
+            Overlay::Edit(ed) => assert_eq!(ed.text(), "yak-"),
+            _ => panic!("a second Esc from Normal should close the picker"),
+        }
+    }
+
+    #[test]
+    fn ref_picker_cancel_keeps_the_typed_prefix() {
+        let mut app = sample();
+        open_body_editor(&mut app);
+        typ(&mut app, "yak-");
+        tab(&mut app);
+        assert!(matches!(app.overlay, Overlay::Fuzzy(_)));
+        // Ctrl-C cancels the picker; we return to the editor with "yak-" intact.
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+        match &app.overlay {
+            Overlay::Edit(ed) => assert_eq!(ed.text(), "yak-"),
+            _ => panic!("expected to return to the editor"),
+        }
     }
 
     #[test]
@@ -5523,6 +5829,13 @@ mod tests {
             );
         }
 
+        fn ctrl_n(app: &mut App) {
+            handle_key(
+                app,
+                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
+            );
+        }
+
         fn esc(app: &mut App) {
             handle_key(app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         }
@@ -5873,11 +6186,12 @@ mod tests {
             ctrl_s(&mut app);
             let before = app.task("t0").unwrap().body.clone();
             assert!(before.contains('\u{25b8}'));
-            // Edit: walk title→type→priority→labels→description→comment. The
-            // seeded comment opens in Normal (921a), so `i` to insert, then type.
+            // Edit: walk title→type→priority→labels→description→comment. Tab is
+            // now a normal key inside content blocks, so field-nav uses Ctrl-N.
+            // The seeded comment opens in Normal (921a), so `i` to insert.
             press(&mut app, "E");
             for _ in 0..5 {
-                tab(&mut app);
+                ctrl_n(&mut app);
             }
             press(&mut app, "iX");
             ctrl_s(&mut app);
