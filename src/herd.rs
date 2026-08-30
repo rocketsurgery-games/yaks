@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 
 use crate::filter::{self, FilterSpec};
@@ -120,6 +120,16 @@ pub struct TaskRefs {
     pub id: String,
     pub title: String,
     pub entries: Vec<RefEntry>,
+}
+
+/// The git commits linked to a yak, recovered from history rather than stored:
+/// those that name the id in a commit message, and those that touched the yak's
+/// own file as it moved across statuses.
+pub struct Commits {
+    pub id: String,
+    pub path: PathBuf,
+    pub by_message: Vec<String>,
+    pub by_file: Vec<String>,
 }
 
 /// Outcome of a rename operation ([`Herd::rename_many`]).
@@ -365,6 +375,26 @@ impl Herd {
             id: task.id,
             title: task.title,
             entries,
+        }))
+    }
+
+    /// Recover the git commits linked to `id` without any stored hash: commits
+    /// whose message names the id, and commits that touched the yak's own file
+    /// (followed across its status moves). `None` if the id is not a task.
+    pub fn commits(&self, id: &str) -> Result<Option<Commits>> {
+        let Some((_, path)) = store::find_task_file(&self.root, id) else {
+            return Ok(None);
+        };
+        let by_message = git_log(&self.root, &["--oneline", &format!("--grep={id}")])?;
+        let by_file = git_log(
+            &self.root,
+            &["--oneline", "--follow", "--", &path.to_string_lossy()],
+        )?;
+        Ok(Some(Commits {
+            id: id.to_string(),
+            path,
+            by_message,
+            by_file,
         }))
     }
 
@@ -634,6 +664,26 @@ impl Herd {
     pub fn reparent(&self, id: &str, new_parent: Option<String>) -> Result<Reparent> {
         store::reparent(&self.root, id, new_parent)
     }
+}
+
+fn git_log(root: &Path, args: &[&str]) -> Result<Vec<String>> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("log")
+        .args(args)
+        .output()
+        .context("running git log")?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git log failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect())
 }
 
 fn rank(s: Status) -> u8 {

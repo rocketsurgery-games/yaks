@@ -21,7 +21,7 @@ use std::env;
 
 use filter::FilterSpec;
 use herd::{
-    CreateOutcome, DepOutcome, Herd, LogEntry, MoveOutcome, NewTask, OpenError, RefKind,
+    Commits, CreateOutcome, DepOutcome, Herd, LogEntry, MoveOutcome, NewTask, OpenError, RefKind,
     RenameOutcome, RenamePlan, Reparent, Show, Stats, TaskEdit, TaskRefs, UpdateOutcome,
 };
 use model::{Status, Task};
@@ -89,6 +89,9 @@ enum Command {
     /// List the yaks a task points at (parent, deps, and id mentions in its
     /// text), flagging any formal reference that dangles.
     Refs { id: String },
+    /// Show the git commits linked to a yak: those naming its id and those that
+    /// touched its file across status moves.
+    Commits { id: String },
     /// List hairy tasks whose dependencies are all resolved.
     #[command(visible_alias = "ready")]
     Next {
@@ -337,6 +340,13 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
             Some(r) => render_refs(&r),
+        },
+        Command::Commits { id } => match herd.commits(&id)? {
+            None => {
+                eprintln!("no such task: {id}");
+                std::process::exit(1);
+            }
+            Some(c) => render_commits(&c),
         },
         Command::Next { filter, json } => {
             let rows = herd.next(build_spec(filter))?;
@@ -765,6 +775,25 @@ fn render_refs(r: &TaskRefs) {
         let status = if e.resolved { "ok" } else { "DANGLING" };
         let loc = e.line.map(|n| format!("  body:L{n}")).unwrap_or_default();
         println!("  {kind:<8} {:<14} {status}{loc}", e.id);
+    }
+}
+
+fn render_commits(c: &Commits) {
+    println!("Commits mentioning {}:", c.id);
+    if c.by_message.is_empty() {
+        println!("  (none)");
+    } else {
+        for l in &c.by_message {
+            println!("  {l}");
+        }
+    }
+    println!("\nCommits touching {}:", c.path.display());
+    if c.by_file.is_empty() {
+        println!("  (none)");
+    } else {
+        for l in &c.by_file {
+            println!("  {l}");
+        }
     }
 }
 
