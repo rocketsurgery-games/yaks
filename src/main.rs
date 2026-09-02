@@ -215,6 +215,22 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Create a new .yaks/ herd in the current directory (hairy/ shaving/
+    /// shorn/ dead/ + config.yaml + schema). Works without an existing herd.
+    Init {
+        /// Id prefix for new yaks (default: yak).
+        #[arg(long)]
+        prefix: Option<String>,
+        /// Default task type for new yaks (default: task).
+        #[arg(long = "type")]
+        kind: Option<String>,
+        /// Default priority for new yaks (default: 3).
+        #[arg(long)]
+        priority: Option<u8>,
+        /// Use emacs keybindings in embedded editors instead of vim.
+        #[arg(long)]
+        emacs: bool,
+    },
     /// Install the bundled agent skills (yak, yak-tracker) into a skills
     /// directory. Works anywhere — no herd required.
     Skills {
@@ -270,8 +286,18 @@ enum SkillsAction {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // `skills` works without a herd (it installs the skill that teaches an agent
-    // how to use yaks, likely before any herd exists), so handle it first.
+    // `init` creates a herd where none exists, and `skills` installs the skill
+    // that teaches an agent how to use yaks (likely before any herd exists) —
+    // both must run without opening a herd, so handle them first.
+    if let Command::Init {
+        prefix,
+        kind,
+        priority,
+        emacs,
+    } = &cli.command
+    {
+        return run_init(prefix.clone(), kind.clone(), *priority, *emacs);
+    }
     if let Command::Skills { action } = &cli.command {
         return run_skills(action);
     }
@@ -333,6 +359,7 @@ fn main() -> Result<()> {
         Command::RenamePrefix { old, new, dry_run } => {
             report_rename(herd.rename_prefix(&old, &new, dry_run)?)
         }
+        Command::Init { .. } => unreachable!("init is handled before opening a herd"),
         Command::Skills { .. } => unreachable!("skills is handled before opening a herd"),
         Command::Refs { id } => match herd.refs(&id)? {
             None => {
@@ -701,6 +728,47 @@ fn report_rename(out: RenameOutcome) {
         }
         RenameOutcome::NothingToRename => println!("Nothing to rename."),
         RenameOutcome::Done(plan) => render_rename(&plan),
+    }
+}
+
+fn run_init(
+    prefix: Option<String>,
+    kind: Option<String>,
+    priority: Option<u8>,
+    emacs: bool,
+) -> Result<()> {
+    let mut cfg = store::InitConfig::default();
+    if let Some(p) = prefix {
+        cfg.prefix = p;
+    }
+    if let Some(k) = kind {
+        cfg.default_type = k;
+    }
+    if let Some(p) = priority {
+        cfg.default_priority = p;
+    }
+    if emacs {
+        cfg.vim_mode = false;
+    }
+
+    let root = env::current_dir()?.join(".yaks");
+    match store::init(&root, &cfg)? {
+        store::InitOutcome::AlreadyExists => {
+            eprintln!(
+                "error: {} already exists — leaving it untouched.",
+                root.display()
+            );
+            std::process::exit(1);
+        }
+        store::InitOutcome::Created => {
+            println!("Initialized empty yaks herd in {}", root.display());
+            println!(
+                "  prefix {}  ·  default type {}  ·  default priority {}",
+                cfg.prefix, cfg.default_type, cfg.default_priority
+            );
+            println!("Create your first yak with: yaks create --title \"…\"");
+            Ok(())
+        }
     }
 }
 

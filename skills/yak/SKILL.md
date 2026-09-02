@@ -19,6 +19,8 @@ Yaks is a single self-contained binary — a plain command-line tool. Run it dir
 
 The npm package is `@rocketsurgery/yaks` (the unscoped `yaks` was taken, so it's published under the `rocketsurgery` org); the command it installs is `yaks`. Every example below is written as `yaks <cmd>` — substitute whichever invocation works for you. The CLI is stateless: each call is independent, there's nothing to keep running.
 
+**Starting a fresh herd.** If there's no `.yaks/` directory yet, create one with `yaks init` (run in the repo root). It scaffolds `.yaks/{hairy,shaving,shorn,dead}/` plus a `config.yaml`; tune the defaults with `--prefix`, `--type`, and `--priority`. It refuses to clobber an existing herd, so it's safe to run.
+
 Add `--json` to any query command (`list`, `show`, `next`, `tangled`, `search`, `stats`, `rollup`) for machine-readable output.
 
 ## Terminology (say it right)
@@ -100,6 +102,7 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 
 | Command | What it does |
 |---------|-------------|
+| `yaks init` | Scaffold a new `.yaks/` herd in the current directory. `--prefix`, `--type`, `--priority`, `--emacs`. Works without an existing herd |
 | `yaks create` | Create a new task (in hairy). `--title` required; `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description` |
 | `yaks list` | List tasks with optional filters (`--all` also includes dead) |
 | `yaks show` | Show full details of a task |

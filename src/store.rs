@@ -411,6 +411,61 @@ pub fn set_config_prefix(root: &Path, new: &str) -> Result<()> {
     Ok(())
 }
 
+/// The values [`init`] seeds a new herd's `config.yaml` with. The `Default`
+/// impl mirrors the built-in fallbacks in [`read_config`] (prefix "yak",
+/// type "task", priority 3, vim keybindings).
+pub struct InitConfig {
+    pub prefix: String,
+    pub default_type: String,
+    pub default_priority: u8,
+    pub vim_mode: bool,
+}
+
+impl Default for InitConfig {
+    fn default() -> Self {
+        InitConfig {
+            prefix: "yak".to_string(),
+            default_type: "task".to_string(),
+            default_priority: 3,
+            vim_mode: true,
+        }
+    }
+}
+
+/// Result of [`init`].
+pub enum InitOutcome {
+    /// A fresh herd was written at the `.yaks/` path.
+    Created,
+    /// The `.yaks/` directory already existed; nothing was written.
+    AlreadyExists,
+}
+
+/// Create a fresh herd at `root` (the `.yaks/` directory itself): the four
+/// status subdirectories, a `config.yaml` seeded from `cfg`, and the `schema`
+/// marker for this build. Refuses to touch an existing `.yaks/` — the caller
+/// gets [`InitOutcome::AlreadyExists`] and nothing is written.
+pub fn init(root: &Path, cfg: &InitConfig) -> Result<InitOutcome> {
+    if root.exists() {
+        return Ok(InitOutcome::AlreadyExists);
+    }
+    for status in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
+        let dir = root.join(status.dir());
+        fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    let config = format!(
+        "prefix: {}\ndefault_type: {}\ndefault_priority: {}\nvim_mode: {}\n",
+        cfg.prefix, cfg.default_type, cfg.default_priority, cfg.vim_mode,
+    );
+    let config_path = root.join("config.yaml");
+    fs::write(&config_path, config)
+        .with_context(|| format!("writing {}", config_path.display()))?;
+    let schema_path = root.join("schema");
+    fs::write(&schema_path, format!("{SCHEMA}\n"))
+        .with_context(|| format!("writing {}", schema_path.display()))?;
+    Ok(InitOutcome::Created)
+}
+
+/// Load every task file
 /// Every task id present on disk (all statuses, including dead).
 pub fn all_ids(root: &Path) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
@@ -1113,5 +1168,73 @@ mod schema_tests {
             schema_status(&temp_root(Some("garbage"))),
             SchemaStatus::Compatible
         );
+    }
+}
+
+#[cfg(test)]
+mod init_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_dir() -> PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "yaksrs-init-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        p
+    }
+
+    #[test]
+    fn init_creates_dirs_config_and_schema() {
+        let base = temp_dir();
+        let root = base.join(".yaks");
+        let cfg = InitConfig {
+            prefix: "acme".into(),
+            default_type: "chore".into(),
+            default_priority: 1,
+            vim_mode: false,
+        };
+        assert!(matches!(init(&root, &cfg).unwrap(), InitOutcome::Created));
+
+        for sub in ["hairy", "shaving", "shorn", "dead"] {
+            assert!(root.join(sub).is_dir(), "missing {sub}/");
+        }
+        assert_eq!(fs::read_to_string(root.join("schema")).unwrap(), "3\n");
+
+        // The seeded config round-trips through the reader.
+        let read = read_config(&root);
+        assert_eq!(read.prefix, "acme");
+        assert_eq!(read.default_type, "chore");
+        assert_eq!(read.default_priority, 1);
+        assert!(!read.vim_mode);
+
+        // A fresh herd is discoverable and empty.
+        assert_eq!(discover_root(&base).unwrap(), root);
+        assert!(load(&root, &[Status::Hairy]).unwrap().is_empty());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn init_refuses_to_clobber_existing_herd() {
+        let base = temp_dir();
+        let root = base.join(".yaks");
+        assert!(matches!(
+            init(&root, &InitConfig::default()).unwrap(),
+            InitOutcome::Created
+        ));
+        // Drop a marker file, then re-init: it must be left untouched.
+        fs::write(root.join("hairy/keep.md"), "x").unwrap();
+        assert!(matches!(
+            init(&root, &InitConfig::default()).unwrap(),
+            InitOutcome::AlreadyExists
+        ));
+        assert_eq!(fs::read_to_string(root.join("hairy/keep.md")).unwrap(), "x");
+
+        let _ = fs::remove_dir_all(&base);
     }
 }
