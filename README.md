@@ -136,6 +136,44 @@ installs them too:
 npx openskills install rocketsurgery-games/yaks
 ```
 
+## Public and private herds
+
+Because a herd is just a `.yaks/` directory, *you* decide whether it's shared or
+private by choosing whether git tracks it.
+
+**Public (team).** Commit `.yaks/` alongside the code. The task list travels with
+the repo, shows up in PRs and `git log`, and yak moves merge with the change that
+completed them. This project works this way — it tracks its own work in a
+committed herd.
+
+**Private (local-only).** Keep `.yaks/` out of the code repo and it becomes a
+personal scratchpad no one else sees. Hide it whichever way fits:
+
+- a `.yaks/` line in the root `.gitignore` — simplest, but the rule is committed;
+- a `.yaks/.gitignore` containing `*`, so the herd hides itself with no change to
+  the repo root — for a plain, non-nested herd only;
+- `.git/info/exclude`, which is per-repo and never committed;
+- a global `core.excludesFile`, to ignore `.yaks/` across every project at once.
+
+**Private across machines.** To carry a private herd between machines without
+committing it to the code repo, give `.yaks/` its own git repo on a private
+remote, nested inside the project:
+
+```sh
+cd .yaks
+git init && git remote add origin <your-private-remote>
+# work from inside .yaks/ for herd git ops; pull before, push after
+```
+
+Hide the nested repo from the outer repo with `.git/info/exclude` (not the `*`
+trick, which would also blind the herd's own repo). yaks needs no configuration —
+it discovers `.yaks/` exactly as before.
+
+> **Heads up:** `git clean -fdx` in the outer repo will delete an ignored or
+> excluded `.yaks/`, including a nested herd's history. Push a private herd
+> often, and remember a gitignored `.yaks/` won't appear in fresh clones or other
+> worktrees.
+
 ## Configuration
 
 Optional per-project config lives in `.yaks/config.yaml`:

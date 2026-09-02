@@ -53,6 +53,19 @@ To check: `git check-ignore .yaks` printing a path means local-only; `git ls-fil
 - Never `git add` yak files or include them in commits.
 - Keep yaks invisible to everyone else: don't mention them — or their IDs — in commit messages, PR titles/descriptions, code comments, or external trackers. Describe the change in plain terms ("add retry logic"), not "shorn yak-1234".
 
+Pick the hiding method that fits — they differ in blast radius:
+- **Root `.gitignore`** (add a `.yaks/` line): simplest, but the ignore rule is itself committed, so the team sees that a herd exists.
+- **`.yaks/.gitignore` containing `*`**: self-contained — the herd hides itself with no edit to the repo root. Use this **only** for a plain, non-nested local-only herd; the `*` also blinds any git repo *inside* `.yaks/`, so it's the wrong tool for the multi-machine pattern below.
+- **`.git/info/exclude`**: per-repo and untracked, so nothing about the herd touches the committed tree. This is the right choice when `.yaks/` is itself a nested repo.
+- **Global `core.excludesFile`**: ignore `.yaks/` across every repo on the machine at once — handy when you keep private herds in many projects.
+
+> **Footgun:** `git clean -fdx` in the outer repo deletes an ignored/excluded `.yaks/` (and, in the nested case, its git history) — `-x` sweeps ignored files too. A gitignored `.yaks/` is also **not** carried into fresh clones or other git worktrees, so it's simply absent there. Push a private herd often, or you can lose it.
+
+**Local-only across machines.** To sync a private herd between machines without committing it to the code repo, give `.yaks/` its **own** git repo on a private remote, nested inside the project:
+- `cd .yaks && git init`, add a private remote, and commit the herd there. Run all herd git ops from inside `.yaks/`.
+- Hide the nested repo from the **outer** repo with `.git/info/exclude` — never the `*` trick, which would also blind the herd's own repo. The outer repo then ignores `.yaks/` cleanly instead of flagging it as an embedded repo.
+- Habit: **pull before, push after** a work session so machines stay in sync. yaks needs no configuration for this — discovery finds `.yaks/` exactly as always.
+
 **Team.** The yak files are part of the repo — treat them like code.
 - Commit the shorn yak move together with the code that completed it (hard rule 2).
 - Yak IDs are fine in commit messages and other in-repo references — collaborators can resolve them from the committed files.
