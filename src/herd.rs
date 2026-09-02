@@ -899,4 +899,48 @@ mod tests {
         assert!(!root.join("config.yaml").exists());
         assert!(root.join("hairy/yaksrs-0001.md").is_file());
     }
+
+    /// The multi-id transition path (`yaks shorn a b c`) drives the CLI batch by
+    /// calling [`Herd::transition`] once per id. A clean batch moves every id;
+    /// a partial-failure batch (one good id + one nonexistent) still moves the
+    /// good id and flags a failure, which the CLI turns into a non-zero exit.
+    #[test]
+    fn transition_batch_moves_valid_ids_and_flags_missing() {
+        let (root, herd) = temp_herd();
+        store::write::save(&root, &task("yak-0001", Status::Hairy)).unwrap();
+        store::write::save(&root, &task("yak-0002", Status::Hairy)).unwrap();
+
+        // All-good batch: both ids move to shorn, nothing flagged.
+        let mut any_failed = false;
+        for id in ["yak-0001", "yak-0002"] {
+            if herd.transition(id, Status::Shorn).unwrap() != MoveOutcome::Moved {
+                any_failed = true;
+            }
+        }
+        assert!(!any_failed, "an all-valid batch must not flag failure");
+        assert!(root.join("shorn/yak-0001.md").is_file());
+        assert!(root.join("shorn/yak-0002.md").is_file());
+
+        // Partial failure: good id moves, missing id reports NotFound. The batch
+        // must not abort on the first error, so the good id still moves.
+        store::write::save(&root, &task("yak-0003", Status::Hairy)).unwrap();
+        let mut outcomes = Vec::new();
+        let mut any_failed = false;
+        for id in ["yak-0003", "yak-nope"] {
+            let outcome = herd.transition(id, Status::Shorn).unwrap();
+            if outcome != MoveOutcome::Moved {
+                any_failed = true;
+            }
+            outcomes.push(outcome);
+        }
+        assert_eq!(outcomes, vec![MoveOutcome::Moved, MoveOutcome::NotFound]);
+        assert!(
+            any_failed,
+            "a missing id must flag the batch (non-zero exit)"
+        );
+        assert!(
+            root.join("shorn/yak-0003.md").is_file(),
+            "the valid id must move despite a sibling failure"
+        );
+    }
 }

@@ -171,19 +171,34 @@ enum Command {
         #[arg(long)]
         note: Option<String>,
     },
-    /// Start shaving a yak (move to shaving).
+    /// Start shaving one or more yaks (move to shaving).
     #[command(visible_alias = "work")]
-    Shave { id: String },
-    /// Mark a yak shorn (move to shorn).
+    Shave {
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
+    /// Mark one or more yaks shorn (move to shorn).
     #[command(visible_alias = "close")]
-    Shorn { id: String },
-    /// Regrow a shorn yak (move back to hairy).
+    Shorn {
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
+    /// Regrow one or more shorn yaks (move back to hairy).
     #[command(visible_alias = "reopen")]
-    Regrow { id: String },
-    /// Slaughter a yak (move to dead).
-    Slaughter { id: String },
-    /// Revive a dead yak (move back to hairy).
-    Revive { id: String },
+    Regrow {
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
+    /// Slaughter one or more yaks (move to dead).
+    Slaughter {
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
+    /// Revive one or more dead yaks (move back to hairy).
+    Revive {
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
     /// Add or remove a dependency.
     Dep {
         #[command(subcommand)]
@@ -472,22 +487,24 @@ fn main() -> Result<()> {
                 UpdateOutcome::NoChanges => println!("No changes specified."),
             }
         }
-        Command::Shave { id } => transition(
+        Command::Shave { ids } => transition_many(
             &herd,
-            &id,
+            &ids,
             Status::Shaving,
             "already being shaved",
             "Shaving",
         )?,
-        Command::Shorn { id } => transition(&herd, &id, Status::Shorn, "already shorn", "Shorn!")?,
-        Command::Regrow { id } => {
-            transition(&herd, &id, Status::Hairy, "already hairy", "Regrown:")?
+        Command::Shorn { ids } => {
+            transition_many(&herd, &ids, Status::Shorn, "already shorn", "Shorn!")?
         }
-        Command::Slaughter { id } => {
-            transition(&herd, &id, Status::Dead, "already dead", "Slaughtered:")?
+        Command::Regrow { ids } => {
+            transition_many(&herd, &ids, Status::Hairy, "already hairy", "Regrown:")?
         }
-        Command::Revive { id } => {
-            transition(&herd, &id, Status::Hairy, "already hairy", "Revived:")?
+        Command::Slaughter { ids } => {
+            transition_many(&herd, &ids, Status::Dead, "already dead", "Slaughtered:")?
+        }
+        Command::Revive { ids } => {
+            transition_many(&herd, &ids, Status::Hairy, "already hairy", "Revived:")?
         }
         Command::Dep { action } => match action {
             DepAction::Add { id, dep_id } => match herd.dep_add(&id, &dep_id)? {
@@ -652,14 +669,44 @@ fn parse_status(s: &str) -> Option<Status> {
 
 // -- rendering ------------------------------------------------------------
 
-fn transition(herd: &Herd, id: &str, dest: Status, already: &str, done: &str) -> Result<()> {
+/// Transition a single yak, printing a per-id result line. Returns `true` on
+/// success (moved or already there) and `false` on failure (not found), so a
+/// batch caller can process every id and set the exit code once at the end.
+fn transition(herd: &Herd, id: &str, dest: Status, already: &str, done: &str) -> Result<bool> {
     match herd.transition(id, dest)? {
         MoveOutcome::NotFound => {
             eprintln!("error: task {id} not found");
-            std::process::exit(1);
+            Ok(false)
         }
-        MoveOutcome::AlreadyThere => println!("{id} is {already}"),
-        MoveOutcome::Moved => println!("{done} {id}"),
+        MoveOutcome::AlreadyThere => {
+            println!("{id} is {already}");
+            Ok(true)
+        }
+        MoveOutcome::Moved => {
+            println!("{done} {id}");
+            Ok(true)
+        }
+    }
+}
+
+/// Transition every id in `ids`, one at a time. All ids are processed even if
+/// one fails (no abort-on-first-error); if any id was not found, the process
+/// exits non-zero after the whole batch is handled.
+fn transition_many(
+    herd: &Herd,
+    ids: &[String],
+    dest: Status,
+    already: &str,
+    done: &str,
+) -> Result<()> {
+    let mut any_failed = false;
+    for id in ids {
+        if !transition(herd, id, dest, already, done)? {
+            any_failed = true;
+        }
+    }
+    if any_failed {
+        std::process::exit(1);
     }
     Ok(())
 }
