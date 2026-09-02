@@ -1,6 +1,6 @@
 {
   "name": "@rocketsurgery/yaks",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Filesystem-native task tracker (Rust) — npm launcher for the `yaks` binary",
   "bin": { "yaks": "bin/yaks.js" },
   "files": ["bin/"],
