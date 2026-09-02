@@ -4,7 +4,7 @@ title: Public/private herd patterns + skill/docs/CLI support
 type: task
 priority: 2
 created: '2026-09-02T22:57:10Z'
-updated: '2026-09-02T22:57:10Z'
+updated: '2026-09-02T23:26:31Z'
 parent: yaks-3901
 labels:
 - docs
