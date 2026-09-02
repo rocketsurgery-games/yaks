@@ -4,7 +4,7 @@ title: Informal yak-linking affordances
 type: feature
 priority: 3
 created: '2026-08-26T13:32:33Z'
-updated: '2026-08-29T18:42:14Z'
+updated: '2026-08-30T01:40:43Z'
 labels:
 - ui
 - links
