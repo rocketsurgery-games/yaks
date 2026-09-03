@@ -116,6 +116,9 @@ enum Command {
         /// (YYYY-MM-DD), or an RFC3339 timestamp. Omit for the full log.
         #[arg(long)]
         since: Option<String>,
+        /// Only notes attributed to this actor (matches the `[actor]` stamp).
+        #[arg(long)]
+        by: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -170,6 +173,10 @@ enum Command {
         source: Option<String>,
         #[arg(long)]
         note: Option<String>,
+        /// Attribute the note to this actor (stamped as `[actor]`). Defaults to
+        /// $YAKS_ACTOR, then the git user; never implies ownership.
+        #[arg(long = "as")]
+        as_actor: Option<String>,
     },
     /// Start shaving one or more yaks (move to shaving).
     #[command(visible_alias = "work")]
@@ -352,9 +359,10 @@ fn main() -> Result<()> {
         Command::Log {
             filter,
             since,
+            by,
             json,
         } => {
-            let entries = herd.log(build_spec(filter), since.as_deref())?;
+            let entries = herd.log(build_spec(filter), since.as_deref(), by.as_deref())?;
             render_log(&entries, json)?;
         }
         Command::Show { id, json } => match herd.show(&id)? {
@@ -467,7 +475,11 @@ fn main() -> Result<()> {
             remove_label,
             source,
             note,
+            as_actor,
         } => {
+            let actor = note
+                .as_ref()
+                .and_then(|_| resolve_actor(as_actor.as_deref()));
             let edit = TaskEdit {
                 title,
                 kind,
@@ -477,6 +489,7 @@ fn main() -> Result<()> {
                 remove_labels: remove_label,
                 source,
                 note,
+                actor,
             };
             match herd.update(&id, edit)? {
                 UpdateOutcome::NotFound => {
@@ -644,6 +657,34 @@ fn parse_size(s: Option<&str>) -> (u16, u16) {
 
 // -- CLI arg mapping ------------------------------------------------------
 
+/// Resolve the actor a note should be attributed to: an explicit `--as` value
+/// wins, then `$YAKS_ACTOR` (a harness/coordinator can pin it once per worker),
+/// then the git `user.name` (free attribution for human CLI use). Returns `None`
+/// when nothing is set, which writes a bare, unattributed note. Best-effort:
+/// never fails the command. Note this defaults an *agent* running under the
+/// human's git identity to the human's name unless it sets `--as`/$YAKS_ACTOR.
+fn resolve_actor(explicit: Option<&str>) -> Option<String> {
+    let clean = |s: &str| {
+        let t = s.trim();
+        (!t.is_empty()).then(|| t.to_string())
+    };
+    if let Some(a) = explicit.and_then(clean) {
+        return Some(a);
+    }
+    if let Some(a) = std::env::var("YAKS_ACTOR").ok().as_deref().and_then(clean) {
+        return Some(a);
+    }
+    let out = std::process::Command::new("git")
+        .args(["config", "user.name"])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        .as_deref()
+        .and_then(clean)
+}
+
 fn build_spec(f: FilterFlags) -> FilterSpec {
     FilterSpec {
         statuses: f.status.iter().filter_map(|s| parse_status(s)).collect(),
@@ -731,7 +772,12 @@ fn render_log(entries: &[LogEntry], json: bool) -> Result<()> {
         println!("No notes found.");
     } else {
         for e in entries {
-            println!("\u{25b8} {}  {}  {}", e.ts, e.id, e.title);
+            let who = e
+                .actor
+                .as_deref()
+                .map(|a| format!("  [{a}]"))
+                .unwrap_or_default();
+            println!("\u{25b8} {}  {}  {}{}", e.ts, e.id, e.title, who);
             for line in e.note.lines() {
                 println!("    {line}");
             }

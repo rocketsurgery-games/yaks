@@ -578,16 +578,45 @@ pub fn load_task_by_id(root: &Path, id: &str) -> Result<Option<Task>> {
 /// Append a timestamped note block to a body
 /// (`<body>\n\n---\n\u{25b8} <ts>\n<note>`; no leading blank line when empty).
 pub fn append_note(body: &str, ts: &str, note: &str) -> String {
+    append_note_as(body, ts, None, note)
+}
+
+/// Like [`append_note`], but stamps an optional actor onto the marker line as
+/// `\u{25b8} <ts> [<actor>]`. An absent or empty actor writes the bare
+/// `\u{25b8} <ts>` form, so this is byte-for-byte compatible with pre-actor
+/// notes and needs no migration.
+pub fn append_note_as(body: &str, ts: &str, actor: Option<&str>, note: &str) -> String {
     let desc = body.trim_end();
     let sep = if desc.is_empty() { "" } else { "\n\n" };
-    format!("{desc}{sep}---\n\u{25b8} {ts}\n{note}")
+    let who = match actor {
+        Some(a) if !a.trim().is_empty() => format!(" [{}]", a.trim()),
+        _ => String::new(),
+    };
+    format!("{desc}{sep}---\n\u{25b8} {ts}{who}\n{note}")
 }
 
 /// A single timestamped note parsed back out of a task body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteEntry {
     pub ts: String,
+    /// The actor that wrote the note, if the marker line carried a `[actor]`
+    /// suffix. `None` for bare (pre-actor) notes.
+    pub actor: Option<String>,
     pub text: String,
+}
+
+/// Split a note marker line's payload into its timestamp and optional trailing
+/// `[actor]`. Timestamps never contain `" ["`, so a line ending in `]` with an
+/// earlier `" ["` is unambiguously `<ts> [<actor>]`; anything else is a bare ts.
+fn split_note_head(head: &str) -> (String, Option<String>) {
+    if head.ends_with(']') {
+        if let Some(idx) = head.rfind(" [") {
+            let ts = head[..idx].trim().to_string();
+            let actor = head[idx + 2..head.len() - 1].to_string();
+            return (ts, Some(actor));
+        }
+    }
+    (head.to_string(), None)
 }
 
 /// Parse the timestamped note blocks written by `append_note` out of a body. A
@@ -604,13 +633,13 @@ pub fn parse_notes(body: &str) -> Vec<NoteEntry> {
     let mut i = 0;
     while i < lines.len() {
         if is_delim(i) {
-            let ts = lines[i + 1][MARK.len()..].trim().to_string();
+            let (ts, actor) = split_note_head(lines[i + 1][MARK.len()..].trim());
             let mut j = i + 2;
             while j < lines.len() && !is_delim(j) {
                 j += 1;
             }
             let text = lines[i + 2..j].join("\n").trim().to_string();
-            out.push(NoteEntry { ts, text });
+            out.push(NoteEntry { ts, actor, text });
             i = j;
         } else {
             i += 1;
@@ -685,6 +714,27 @@ mod log_parse_tests {
         assert_eq!(notes[0].text, "first note");
         assert_eq!(notes[1].ts, "2026-01-02T00:00:00Z");
         assert_eq!(notes[1].text, "second\nspans lines");
+        // Bare notes (no `--as`) carry no actor.
+        assert_eq!(notes[0].actor, None);
+        assert_eq!(notes[1].actor, None);
+    }
+
+    #[test]
+    fn append_note_as_round_trips_actor_and_stays_back_compatible() {
+        // An actor is stamped as `[actor]` and parses back out...
+        let with = append_note_as("", "2026-01-01T00:00:00Z", Some("opus@joel"), "did a thing");
+        assert!(with.contains("\u{25b8} 2026-01-01T00:00:00Z [opus@joel]"));
+        // ...alongside a bare note in the same body, which stays actor-less.
+        let body = append_note_as(&with, "2026-01-02T00:00:00Z", None, "bare");
+        let notes = parse_notes(&body);
+        assert_eq!(notes[0].actor.as_deref(), Some("opus@joel"));
+        assert_eq!(notes[0].ts, "2026-01-01T00:00:00Z");
+        assert_eq!(notes[0].text, "did a thing");
+        assert_eq!(notes[1].actor, None);
+        assert_eq!(notes[1].ts, "2026-01-02T00:00:00Z");
+        // An empty/whitespace actor writes the bare form (no empty `[]`).
+        let blank = append_note_as("", "2026-01-03T00:00:00Z", Some("  "), "x");
+        assert_eq!(parse_notes(&blank)[0].actor, None);
     }
 
     #[test]

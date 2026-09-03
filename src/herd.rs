@@ -60,6 +60,9 @@ pub struct TaskEdit {
     pub remove_labels: Vec<String>,
     pub source: Option<String>,
     pub note: Option<String>,
+    /// Actor to attribute an appended note to (stamped as `[actor]`). Only
+    /// meaningful alongside `note`; ownership is never implied.
+    pub actor: Option<String>,
 }
 
 pub enum CreateOutcome {
@@ -172,6 +175,7 @@ pub struct LogEntry {
     pub id: String,
     pub title: String,
     pub ts: String,
+    pub actor: Option<String>,
     pub note: String,
 }
 
@@ -295,7 +299,12 @@ impl Herd {
     /// set, keeps only notes at or after that instant (see `store::parse_since`).
     /// Notes live in each task body; state transitions are not timestamped, so
     /// this is a note log, not a full audit trail.
-    pub fn log(&self, spec: FilterSpec, since: Option<&str>) -> Result<Vec<LogEntry>> {
+    pub fn log(
+        &self,
+        spec: FilterSpec,
+        since: Option<&str>,
+        by: Option<&str>,
+    ) -> Result<Vec<LogEntry>> {
         let cutoff = match since {
             Some(s) => Some(store::parse_since(s, Utc::now())?),
             None => None,
@@ -312,10 +321,16 @@ impl Herd {
                         }
                     }
                 }
+                if let Some(who) = by {
+                    if note.actor.as_deref() != Some(who) {
+                        continue;
+                    }
+                }
                 out.push(LogEntry {
                     id: t.id.clone(),
                     title: t.title.clone(),
                     ts: note.ts,
+                    actor: note.actor,
                     note: note.text,
                 });
             }
@@ -611,7 +626,7 @@ impl Herd {
         }
         if let Some(n) = edit.note {
             let ts = store::now_iso();
-            task.body = store::append_note(&task.body, &ts, &n);
+            task.body = store::append_note_as(&task.body, &ts, edit.actor.as_deref(), &n);
             changed = true;
         }
         if changed {

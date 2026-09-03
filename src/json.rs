@@ -60,7 +60,9 @@ pub fn log_array(entries: &[crate::herd::LogEntry]) -> Value {
     Value::Array(
         entries
             .iter()
-            .map(|e| json!({"timestamp": e.ts, "id": e.id, "title": e.title, "note": e.note}))
+            .map(|e| {
+                json!({"timestamp": e.ts, "id": e.id, "title": e.title, "actor": e.actor, "note": e.note})
+            })
             .collect(),
     )
 }
