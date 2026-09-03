@@ -150,3 +150,58 @@ fn rollup_json() {
 fn rollup_keys() {
     snap!("rollup_keys", &["rollup", "--keys"]);
 }
+
+/// `list --needs` selects only yaks blocked on a human. Uses a throwaway herd
+/// built via the CLI so it never depends on the shared fixture (yaks-f81a).
+#[test]
+fn list_needs_filters_to_blocked() {
+    let dir = std::env::temp_dir().join(format!("yaks-needs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let cli = |args: &[&str]| -> String {
+        let out = Command::cargo_bin("yaks")
+            .unwrap()
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "command {args:?} failed: {:?}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    // `Created <id>: <title>` -> id.
+    let created_id = |out: &str| -> String {
+        out.lines()
+            .find_map(|l| l.strip_prefix("Created "))
+            .and_then(|rest| rest.split(':').next())
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+
+    cli(&["init"]);
+    let blocked = created_id(&cli(&["create", "--title", "needs a decision"]));
+    let free = created_id(&cli(&["create", "--title", "just work"]));
+
+    // Block one yak on a human.
+    cli(&["ask", &blocked, "--note", "which way?"]);
+
+    // Baseline: plain list shows both.
+    let all = cli(&["list"]);
+    assert!(all.contains(&blocked) && all.contains(&free), "list: {all}");
+
+    // --needs keeps only the blocked one.
+    let needs = cli(&["list", "--needs"]);
+    assert!(needs.contains(&blocked), "list --needs missing blocked: {needs}");
+    assert!(
+        !needs.contains(&free),
+        "list --needs leaked unblocked yak: {needs}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
