@@ -48,6 +48,10 @@ pub fn task_value(t: &Task) -> Value {
     if let Some(n) = &t.needs {
         m.insert("needs".into(), json!(n));
     }
+    // Verbatim frontmatter lines this binary does not model, surfaced read-only.
+    if !t.extra.is_empty() {
+        m.insert("extra".into(), json!(t.extra));
+    }
     let body = t.body.trim();
     if !body.is_empty() {
         m.insert("description".into(), json!(body));
@@ -145,4 +149,43 @@ pub fn rollup_value(groups: &[Group]) -> Value {
 pub fn print(v: &Value) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(v)?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task() -> Task {
+        Task {
+            id: "yak-0001".into(),
+            title: "a title".into(),
+            kind: "feature".into(),
+            priority: 3,
+            status: Status::Hairy,
+            created: None,
+            updated: None,
+            parent: None,
+            labels: vec![],
+            depends_on: vec![],
+            source: None,
+            needs: None,
+            extra: vec![],
+            body: String::new(),
+        }
+    }
+
+    #[test]
+    fn task_value_surfaces_extra_when_present() {
+        let mut t = task();
+        t.extra = vec!["wat: foo".into()];
+        let v = task_value(&t);
+        assert_eq!(v["extra"], json!(["wat: foo"]));
+    }
+
+    #[test]
+    fn task_value_omits_extra_when_empty() {
+        // No unmodeled fields => no `extra` key at all (keeps existing goldens).
+        let v = task_value(&task());
+        assert!(v.get("extra").is_none());
+    }
 }
