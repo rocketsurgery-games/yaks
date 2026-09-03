@@ -4,7 +4,7 @@ title: Skill updates from our decisions + how to VALIDATE skills
 type: task
 priority: 2
 created: '2026-09-03T22:25:55Z'
-updated: '2026-09-03T22:25:55Z'
+updated: '2026-09-03T22:45:51Z'
 parent: yaks-3901
 labels:
 - skills
@@ -31,3 +31,7 @@ HOW TO VALIDATE SKILLS (ideas to develop):
 3. Ablation / adversarial: deliberately omit a rule, see if the failure mode reappears (we implicitly did this with the FilterSpec type-hazard). Controlled A/B: same scoped task with vs without a rule.
 4. LLM-as-judge over the trail as a fallback where predicates are too rigid — but bias toward predicates.
 5. The method we've been using IS the validation loop: run real parallel rounds, observe deviations, encode each observed success/failure back into the skill AS A PREDICATE. Skills improve by accreting tripwires from real runs. This yak tracks that accretion.
+
+---
+▸ 2026-09-03T22:45:51Z [coordinator]
+SKILL-SOP REFINEMENT from run 3 (pending fold into coordinating-yaks): the file-tool SOP's 'edit via explicit .worktrees/<name>/ path' can FAIL when the harness's edit tool refuses GITIGNORED paths (.worktrees/ is gitignored) — the CLI worker's edit_file couldn't resolve the worktree path and fell back to TERMINAL-based edits (cwd=worktree, anchored replacements). Both workers stayed main-src-clean regardless. So the SOP needs a fallback rung: if the file tool won't write the gitignored worktree path, do edits through the terminal with cwd in the worktree. New validation predicate candidate: 'main tree src-clean throughout a worktree run' held for a 3rd time -> strong signal the isolation discipline is real. Also: a human's dirty working-tree yak (b517: wat:+needs:human) correctly surfaced in inbox and was left untouched by both workers + coordinator — the 'leave human drift' + 'files-are-authoritative' conventions held again.
