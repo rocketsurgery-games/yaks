@@ -127,7 +127,15 @@ enum EditAction {
     Comment(String),
     Attach(String),
     SaveView,
-    RenameView { index: usize },
+    RenameView {
+        index: usize,
+    },
+    /// Raise a `needs` block on this id (default `human`) and record the typed
+    /// question as an attributed note. TUI counterpart of CLI `ask`.
+    Ask(String),
+    /// Clear the `needs` block on this id and record the typed reply. TUI
+    /// counterpart of CLI `answer`.
+    Answer(String),
 }
 
 /// What a context-sensitive `E` in the detail pane should edit, derived from
@@ -766,6 +774,10 @@ pub struct App {
     herd_scope: HashMap<String, view::HerdScope>,
     /// The live view filter applied by the tree (re-colors + prunes).
     filter: FilterSpec,
+    /// When set, the list is overridden to show only yaks carrying a `needs`
+    /// block (the inbox: anything awaiting a human, regardless of status/view).
+    /// A TUI-layer overlay on `rows()`, not a `FilterSpec` axis. Toggled by `i`.
+    inbox_only: bool,
     /// Approx. list viewport height, refreshed each loop for paging math.
     page: u16,
     /// Approx. detail viewport height (mid area = terminal height - 3),
@@ -818,6 +830,7 @@ impl App {
             collapsed: HashSet::new(),
             herd_scope: HashMap::new(),
             filter,
+            inbox_only: false,
             page: 10,
             detail_page: 10,
             detail_width: Cell::new(0),
@@ -1016,6 +1029,15 @@ impl App {
 
     /// Visible rows for the active view (dispatch: working-set / flat / tree).
     fn rows(&self) -> Vec<tree::Row<'_>> {
+        // The inbox override wins over any view: a flat list of every yak with a
+        // `needs` block, whatever its status (mirrors `herd.inbox`), so a set
+        // block is never invisible. Filters the loaded set in the TUI layer
+        // rather than touching the shared `FilterSpec`.
+        if self.inbox_only {
+            let mut matched: Vec<&Task> = self.all.iter().filter(|t| t.needs.is_some()).collect();
+            matched.sort_by(|a, b| a.id.cmp(&b.id));
+            return matched.into_iter().map(tree::Row::leaf).collect();
+        }
         let v = self.active_view();
         if v.key == "working-set" {
             return self.working_set_rows();
@@ -1070,6 +1092,22 @@ impl App {
         let n = pinned.len() as i32;
         let next = pinned[(((cur as i32 + delta) % n + n) % n) as usize];
         self.set_view(next);
+    }
+
+    /// Toggle the inbox override — the flat list of yaks awaiting a human
+    /// (`needs` set), across every status and view. See [`App::rows`].
+    fn toggle_inbox(&mut self) {
+        self.inbox_only = !self.inbox_only;
+        self.cursor = 0;
+        self.detail_scroll = 0;
+        self.focus = Focus::List;
+        self.clamp_cursor();
+        self.notification = Some(if self.inbox_only {
+            let n = self.all.iter().filter(|t| t.needs.is_some()).count();
+            format!("inbox: {n} awaiting a human (i to exit)")
+        } else {
+            "inbox off".into()
+        });
     }
 
     /// True when the live filter has been edited away from the active view spec.
@@ -1849,6 +1887,57 @@ impl App {
                 "",
                 EditAction::Comment(id),
             ));
+        }
+    }
+
+    /// Context-sensitive needs affordance: answer the selected yak if it already
+    /// carries a `needs` block, otherwise ask (raise one). One key, two verbs —
+    /// the prompt label states which.
+    fn open_ask_or_answer(&mut self) {
+        let blocked = self.selected().is_some_and(|t| t.needs.is_some());
+        if blocked {
+            self.open_answer();
+        } else {
+            self.open_ask();
+        }
+    }
+
+    fn open_ask(&mut self) {
+        if let Some(id) = self.selected_id() {
+            self.overlay = Overlay::Edit(Editor::new(
+                self.editor_vim,
+                true,
+                format!("Ask {id} (blocks on a human) — Enter save · Ctrl-C cancel"),
+                "",
+                EditAction::Ask(id),
+            ));
+        }
+    }
+
+    fn open_answer(&mut self) {
+        if let Some(id) = self.selected_id() {
+            self.overlay = Overlay::Edit(Editor::new(
+                self.editor_vim,
+                true,
+                format!("Answer {id} (clears the block) — Enter save · Ctrl-C cancel"),
+                "",
+                EditAction::Answer(id),
+            ));
+        }
+    }
+
+    /// Set or clear a `needs` block via the herd, appending the typed text as an
+    /// attributed note when non-empty. Backs the `Ask`/`Answer` edit actions.
+    fn set_needs_edit(&mut self, id: &str, needs: Option<String>, note: Option<&str>, ok: String) {
+        let actor = crate::actor::resolve(None);
+        let Some(h) = &self.herd else { return };
+        match h.set_needs(id, needs, actor.as_deref(), note) {
+            Ok(Some(_)) => {
+                self.reload();
+                self.notification = Some(ok);
+            }
+            Ok(None) => self.notification = Some(format!("{id} not found")),
+            Err(e) => self.notification = Some(format!("error: {e}")),
         }
     }
 
@@ -2750,6 +2839,21 @@ impl App {
                 );
             }
             EditAction::Attach(id) => self.commit_attach(id, text),
+            EditAction::Ask(id) => {
+                let note = text.trim();
+                let note = (!note.is_empty()).then_some(note);
+                self.set_needs_edit(
+                    &id,
+                    Some("human".into()),
+                    note,
+                    format!("asked {id}: needs human (out of next until answered)"),
+                );
+            }
+            EditAction::Answer(id) => {
+                let note = text.trim();
+                let note = (!note.is_empty()).then_some(note);
+                self.set_needs_edit(&id, None, note, format!("answered {id}: block cleared"));
+            }
             EditAction::SaveView => self.save_current_view(text),
             EditAction::RenameView { index } => {
                 let name = text.trim().to_string();
@@ -3070,6 +3174,8 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('y') => app.copy_selected_id(),
             KeyCode::Char('M') => app.open_comment(),
             KeyCode::Char('A') => app.open_attach(),
+            KeyCode::Char('a') => app.open_ask_or_answer(),
+            KeyCode::Char('i') => app.toggle_inbox(),
             KeyCode::Char('v') => app.open_view_picker(),
             KeyCode::Char('V') => app.open_save_view(),
             KeyCode::Char('?') => app.open_help(),
@@ -3160,6 +3266,7 @@ fn handle_key(app: &mut App, k: KeyEvent) {
                 }
                 KeyCode::Char('M') => app.open_comment(),
                 KeyCode::Char('A') => app.open_attach(),
+                KeyCode::Char('a') => app.open_ask_or_answer(),
                 KeyCode::Char('O') => app.open_current_external(),
                 // Move between tasks without leaving the detail pane.
                 KeyCode::Char('J') => app.detail_next_task(1),
@@ -3310,6 +3417,7 @@ fn help_content() -> Vec<Line<'static>> {
         entry("Space", "Collapse / expand subtree"),
         entry("v / V", "View picker / save filter as view"),
         entry("* ", "Star / unstar (Starred view)"),
+        entry("i", "Inbox: toggle yaks awaiting a human"),
         blank(),
         section("Detail pane"),
         entry("h / ← / Esc", "Back to list"),
@@ -3329,6 +3437,7 @@ fn help_content() -> Vec<Line<'static>> {
         entry("P / T / L / S", "Priority / type / labels / state"),
         entry("D / R", "Add dependency / reparent"),
         entry("M", "Add a comment (note)"),
+        entry("a", "Ask / answer (raise / clear needs block)"),
         entry(
             ":w / :q / :wq",
             "Save / cancel / save+close (editor Normal)",
@@ -3918,7 +4027,7 @@ fn disp_width(s: &str) -> usize {
     s.chars()
         .map(|c| {
             let cp = c as u32;
-            if cp >= 0x1_F000 || cp == 0x2b50 || cp == 0x2764 {
+            if cp >= 0x1_F000 || cp == 0x2b50 || cp == 0x2764 || cp == 0x23f3 {
                 2
             } else {
                 1
@@ -4047,6 +4156,7 @@ fn render_list(app: &App, frame: &mut Frame, area: Rect) {
                 r,
                 id_field_w,
                 blocked.contains(&r.task.id),
+                r.task.needs.is_some(),
                 app.is_starred(&r.task.id),
                 area.width,
             )
@@ -4093,6 +4203,7 @@ fn list_item<'a>(
     r: &tree::Row<'a>,
     id_field_w: usize,
     blocked: bool,
+    needs_blocked: bool,
     starred: bool,
     width: u16,
 ) -> ListItem<'a> {
@@ -4133,6 +4244,19 @@ fn list_item<'a>(
         right_spans.push(Span::styled(
             label_str.clone(),
             dim(Style::new().fg(Color::Magenta).add_modifier(Modifier::DIM)),
+        ));
+    }
+    // Needs badge (⏳): this yak is awaiting a human (a `needs` block). A
+    // distinct axis from the dependency-blocked `*` lead, so it can co-occur.
+    if needs_blocked {
+        if !right_plain.is_empty() {
+            right_plain.push(' ');
+            right_spans.push(Span::raw(" "));
+        }
+        right_plain.push('\u{23f3}');
+        right_spans.push(Span::styled(
+            "\u{23f3}",
+            dim(Style::new().fg(Color::Yellow)),
         ));
     }
     if starred {
@@ -5782,6 +5906,42 @@ mod tests {
         insta::assert_snapshot!(draw(&app, 72, 14));
     }
 
+    #[test]
+    fn needs_badge_renders_on_a_blocked_row() {
+        // A yak carrying a `needs` block gets the ⏳ badge; an unblocked one
+        // does not (the badge is per-row, on the right).
+        let mut blocked = task("t0", "waiting on a human", Status::Hairy, 3, None);
+        blocked.needs = Some("human".into());
+        let app = App::new(vec![blocked, task("t1", "free", Status::Hairy, 3, None)]);
+        let out = draw(&app, 80, 8);
+        assert!(out.contains('\u{23f3}'), "hourglass badge present:\n{out}");
+    }
+
+    #[test]
+    fn inbox_toggle_shows_only_needs_blocked_across_statuses() {
+        // `i` overrides the view with a flat list of every yak awaiting a human,
+        // regardless of status (a shorn-but-blocked yak still surfaces).
+        let mut hairy = task("t0", "ask me", Status::Hairy, 3, None);
+        hairy.needs = Some("human".into());
+        let mut shorn = task("t1", "still blocked", Status::Shorn, 3, None);
+        shorn.needs = Some("human".into());
+        let free = task("t2", "unblocked", Status::Hairy, 3, None);
+        let mut app = App::new(vec![hairy, shorn, free]);
+        handle_key(&mut app, key('i'));
+        assert!(app.inbox_only);
+        let ids: Vec<String> = app.rows().iter().map(|r| r.task.id.clone()).collect();
+        assert_eq!(ids, vec!["t0".to_string(), "t1".to_string()]);
+        // Toggling off restores the normal (Hairy) view: the shorn yak drops out.
+        handle_key(&mut app, key('i'));
+        assert!(!app.inbox_only);
+        let ids: Vec<String> = app.rows().iter().map(|r| r.task.id.clone()).collect();
+        assert!(ids.contains(&"t0".to_string()) && ids.contains(&"t2".to_string()));
+        assert!(
+            !ids.contains(&"t1".to_string()),
+            "shorn hidden in Hairy view"
+        );
+    }
+
     // -- live mutation through a temp herd --------------------------------
 
     mod live {
@@ -6135,6 +6295,41 @@ mod tests {
             let body = &app.task("t0").unwrap().body;
             assert!(body.contains("a helpful note"), "note text present");
             assert!(body.contains('\u{25b8}'), "timestamp sigil present");
+        }
+
+        #[test]
+        fn ask_raises_needs_and_records_the_question() {
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "a"); // no needs yet -> ask prompt
+            press(&mut app, "why is this blocked");
+            enter(&mut app); // single-line commit
+            assert!(matches!(app.overlay, Overlay::None));
+            let t = app.task("t0").unwrap();
+            assert_eq!(t.needs.as_deref(), Some("human"));
+            assert!(
+                t.body.contains("why is this blocked"),
+                "question recorded as a note: {}",
+                t.body
+            );
+        }
+
+        #[test]
+        fn answer_clears_needs_and_records_the_reply() {
+            let mut seed = task("t0", "solo", Status::Hairy, 3, None);
+            seed.needs = Some("human".into());
+            let (_dir, herd) = temp_herd(&[seed]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "a"); // needs is set -> answer prompt
+            press(&mut app, "resolved offline");
+            enter(&mut app);
+            let t = app.task("t0").unwrap();
+            assert!(t.needs.is_none(), "block cleared");
+            assert!(
+                t.body.contains("resolved offline"),
+                "reply recorded as a note: {}",
+                t.body
+            );
         }
 
         #[test]
