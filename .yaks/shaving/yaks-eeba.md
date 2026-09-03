@@ -4,7 +4,7 @@ title: Render preserved unknown frontmatter fields in TUI detail
 type: feature
 priority: 3
 created: '2026-09-03T19:58:25Z'
-updated: '2026-09-03T19:58:25Z'
+updated: '2026-09-03T20:00:40Z'
 parent: yaks-594b
 labels:
 - ui
