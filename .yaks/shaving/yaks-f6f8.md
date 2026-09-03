@@ -4,7 +4,7 @@ title: 'a3a6 PREP: add needs predicate to FilterSpec + matches (coordinator prep
 type: task
 priority: 3
 created: '2026-09-03T22:28:44Z'
-updated: '2026-09-03T22:28:44Z'
+updated: '2026-09-03T22:28:51Z'
 parent: yaks-a3a6
 labels:
 - cli
