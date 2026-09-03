@@ -216,6 +216,12 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
         field("Labels:", &labels),
     ];
 
+    // A `needs` block is state worth seeing next to Status (mirrors CLI `show`).
+    // Accent styling is deferred to the badge work (yaks-548b).
+    if let Some(n) = &task.needs {
+        out.insert(4, field("Needs:", n));
+    }
+
     if !task.depends_on.is_empty() {
         out.push(empty());
         out.push(section("Depends on:"));
@@ -497,6 +503,27 @@ mod detail_tests {
                 .iter()
                 .any(|j| j.target == Target::Task("yak-0002".into()))
         );
+    }
+
+    #[test]
+    fn needs_block_renders_after_status_when_set() {
+        let mut task = t("yak-0001", None, &[]);
+        // Unset: no Needs line.
+        let plain: Vec<String> = build(&task, &[task.clone()])
+            .iter()
+            .map(|l| l.text.clone())
+            .collect();
+        assert!(!plain.iter().any(|l| l.starts_with("Needs:")));
+        // Set: a Needs line appears, immediately after Status.
+        task.needs = Some("human".into());
+        let lines: Vec<String> = build(&task, &[task.clone()])
+            .iter()
+            .map(|l| l.text.clone())
+            .collect();
+        let status_i = lines.iter().position(|l| l.starts_with("Status:")).unwrap();
+        let needs_i = lines.iter().position(|l| l.starts_with("Needs:")).unwrap();
+        assert_eq!(needs_i, status_i + 1);
+        assert!(lines[needs_i].contains("human"));
     }
 
     #[test]
