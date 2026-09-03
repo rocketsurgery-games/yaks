@@ -178,6 +178,36 @@ enum Command {
         #[arg(long = "as")]
         as_actor: Option<String>,
     },
+    /// Block a yak on a human decision and record the question. Sets the `needs`
+    /// field so the yak drops out of `next`; clear it with `answer`.
+    Ask {
+        id: String,
+        /// The question for the human (recorded as an attributed note).
+        #[arg(long)]
+        note: Option<String>,
+        /// What the yak is waiting on. Defaults to `human`.
+        #[arg(long, default_value = "human")]
+        needs: String,
+        #[arg(long = "as")]
+        as_actor: Option<String>,
+    },
+    /// Clear a yak's `needs` block (answer it) and record the reply. The
+    /// human-reserved counterpart to `ask`; returns the yak to `next`.
+    Answer {
+        id: String,
+        /// The reply/decision (recorded as an attributed note).
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long = "as")]
+        as_actor: Option<String>,
+    },
+    /// List yaks awaiting a human (the `needs` inbox).
+    Inbox {
+        #[command(flatten)]
+        filter: FilterFlags,
+        #[arg(long)]
+        json: bool,
+    },
     /// Start shaving one or more yaks (move to shaving).
     #[command(visible_alias = "work")]
     Shave {
@@ -499,6 +529,35 @@ fn main() -> Result<()> {
                 UpdateOutcome::Updated => println!("Updated {id}"),
                 UpdateOutcome::NoChanges => println!("No changes specified."),
             }
+        }
+        Command::Ask {
+            id,
+            note,
+            needs,
+            as_actor,
+        } => {
+            let actor = resolve_actor(as_actor.as_deref());
+            match herd.set_needs(&id, Some(needs.clone()), actor.as_deref(), note.as_deref())? {
+                UpdateOutcome::NotFound => {
+                    eprintln!("error: task {id} not found");
+                    std::process::exit(1);
+                }
+                _ => println!("Asked {id}: needs {needs} (dropped from next until answered)"),
+            }
+        }
+        Command::Answer { id, note, as_actor } => {
+            let actor = resolve_actor(as_actor.as_deref());
+            match herd.set_needs(&id, None, actor.as_deref(), note.as_deref())? {
+                UpdateOutcome::NotFound => {
+                    eprintln!("error: task {id} not found");
+                    std::process::exit(1);
+                }
+                _ => println!("Answered {id}: needs cleared (back in next)"),
+            }
+        }
+        Command::Inbox { filter, json } => {
+            let rows = herd.inbox(build_spec(filter))?;
+            render_rows(&rows, json, "Inbox empty: nothing awaiting a human.")?;
         }
         Command::Shave { ids } => transition_many(
             &herd,
@@ -982,6 +1041,9 @@ fn render_show(s: &Show) {
     }
     if let Some(src) = &t.source {
         println!("source:   {src}");
+    }
+    if let Some(n) = &t.needs {
+        println!("needs:    {n}");
     }
     if !t.body.is_empty() {
         println!("\n{}", t.body);

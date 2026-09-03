@@ -240,6 +240,42 @@ impl Herd {
             .collect())
     }
 
+    /// Set (or clear) a yak's `needs` block, optionally appending an attributed
+    /// note in the same write. Backs `ask` (set `needs=human` + question) and
+    /// `answer` (clear `needs` + reply). Clearing an already-clear block, or
+    /// setting an already-identical one, still records the note if given.
+    pub fn set_needs(
+        &self,
+        id: &str,
+        needs: Option<String>,
+        actor: Option<&str>,
+        note: Option<&str>,
+    ) -> Result<UpdateOutcome> {
+        let Some(mut task) = store::load_task_by_id(&self.root, id)? else {
+            return Ok(UpdateOutcome::NotFound);
+        };
+        task.needs = needs;
+        if let Some(n) = note {
+            let ts = store::now_iso();
+            task.body = store::append_note(&task.body, &ts, actor, n);
+        }
+        task.updated = Some(store::now_iso());
+        store::write::save(&self.root, &task)?;
+        Ok(UpdateOutcome::Updated)
+    }
+
+    /// Yaks currently carrying a `needs` block (the human/answer inbox), newest
+    /// blocked first is not meaningful here, so ordering follows the filter.
+    pub fn inbox(&self, mut spec: FilterSpec) -> Result<Vec<Task>> {
+        spec.statuses = vec![Status::Hairy, Status::Shaving];
+        let tasks = store::load(&self.root, &EVERY)?;
+        Ok(filter::apply(&tasks, &spec, false)
+            .into_iter()
+            .filter(|t| t.needs.is_some())
+            .cloned()
+            .collect())
+    }
+
     /// Hairy tasks with at least one unresolved dependency, each paired with
     /// the list of ids it is waiting on.
     pub fn tangled(&self, mut spec: FilterSpec) -> Result<Vec<(Task, Vec<String>)>> {
@@ -579,6 +615,7 @@ impl Herd {
             labels: new.labels,
             depends_on: new.depends_on,
             source: new.source,
+            needs: None,
             body: new.description.unwrap_or_default(),
         };
         store::write::save(&self.root, &task)?;
@@ -626,7 +663,7 @@ impl Herd {
         }
         if let Some(n) = edit.note {
             let ts = store::now_iso();
-            task.body = store::append_note_as(&task.body, &ts, edit.actor.as_deref(), &n);
+            task.body = store::append_note(&task.body, &ts, edit.actor.as_deref(), &n);
             changed = true;
         }
         if changed {
@@ -755,6 +792,7 @@ mod tests {
             labels: vec![],
             depends_on: vec![],
             source: None,
+            needs: None,
             body: String::new(),
         }
     }

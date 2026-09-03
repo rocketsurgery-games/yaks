@@ -151,8 +151,14 @@ mod tests {
     #[test]
     fn splits_description_and_comments() {
         let body = append_note(
-            &append_note("The description.", "2026-01-01T00:00:00Z", "first note"),
+            &append_note(
+                "The description.",
+                "2026-01-01T00:00:00Z",
+                None,
+                "first note",
+            ),
             "2026-01-02T00:00:00Z",
+            None,
             "second note",
         );
         assert_eq!(
@@ -167,7 +173,7 @@ mod tests {
 
     #[test]
     fn comment_only_body_has_empty_description() {
-        let body = append_note("", "2026-01-01T00:00:00Z", "hi");
+        let body = append_note("", "2026-01-01T00:00:00Z", None, "hi");
         assert_eq!(
             parse(&body),
             vec![desc(""), comment("2026-01-01T00:00:00Z", "hi")]
@@ -177,11 +183,12 @@ mod tests {
     #[test]
     fn round_trips_append_note_bodies() {
         for body in [
-            append_note("", "2026-01-01T00:00:00Z", "solo"),
-            append_note("Desc.", "2026-01-01T00:00:00Z", "one"),
+            append_note("", "2026-01-01T00:00:00Z", None, "solo"),
+            append_note("Desc.", "2026-01-01T00:00:00Z", None, "one"),
             append_note(
-                &append_note("Multi\nline desc.", "2026-01-01T00:00:00Z", "a\nb"),
+                &append_note("Multi\nline desc.", "2026-01-01T00:00:00Z", None, "a\nb"),
                 "2026-01-02T00:00:00Z",
+                None,
                 "c",
             ),
         ] {

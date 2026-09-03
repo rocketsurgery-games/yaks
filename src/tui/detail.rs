@@ -470,6 +470,7 @@ mod detail_tests {
             labels: vec![],
             depends_on: deps.iter().map(|s| s.to_string()).collect(),
             source: None,
+            needs: None,
             body: String::new(),
         }
     }
@@ -539,6 +540,7 @@ mod tests {
             labels: vec![],
             depends_on: deps.iter().map(|s| s.to_string()).collect(),
             source: None,
+            needs: None,
             body: body.into(),
         }
     }

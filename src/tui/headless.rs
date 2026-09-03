@@ -60,6 +60,7 @@ mod tests {
             labels: vec![],
             depends_on: vec![],
             source: None,
+            needs: None,
             body: String::new(),
         }
     }

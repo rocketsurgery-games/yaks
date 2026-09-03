@@ -66,6 +66,7 @@ fn parse_task(text: &str, status: Status) -> Option<Task> {
     let mut updated = None;
     let mut parent = None;
     let mut source = None;
+    let mut needs = None;
     let mut labels: Vec<String> = Vec::new();
     let mut depends_on: Vec<String> = Vec::new();
 
@@ -102,6 +103,7 @@ fn parse_task(text: &str, status: Status) -> Option<Task> {
             "updated" => updated = non_empty(unquote(value)),
             "parent" => parent = non_empty(unquote(value)),
             "source" => source = non_empty(unquote(value)),
+            "needs" => needs = non_empty(unquote(value)),
             "labels" => match parse_inline_list(value) {
                 Some(list) => labels = list,
                 None => pending = Some("labels"),
@@ -129,6 +131,7 @@ fn parse_task(text: &str, status: Status) -> Option<Task> {
         labels,
         depends_on,
         source,
+        needs,
         body: body.trim().to_string(),
     })
 }
@@ -237,6 +240,9 @@ pub mod write {
         }
         if let Some(s) = &t.source {
             out.push_str(&format!("source: {}\n", scalar(s)));
+        }
+        if let Some(n) = &t.needs {
+            out.push_str(&format!("needs: {}\n", scalar(n)));
         }
         out
     }
@@ -577,15 +583,10 @@ pub fn load_task_by_id(root: &Path, id: &str) -> Result<Option<Task>> {
 
 /// Append a timestamped note block to a body
 /// (`<body>\n\n---\n\u{25b8} <ts>\n<note>`; no leading blank line when empty).
-pub fn append_note(body: &str, ts: &str, note: &str) -> String {
-    append_note_as(body, ts, None, note)
-}
-
-/// Like [`append_note`], but stamps an optional actor onto the marker line as
-/// `\u{25b8} <ts> [<actor>]`. An absent or empty actor writes the bare
-/// `\u{25b8} <ts>` form, so this is byte-for-byte compatible with pre-actor
-/// notes and needs no migration.
-pub fn append_note_as(body: &str, ts: &str, actor: Option<&str>, note: &str) -> String {
+/// An optional actor is stamped onto the marker line as `\u{25b8} <ts> [<actor>]`;
+/// an absent or empty actor writes the bare `\u{25b8} <ts>` form, so this is
+/// byte-for-byte compatible with pre-actor notes and needs no migration.
+pub fn append_note(body: &str, ts: &str, actor: Option<&str>, note: &str) -> String {
     let desc = body.trim_end();
     let sep = if desc.is_empty() { "" } else { "\n\n" };
     let who = match actor {
@@ -706,8 +707,8 @@ mod log_parse_tests {
 
     #[test]
     fn parse_notes_splits_timestamped_blocks() {
-        let body = append_note("Description.", "2026-01-01T00:00:00Z", "first note");
-        let body = append_note(&body, "2026-01-02T00:00:00Z", "second\nspans lines");
+        let body = append_note("Description.", "2026-01-01T00:00:00Z", None, "first note");
+        let body = append_note(&body, "2026-01-02T00:00:00Z", None, "second\nspans lines");
         let notes = parse_notes(&body);
         assert_eq!(notes.len(), 2);
         assert_eq!(notes[0].ts, "2026-01-01T00:00:00Z");
@@ -720,12 +721,12 @@ mod log_parse_tests {
     }
 
     #[test]
-    fn append_note_as_round_trips_actor_and_stays_back_compatible() {
+    fn append_note_round_trips_actor_and_stays_back_compatible() {
         // An actor is stamped as `[actor]` and parses back out...
-        let with = append_note_as("", "2026-01-01T00:00:00Z", Some("opus@joel"), "did a thing");
+        let with = append_note("", "2026-01-01T00:00:00Z", Some("opus@joel"), "did a thing");
         assert!(with.contains("\u{25b8} 2026-01-01T00:00:00Z [opus@joel]"));
         // ...alongside a bare note in the same body, which stays actor-less.
-        let body = append_note_as(&with, "2026-01-02T00:00:00Z", None, "bare");
+        let body = append_note(&with, "2026-01-02T00:00:00Z", None, "bare");
         let notes = parse_notes(&body);
         assert_eq!(notes[0].actor.as_deref(), Some("opus@joel"));
         assert_eq!(notes[0].ts, "2026-01-01T00:00:00Z");
@@ -733,7 +734,7 @@ mod log_parse_tests {
         assert_eq!(notes[1].actor, None);
         assert_eq!(notes[1].ts, "2026-01-02T00:00:00Z");
         // An empty/whitespace actor writes the bare form (no empty `[]`).
-        let blank = append_note_as("", "2026-01-03T00:00:00Z", Some("  "), "x");
+        let blank = append_note("", "2026-01-03T00:00:00Z", Some("  "), "x");
         assert_eq!(parse_notes(&blank)[0].actor, None);
     }
 
@@ -903,6 +904,7 @@ mod tests {
             labels: vec!["rust".into()],
             depends_on: vec!["yaksrs-aaaa".into(), "yaksrs-bbbb".into()],
             source: None,
+            needs: None,
             body: "First line.\n\n---\n\u{25b8} 2026-08-19T02:00:00Z\nA note with an apostrophe: don't panic.".into(),
         }
     }
@@ -987,6 +989,7 @@ mod move_tests {
             labels: vec![],
             depends_on: vec![],
             source: None,
+            needs: None,
             body: String::new(),
         }
     }
@@ -1034,14 +1037,14 @@ mod note_tests {
     #[test]
     fn append_note_on_empty_body_has_no_leading_blank() {
         assert_eq!(
-            append_note("", "2026-01-01T00:00:00Z", "hi"),
+            append_note("", "2026-01-01T00:00:00Z", None, "hi"),
             "---\n\u{25b8} 2026-01-01T00:00:00Z\nhi"
         );
     }
 
     #[test]
     fn append_note_separates_from_existing_body() {
-        let out = append_note("Existing.\n", "2026-01-01T00:00:00Z", "second");
+        let out = append_note("Existing.\n", "2026-01-01T00:00:00Z", None, "second");
         assert_eq!(
             out,
             "Existing.\n\n---\n\u{25b8} 2026-01-01T00:00:00Z\nsecond"
@@ -1083,6 +1086,7 @@ mod graph_tests {
             labels: vec![],
             depends_on: vec![],
             source: None,
+            needs: None,
             body: String::new(),
         };
         write::save(root, &t).unwrap();

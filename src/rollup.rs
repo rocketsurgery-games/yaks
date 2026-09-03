@@ -246,6 +246,7 @@ mod tests {
             labels: vec![],
             depends_on: vec![],
             source: source.map(String::from),
+            needs: None,
             body: String::new(),
         }
     }

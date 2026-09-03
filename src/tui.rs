@@ -4606,6 +4606,7 @@ mod tests {
             labels: vec![],
             depends_on: vec![],
             source: None,
+            needs: None,
             body: String::new(),
         }
     }
@@ -4991,8 +4992,13 @@ mod tests {
 
     fn body_with_comments() -> Task {
         let mut t = task("c0", "Commented", Status::Hairy, 3, None);
-        let b = crate::store::append_note("The description.", "2026-01-01T00:00:00Z", "first note");
-        t.body = crate::store::append_note(&b, "2026-01-02T00:00:00Z", "second note");
+        let b = crate::store::append_note(
+            "The description.",
+            "2026-01-01T00:00:00Z",
+            None,
+            "first note",
+        );
+        t.body = crate::store::append_note(&b, "2026-01-02T00:00:00Z", None, "second note");
         t
     }
 

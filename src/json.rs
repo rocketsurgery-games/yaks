@@ -45,6 +45,9 @@ pub fn task_value(t: &Task) -> Value {
     if let Some(s) = &t.source {
         m.insert("source".into(), json!(s));
     }
+    if let Some(n) = &t.needs {
+        m.insert("needs".into(), json!(n));
+    }
     let body = t.body.trim();
     if !body.is_empty() {
         m.insert("description".into(), json!(body));

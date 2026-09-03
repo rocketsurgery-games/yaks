@@ -59,7 +59,9 @@ impl FilterSpec {
             }
         }
         let has_unresolved = t.depends_on.iter().any(|d| !resolved.contains(d.as_str()));
-        if self.ready_only && has_unresolved {
+        // A `needs` block (e.g. awaiting a human) is a soft, external dependency:
+        // it keeps a hairy yak out of `next` without being a status of its own.
+        if self.ready_only && (has_unresolved || t.needs.is_some()) {
             return false;
         }
         if self.tangled_only && !has_unresolved {
@@ -180,6 +182,7 @@ mod tests {
             labels: vec![],
             depends_on: deps.iter().map(|s| s.to_string()).collect(),
             source: None,
+            needs: None,
             body: String::new(),
         }
     }
@@ -238,6 +241,23 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(ids(apply(&h, &spec, false)), vec!["c"]);
+    }
+
+    #[test]
+    fn ready_only_excludes_a_needs_block() {
+        let mut h = herd();
+        let spec = FilterSpec {
+            statuses: vec![Status::Hairy],
+            ready_only: true,
+            ..Default::default()
+        };
+        // "d" is ready (hairy, no unresolved deps). Blocking it on a human
+        // (as `ask` does) drops it out of `next` without changing its status.
+        h.iter_mut().find(|t| t.id == "d").unwrap().needs = Some("human".into());
+        assert_eq!(ids(apply(&h, &spec, false)), vec!["b", "k"]);
+        // Answering (clearing the block) returns it to ready.
+        h.iter_mut().find(|t| t.id == "d").unwrap().needs = None;
+        assert_eq!(ids(apply(&h, &spec, false)), vec!["b", "d", "k"]);
     }
 
     #[test]

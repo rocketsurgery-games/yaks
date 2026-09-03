@@ -68,5 +68,8 @@ pub struct Task {
     pub labels: Vec<String>,
     pub depends_on: Vec<String>,
     pub source: Option<String>,
+    /// A soft, external block: while set (e.g. `human`), the yak is not ready in
+    /// `next`. Raised by `ask`, cleared by `answer`. Not ownership, not a status.
+    pub needs: Option<String>,
     pub body: String,
 }
