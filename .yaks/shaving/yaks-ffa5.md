@@ -4,7 +4,7 @@ title: TUI auto-attributes comments to the current actor
 type: feature
 priority: 3
 created: '2026-09-03T17:59:19Z'
-updated: '2026-09-03T17:59:43Z'
+updated: '2026-09-03T18:25:26Z'
 parent: yaks-594b
 depends_on:
 - yaks-1603
