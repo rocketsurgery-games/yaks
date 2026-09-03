@@ -538,21 +538,29 @@ fn main() -> Result<()> {
         } => {
             let actor = resolve_actor(as_actor.as_deref());
             match herd.set_needs(&id, Some(needs.clone()), actor.as_deref(), note.as_deref())? {
-                UpdateOutcome::NotFound => {
+                None => {
                     eprintln!("error: task {id} not found");
                     std::process::exit(1);
                 }
-                _ => println!("Asked {id}: needs {needs} (dropped from next until answered)"),
+                Some(st) if matches!(st, Status::Shorn | Status::Dead) => {
+                    eprintln!(
+                        "warning: {id} is {st:?} — blocking finished work; did you mean a hairy yak? (it will still show in `inbox`)"
+                    );
+                    println!("Asked {id}: needs {needs}");
+                }
+                Some(_) => {
+                    println!("Asked {id}: needs {needs} (dropped from next until answered)")
+                }
             }
         }
         Command::Answer { id, note, as_actor } => {
             let actor = resolve_actor(as_actor.as_deref());
             match herd.set_needs(&id, None, actor.as_deref(), note.as_deref())? {
-                UpdateOutcome::NotFound => {
+                None => {
                     eprintln!("error: task {id} not found");
                     std::process::exit(1);
                 }
-                _ => println!("Answered {id}: needs cleared (back in next)"),
+                Some(_) => println!("Answered {id}: needs cleared (back in next)"),
             }
         }
         Command::Inbox { filter, json } => {

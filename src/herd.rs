@@ -244,16 +244,20 @@ impl Herd {
     /// note in the same write. Backs `ask` (set `needs=human` + question) and
     /// `answer` (clear `needs` + reply). Clearing an already-clear block, or
     /// setting an already-identical one, still records the note if given.
+    /// Set (or clear) a yak's `needs` block, optionally appending an attributed
+    /// note. Returns the yak's status (so callers can warn about blocking
+    /// finished work), or `None` if the id is unknown.
     pub fn set_needs(
         &self,
         id: &str,
         needs: Option<String>,
         actor: Option<&str>,
         note: Option<&str>,
-    ) -> Result<UpdateOutcome> {
+    ) -> Result<Option<Status>> {
         let Some(mut task) = store::load_task_by_id(&self.root, id)? else {
-            return Ok(UpdateOutcome::NotFound);
+            return Ok(None);
         };
+        let status = task.status;
         task.needs = needs;
         if let Some(n) = note {
             let ts = store::now_iso();
@@ -261,15 +265,17 @@ impl Herd {
         }
         task.updated = Some(store::now_iso());
         store::write::save(&self.root, &task)?;
-        Ok(UpdateOutcome::Updated)
+        Ok(Some(status))
     }
 
-    /// Yaks currently carrying a `needs` block (the human/answer inbox), newest
-    /// blocked first is not meaningful here, so ordering follows the filter.
+    /// Every yak carrying a `needs` block, regardless of status. The invariant is
+    /// that a set block is never invisible: an `ask` on a shorn/dead yak must
+    /// still surface here (that silent-block gap is exactly why this ignores
+    /// status). Other filter flags (priority/label/search) still apply.
     pub fn inbox(&self, mut spec: FilterSpec) -> Result<Vec<Task>> {
-        spec.statuses = vec![Status::Hairy, Status::Shaving];
+        spec.statuses = vec![Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead];
         let tasks = store::load(&self.root, &EVERY)?;
-        Ok(filter::apply(&tasks, &spec, false)
+        Ok(filter::apply(&tasks, &spec, true)
             .into_iter()
             .filter(|t| t.needs.is_some())
             .cloned()
@@ -797,6 +803,30 @@ mod tests {
             extra: Vec::new(),
             body: String::new(),
         }
+    }
+
+    /// A `needs` block is never invisible: `inbox` surfaces a blocked yak
+    /// whatever its status (the shorn-yak silent-block gap), while unblocked
+    /// yaks stay out.
+    #[test]
+    fn inbox_shows_blocked_yaks_regardless_of_status() {
+        let (root, herd) = temp_herd();
+        let mut blocked_hairy = task("yak-0001", Status::Hairy);
+        blocked_hairy.needs = Some("human".into());
+        let mut blocked_shorn = task("yak-0002", Status::Shorn);
+        blocked_shorn.needs = Some("human".into());
+        store::write::save(&root, &blocked_hairy).unwrap();
+        store::write::save(&root, &blocked_shorn).unwrap();
+        store::write::save(&root, &task("yak-0003", Status::Hairy)).unwrap(); // unblocked
+
+        let mut got: Vec<String> = herd
+            .inbox(FilterSpec::default())
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        got.sort();
+        assert_eq!(got, vec!["yak-0001", "yak-0002"]); // shorn block included, unblocked excluded
     }
 
     /// `refs` reports formal parent/deps (flagging danglers) and validated body
