@@ -4,7 +4,7 @@ title: inbox must show every needs-blocked yak (status-independent); ask should 
 type: bug
 priority: 2
 created: '2026-09-03T17:59:04Z'
-updated: '2026-09-03T17:59:04Z'
+updated: '2026-09-03T18:11:28Z'
 parent: yaks-594b
 labels:
 - cli
