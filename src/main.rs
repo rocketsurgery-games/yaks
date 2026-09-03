@@ -55,6 +55,9 @@ struct FilterFlags {
     ready: bool,
     #[arg(long)]
     tangled: bool,
+    /// Keep only yaks blocked on a human (a `needs` field is set).
+    #[arg(long)]
+    needs: bool,
     #[arg(long = "parent-of")]
     parent_of: Option<String>,
 }
@@ -202,7 +205,8 @@ enum Command {
         #[arg(long = "as")]
         as_actor: Option<String>,
     },
-    /// List yaks awaiting a human (the `needs` inbox).
+    /// List yaks awaiting a human (the `needs` inbox). Equivalent to
+    /// `list --needs` run across all statuses.
     Inbox {
         #[command(flatten)]
         filter: FilterFlags,
@@ -734,7 +738,7 @@ fn build_spec(f: FilterFlags) -> FilterSpec {
         search: f.search,
         ready_only: f.ready,
         tangled_only: f.tangled,
-        needs_only: false,
+        needs_only: f.needs,
         parent: f.parent_of,
     }
 }
