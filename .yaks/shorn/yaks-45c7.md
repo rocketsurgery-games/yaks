@@ -4,7 +4,7 @@ title: 'CLI: --needs filter + a needs marker on list/next rows'
 type: feature
 priority: 3
 created: '2026-09-03T17:59:19Z'
-updated: '2026-09-03T20:01:32Z'
+updated: '2026-09-03T20:04:43Z'
 parent: yaks-594b
 labels:
 - cli
@@ -15,3 +15,7 @@ Two query gaps: (1) fmt_row shows [glyph] id pN type title [labels] with no indi
 ---
 ▸ 2026-09-03T19:58:25Z [coordinator]
 [coordinator] DESCOPE for the parallel run: drop the '--needs' FilterSpec filter half. FilterSpec has EXHAUSTIVE literal constructions in tui/ (tui.rs:427, tui/views_store.rs:118), so adding a FilterSpec field would force edits in the TUI lane's files -> not disjoint. Keep 45c7 to the high-value ROW MARKER in fmt_row (main.rs only). '--needs' filter is deferred (it overlaps 'inbox' already); revisit as its own yak, likely paired with a coordinator prep commit that adds the FilterSpec field + fixes all constructions up front.
+
+---
+▸ 2026-09-03T20:04:43Z [wt-cli]
+Done (row marker only, per coordinator descope). fmt_row now appends a trailing '⚠ needs:<who>' tag when task.needs.is_some(). Live: '  [H] yaks-9689  p3 chore    throwaway marker check ⚠ needs:human'. Unit tests fmt_row_marks_needs_blocked + fmt_row_ready_has_no_needs_marker pass. No FilterSpec/filter.rs touched; --needs filter left deferred.

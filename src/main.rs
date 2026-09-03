@@ -1037,7 +1037,7 @@ fn render_show(s: &Show) {
     }
 }
 
-/// `  [X] id  pN type     title [labels] (deps: ...)`
+/// `  [X] id  pN type     title [labels] (deps: ...) ⚠ needs:<who>`
 fn fmt_row(t: &Task) -> String {
     let labels = if t.labels.is_empty() {
         String::new()
@@ -1049,19 +1049,66 @@ fn fmt_row(t: &Task) -> String {
     } else {
         format!(" (deps: {})", t.depends_on.join(","))
     };
+    // Make a needs-blocked yak visually distinct from a ready one in list/next.
+    let needs = match &t.needs {
+        Some(who) => format!(" \u{26a0} needs:{who}"),
+        None => String::new(),
+    };
     format!(
-        "  [{}] {}  p{} {:8} {}{}{}",
+        "  [{}] {}  p{} {:8} {}{}{}{}",
         t.status.glyph(),
         t.id,
         t.priority,
         t.kind,
         t.title,
         labels,
-        deps
+        deps,
+        needs
     )
 }
 
 /// `  id  pN type     title` (no status glyph) — matches Python cmd_next.
 fn fmt_plain_row(t: &Task) -> String {
     format!("  {}  p{} {:8} {}", t.id, t.priority, t.kind, t.title)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task() -> Task {
+        Task {
+            id: "yak-0001".into(),
+            title: "a title".into(),
+            kind: "feature".into(),
+            priority: 3,
+            status: Status::Hairy,
+            created: None,
+            updated: None,
+            parent: None,
+            labels: vec![],
+            depends_on: vec![],
+            source: None,
+            needs: None,
+            extra: vec![],
+            body: String::new(),
+        }
+    }
+
+    #[test]
+    fn fmt_row_marks_needs_blocked() {
+        let mut t = task();
+        t.needs = Some("human".into());
+        let row = fmt_row(&t);
+        // A blocked yak carries a visible, greppable marker naming who it needs.
+        assert!(row.contains("\u{26a0} needs:human"), "row was: {row:?}");
+    }
+
+    #[test]
+    fn fmt_row_ready_has_no_needs_marker() {
+        // A ready yak (needs == None) must stay distinguishable: no marker at all.
+        let row = fmt_row(&task());
+        assert!(!row.contains("needs:"), "row was: {row:?}");
+        assert!(!row.contains('\u{26a0}'), "row was: {row:?}");
+    }
 }
