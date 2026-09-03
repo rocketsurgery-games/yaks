@@ -3585,9 +3585,12 @@ fn render_content_stack(f: &CreateForm, frame: &mut Frame, area: Rect) {
 fn render_block_separator(block: &ContentBlock, focused: bool, frame: &mut Frame, area: Rect) {
     let label = match &block.kind {
         content::BlockKind::Description => "description".to_string(),
-        content::BlockKind::Comment { timestamp } => {
+        content::BlockKind::Comment { timestamp, actor } => {
             let date = timestamp.get(..10).unwrap_or(timestamp);
-            format!("comment · {date}")
+            match actor {
+                Some(a) => format!("comment · {date} · {a}"),
+                None => format!("comment · {date}"),
+            }
         }
     };
     let marker = if focused { "▸ " } else { "  " };

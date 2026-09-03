@@ -609,11 +609,17 @@ pub fn load_task_by_id(root: &Path, id: &str) -> Result<Option<Task>> {
 pub fn append_note(body: &str, ts: &str, actor: Option<&str>, note: &str) -> String {
     let desc = body.trim_end();
     let sep = if desc.is_empty() { "" } else { "\n\n" };
-    let who = match actor {
-        Some(a) if !a.trim().is_empty() => format!(" [{}]", a.trim()),
-        _ => String::new(),
-    };
-    format!("{desc}{sep}---\n\u{25b8} {ts}{who}\n{note}")
+    format!("{desc}{sep}---\n\u{25b8} {}\n{note}", note_head(ts, actor))
+}
+
+/// Format a note marker line's payload: `<ts>` or `<ts> [<actor>]`. The single
+/// source of truth for the marker shape, shared by the log writer and the TUI's
+/// comment (re)assembly so the two can't drift.
+pub fn note_head(ts: &str, actor: Option<&str>) -> String {
+    match actor {
+        Some(a) if !a.trim().is_empty() => format!("{ts} [{}]", a.trim()),
+        _ => ts.to_string(),
+    }
 }
 
 /// A single timestamped note parsed back out of a task body.
@@ -629,7 +635,8 @@ pub struct NoteEntry {
 /// Split a note marker line's payload into its timestamp and optional trailing
 /// `[actor]`. Timestamps never contain `" ["`, so a line ending in `]` with an
 /// earlier `" ["` is unambiguously `<ts> [<actor>]`; anything else is a bare ts.
-fn split_note_head(head: &str) -> (String, Option<String>) {
+/// Public so the TUI's comment parser reuses the exact same split.
+pub fn split_note_head(head: &str) -> (String, Option<String>) {
     if head.ends_with(']') {
         if let Some(idx) = head.rfind(" [") {
             let ts = head[..idx].trim().to_string();

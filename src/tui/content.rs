@@ -22,7 +22,11 @@ const MARK: char = '\u{25b8}';
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockKind {
     Description,
-    Comment { timestamp: String },
+    Comment {
+        timestamp: String,
+        /// The `[actor]` that wrote the comment, if any (see `store::note_head`).
+        actor: Option<String>,
+    },
 }
 
 /// One content block: its kind plus the body text (no separator/marker lines).
@@ -58,17 +62,14 @@ pub fn parse(body: &str) -> Vec<Block> {
 
     // Comments: each spans its `▸` line's content until the next marker.
     while j < lines.len() {
-        let ts = lines[j + 1]
-            .trim_start()
-            .trim_start_matches(MARK)
-            .trim()
-            .to_string();
+        let head = lines[j + 1].trim_start().trim_start_matches(MARK).trim();
+        let (timestamp, actor) = crate::store::split_note_head(head);
         let mut k = j + 2;
         while k < lines.len() && !is_marker(&lines, k) {
             k += 1;
         }
         blocks.push(Block {
-            kind: BlockKind::Comment { timestamp: ts },
+            kind: BlockKind::Comment { timestamp, actor },
             text: lines[j + 2..k].join("\n").trim_end().to_string(),
         });
         j = k;
@@ -88,7 +89,7 @@ pub fn assemble(blocks: &[Block]) -> String {
                 out.push_str(text);
                 wrote = !text.is_empty();
             }
-            BlockKind::Comment { timestamp } => {
+            BlockKind::Comment { timestamp, actor } => {
                 if text.is_empty() {
                     continue; // emptied comment → deleted
                 }
@@ -98,7 +99,7 @@ pub fn assemble(blocks: &[Block]) -> String {
                 out.push_str("---\n");
                 out.push(MARK);
                 out.push(' ');
-                out.push_str(timestamp);
+                out.push_str(&crate::store::note_head(timestamp, actor.as_deref()));
                 out.push('\n');
                 out.push_str(text);
                 wrote = true;
@@ -123,6 +124,7 @@ mod tests {
         Block {
             kind: BlockKind::Comment {
                 timestamp: ts.into(),
+                actor: None,
             },
             text: text.into(),
         }
@@ -169,6 +171,23 @@ mod tests {
                 comment("2026-01-02T00:00:00Z", "second note"),
             ]
         );
+    }
+
+    #[test]
+    fn parses_and_round_trips_the_actor_stamp() {
+        // A body written with attribution (store::append_note) must parse the
+        // actor as a first-class field, not glue it into the timestamp.
+        let body = crate::store::append_note("Desc.", "2026-01-01T00:00:00Z", Some("opus"), "hi");
+        let blocks = parse(&body);
+        assert_eq!(
+            blocks[1].kind,
+            BlockKind::Comment {
+                timestamp: "2026-01-01T00:00:00Z".into(),
+                actor: Some("opus".into()),
+            }
+        );
+        // ...and assemble puts it back exactly (byte-identical body).
+        assert_eq!(assemble(&blocks), body);
     }
 
     #[test]
