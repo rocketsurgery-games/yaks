@@ -4,7 +4,7 @@ title: 'CLI: --needs filter + a needs marker on list/next rows'
 type: feature
 priority: 3
 created: '2026-09-03T17:59:19Z'
-updated: '2026-09-03T19:58:25Z'
+updated: '2026-09-03T20:01:32Z'
 parent: yaks-594b
 labels:
 - cli
