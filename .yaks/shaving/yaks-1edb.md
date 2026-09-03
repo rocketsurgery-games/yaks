@@ -4,7 +4,7 @@ title: TUI comment parser must understand the [actor] stamp (unify with store::p
 type: bug
 priority: 2
 created: '2026-09-03T17:59:04Z'
-updated: '2026-09-03T17:59:04Z'
+updated: '2026-09-03T18:23:56Z'
 parent: yaks-594b
 labels:
 - ui
