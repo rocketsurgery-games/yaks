@@ -341,7 +341,13 @@ mod tests {
         assert_eq!(out[1].key, "view:abcd1234");
         assert_eq!(out[1].spec.types, vec!["bug".to_string()]);
         // Every built-in still present.
-        for key in ["status:shaving", "status:shorn", "recent", "working-set"] {
+        for key in [
+            "status:shaving",
+            "status:shorn",
+            "recent",
+            "inbox",
+            "working-set",
+        ] {
             assert!(out.iter().any(|v| v.key == key), "missing {key}");
         }
     }

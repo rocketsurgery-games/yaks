@@ -166,6 +166,28 @@ pub fn recent_view() -> View {
     }
 }
 
+/// The inbox: a flat list of every yak carrying a `needs` block (awaiting a
+/// human), across all statuses. Driven purely by the shared `needs_only`
+/// predicate, so it composes with — rather than overrides — the filter. Not
+/// pinned by default (reach it from the view picker, or toggle the `inbox`
+/// chip in the filter drawer); replaces the old modal `i` toggle.
+pub fn inbox_view() -> View {
+    View {
+        name: "\u{1f4e5} Inbox".into(),
+        key: "inbox".into(),
+        status: None,
+        builtin: true,
+        pinned: false,
+        spec: FilterSpec {
+            needs_only: true,
+            ..Default::default()
+        },
+        sort_by: Some(SortField::Updated),
+        sort_dir: SortDir::Desc,
+        limit: None,
+    }
+}
+
 pub fn working_set_view() -> View {
     View {
         name: "\u{2b50} Starred".into(),
@@ -183,6 +205,7 @@ pub fn working_set_view() -> View {
 pub fn default_views() -> Vec<View> {
     let mut v = builtin_status_views();
     v.push(recent_view());
+    v.push(inbox_view());
     v.push(working_set_view());
     v
 }
