@@ -11,7 +11,7 @@ expression: "draw(&app, 72, 16)"
                         │   labels   (any)
                         │   search   (any)
                         │   parent   (any)
-                        │   deps      ready tangled
+                        │   deps      ready tangled inbox
                         │
                         │
                         │

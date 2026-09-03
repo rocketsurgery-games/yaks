@@ -282,7 +282,7 @@ const DRAWER_ROWS: usize = 7;
 const STATUS_CHOICES: [Status; 4] = [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead];
 const TYPE_CHOICES: [&str; 4] = ["task", "bug", "feature", "idea"];
 const PRI_CHOICES: [u8; 5] = [1, 2, 3, 4, 5];
-const DEPS_CHOICES: [&str; 2] = ["ready", "tangled"];
+const DEPS_CHOICES: [&str; 3] = ["ready", "tangled", "inbox"];
 
 /// The filter drawer: a small form of chip facets (status/type/priority/deps)
 /// and text facets (labels/search/parent). Editing it previews live on the
@@ -294,6 +294,9 @@ struct Drawer {
     priorities: Vec<u8>,
     ready: bool,
     tangled: bool,
+    /// The inbox facet: keep only yaks carrying a `needs` block. Composes with
+    /// the rest of the filter (replaces the old modal `i` toggle).
+    needs: bool,
     labels: RefCell<EditorState>,
     search: RefCell<EditorState>,
     parent: RefCell<EditorState>,
@@ -342,6 +345,7 @@ impl Drawer {
             priorities: f.priorities.clone(),
             ready: f.ready_only,
             tangled: f.tangled_only,
+            needs: f.needs_only,
             labels: text_field(&f.labels.join(", "), vim),
             search: text_field(f.search.as_deref().unwrap_or(""), vim),
             parent: text_field(f.parent.as_deref().unwrap_or(""), vim),
@@ -380,13 +384,11 @@ impl Drawer {
             0 => toggle(&mut self.statuses, STATUS_CHOICES[self.chip_idx]),
             1 => toggle(&mut self.types, TYPE_CHOICES[self.chip_idx].to_string()),
             2 => toggle(&mut self.priorities, PRI_CHOICES[self.chip_idx]),
-            6 => {
-                if self.chip_idx == 0 {
-                    self.ready = !self.ready;
-                } else {
-                    self.tangled = !self.tangled;
-                }
-            }
+            6 => match self.chip_idx {
+                0 => self.ready = !self.ready,
+                1 => self.tangled = !self.tangled,
+                _ => self.needs = !self.needs,
+            },
             _ => {}
         }
     }
@@ -397,6 +399,7 @@ impl Drawer {
         self.priorities.clear();
         self.ready = false;
         self.tangled = false;
+        self.needs = false;
         *self.labels.borrow_mut() = {
             let mut s = EditorState::new(Lines::from(""));
             s.set_single_line(true);
@@ -440,7 +443,7 @@ impl Drawer {
             search: non_empty(&self.search),
             ready_only: self.ready,
             tangled_only: self.tangled,
-            needs_only: false,
+            needs_only: self.needs,
             parent: non_empty(&self.parent),
         }
     }
@@ -773,12 +776,10 @@ pub struct App {
     /// UI-state cache). A missing entry means the view inherits the global
     /// default ("auto"). See [`view::HerdScope`].
     herd_scope: HashMap<String, view::HerdScope>,
-    /// The live view filter applied by the tree (re-colors + prunes).
+    /// The live view filter applied by the tree (re-colors + prunes). The inbox
+    /// (yaks awaiting a human) is just `FilterSpec::needs_only` on this filter
+    /// — surfaced via the Inbox view and the drawer's `inbox` chip, not a mode.
     filter: FilterSpec,
-    /// When set, the list is overridden to show only yaks carrying a `needs`
-    /// block (the inbox: anything awaiting a human, regardless of status/view).
-    /// A TUI-layer overlay on `rows()`, not a `FilterSpec` axis. Toggled by `i`.
-    inbox_only: bool,
     /// Approx. list viewport height, refreshed each loop for paging math.
     page: u16,
     /// Approx. detail viewport height (mid area = terminal height - 3),
@@ -831,7 +832,6 @@ impl App {
             collapsed: HashSet::new(),
             herd_scope: HashMap::new(),
             filter,
-            inbox_only: false,
             page: 10,
             detail_page: 10,
             detail_width: Cell::new(0),
@@ -966,6 +966,21 @@ impl App {
                 .filter(|id| self.task(id).is_some())
                 .count();
         }
+        // Flat views (Recent/Inbox/custom sorted) count via the flat predicate
+        // so facets the tree ignores for pruning — notably `needs_only` — are
+        // honored (an Inbox tab shows the awaiting-a-human count, not the herd
+        // size). Mirrors `flat_rows`: exclude dead unless the spec asks, respect
+        // the row cap.
+        if v.is_flat() {
+            let resolved = filter::resolved_ids(&self.all);
+            let want_dead = v.spec.statuses.contains(&Status::Dead);
+            let n = self
+                .all
+                .iter()
+                .filter(|t| (want_dead || t.status != Status::Dead) && v.spec.matches(t, &resolved))
+                .count();
+            return v.limit.map_or(n, |l| n.min(l));
+        }
         tree::build(&self.all, &v.spec, self.resolved_herd_scope(v))
             .iter()
             .filter(|r| !r.ghost)
@@ -1030,15 +1045,6 @@ impl App {
 
     /// Visible rows for the active view (dispatch: working-set / flat / tree).
     fn rows(&self) -> Vec<tree::Row<'_>> {
-        // The inbox override wins over any view: a flat list of every yak with a
-        // `needs` block, whatever its status (mirrors `herd.inbox`), so a set
-        // block is never invisible. Filters the loaded set in the TUI layer
-        // rather than touching the shared `FilterSpec`.
-        if self.inbox_only {
-            let mut matched: Vec<&Task> = self.all.iter().filter(|t| t.needs.is_some()).collect();
-            matched.sort_by(|a, b| a.id.cmp(&b.id));
-            return matched.into_iter().map(tree::Row::leaf).collect();
-        }
         let v = self.active_view();
         if v.key == "working-set" {
             return self.working_set_rows();
@@ -1093,22 +1099,6 @@ impl App {
         let n = pinned.len() as i32;
         let next = pinned[(((cur as i32 + delta) % n + n) % n) as usize];
         self.set_view(next);
-    }
-
-    /// Toggle the inbox override — the flat list of yaks awaiting a human
-    /// (`needs` set), across every status and view. See [`App::rows`].
-    fn toggle_inbox(&mut self) {
-        self.inbox_only = !self.inbox_only;
-        self.cursor = 0;
-        self.detail_scroll = 0;
-        self.focus = Focus::List;
-        self.clamp_cursor();
-        self.notification = Some(if self.inbox_only {
-            let n = self.all.iter().filter(|t| t.needs.is_some()).count();
-            format!("inbox: {n} awaiting a human (i to exit)")
-        } else {
-            "inbox off".into()
-        });
     }
 
     /// True when the live filter has been edited away from the active view spec.
@@ -3176,7 +3166,6 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('M') => app.open_comment(),
             KeyCode::Char('A') => app.open_attach(),
             KeyCode::Char('a') => app.open_ask_or_answer(),
-            KeyCode::Char('i') => app.toggle_inbox(),
             KeyCode::Char('v') => app.open_view_picker(),
             KeyCode::Char('V') => app.open_save_view(),
             KeyCode::Char('?') => app.open_help(),
@@ -3418,7 +3407,6 @@ fn help_content() -> Vec<Line<'static>> {
         entry("Space", "Collapse / expand subtree"),
         entry("v / V", "View picker / save filter as view"),
         entry("* ", "Star / unstar (Starred view)"),
-        entry("i", "Inbox: toggle yaks awaiting a human"),
         blank(),
         section("Detail pane"),
         entry("h / ← / Esc", "Back to list"),
@@ -3502,7 +3490,11 @@ fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
         .iter()
         .map(|&p| (format!("p{p}"), d.priorities.contains(&p)))
         .collect();
-    let deps: Vec<(String, bool)> = vec![("ready".into(), d.ready), ("tangled".into(), d.tangled)];
+    let deps: Vec<(String, bool)> = vec![
+        ("ready".into(), d.ready),
+        ("tangled".into(), d.tangled),
+        ("inbox".into(), d.needs),
+    ];
     render_chip_row(
         d.row == 0,
         d.chip_idx,
@@ -4665,6 +4657,9 @@ fn filter_summary(f: &FilterSpec) -> String {
     if f.tangled_only {
         parts.push("tangled".into());
     }
+    if f.needs_only {
+        parts.push("inbox".into());
+    }
     if parts.is_empty() {
         "(all)".into()
     } else {
@@ -5657,7 +5652,7 @@ mod tests {
     #[test]
     fn default_views_and_tab_cycling() {
         let mut app = sample();
-        assert_eq!(app.views.len(), 5); // 3 status + Recent + Starred
+        assert_eq!(app.views.len(), 6); // 3 status + Recent + Inbox + Starred
         assert_eq!(app.view, 0);
         assert_eq!(app.filter.statuses, vec![Status::Hairy]);
         tab_key(&mut app); // -> Shaving
@@ -5682,8 +5677,8 @@ mod tests {
         let mut app = sample(); // cursor on a0
         handle_key(&mut app, key('*'));
         assert!(app.is_starred("a0"));
-        // Starred view (index 4) lists the starred task.
-        app.set_view(4);
+        // Starred view (index 5) lists the starred task.
+        app.set_view(5);
         assert_eq!(app.active_view().key, "working-set");
         let ids: Vec<&str> = app.rows().iter().map(|r| r.task.id.as_str()).collect();
         assert_eq!(ids, vec!["a0"]);
@@ -5702,8 +5697,8 @@ mod tests {
         handle_key(&mut app, key('V')); // save view
         typ(&mut app, "kids");
         enter_key(&mut app); // commit name
-        assert_eq!(app.views.len(), 6);
-        assert_eq!(app.view, 5);
+        assert_eq!(app.views.len(), 7);
+        assert_eq!(app.view, 6);
         let v = app.active_view();
         assert_eq!(v.name, "kids");
         assert_eq!(v.spec.search.as_deref(), Some("child"));
@@ -5773,11 +5768,11 @@ mod tests {
         handle_key(&mut app, key('V'));
         typ(&mut app, "mine");
         enter_key(&mut app);
-        assert_eq!(app.views.len(), 6);
-        // Delete it via the picker (active view is the custom one, index 5).
+        assert_eq!(app.views.len(), 7);
+        // Delete it via the picker (active view is the custom one, last index).
         handle_key(&mut app, key('v'));
         handle_key(&mut app, key('d'));
-        assert_eq!(app.views.len(), 5);
+        assert_eq!(app.views.len(), 6);
         // Deleting a built-in is refused.
         handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         handle_key(&mut app, key('v'));
@@ -5919,28 +5914,64 @@ mod tests {
     }
 
     #[test]
-    fn inbox_toggle_shows_only_needs_blocked_across_statuses() {
-        // `i` overrides the view with a flat list of every yak awaiting a human,
-        // regardless of status (a shorn-but-blocked yak still surfaces).
+    fn inbox_view_lists_needs_blocked_across_statuses() {
+        // The Inbox built-in view is a flat list of every yak awaiting a human,
+        // regardless of status (a shorn-but-blocked yak still surfaces). It's
+        // driven by the shared `needs_only` predicate, replacing the old modal
+        // `i` toggle.
         let mut hairy = task("t0", "ask me", Status::Hairy, 3, None);
         hairy.needs = Some("human".into());
         let mut shorn = task("t1", "still blocked", Status::Shorn, 3, None);
         shorn.needs = Some("human".into());
         let free = task("t2", "unblocked", Status::Hairy, 3, None);
         let mut app = App::new(vec![hairy, shorn, free]);
-        handle_key(&mut app, key('i'));
-        assert!(app.inbox_only);
-        let ids: Vec<String> = app.rows().iter().map(|r| r.task.id.clone()).collect();
+        let idx = app
+            .views
+            .iter()
+            .position(|v| v.key == "inbox")
+            .expect("inbox view present in defaults");
+        app.set_view(idx);
+        assert!(app.active_view().is_flat());
+        let mut ids: Vec<String> = app.rows().iter().map(|r| r.task.id.clone()).collect();
+        ids.sort();
         assert_eq!(ids, vec!["t0".to_string(), "t1".to_string()]);
-        // Toggling off restores the normal (Hairy) view: the shorn yak drops out.
-        handle_key(&mut app, key('i'));
-        assert!(!app.inbox_only);
+        // The free (unblocked) yak never appears in the inbox.
+        assert!(!ids.contains(&"t2".to_string()));
+        // The tab/picker count reflects the awaiting-a-human set, not the herd.
+        assert_eq!(app.view_count(app.active_view()), 2);
+        // Switching to the Hairy view drops the shorn yak again — inbox is a
+        // view/filter, not a persistent override.
+        app.set_view(0);
         let ids: Vec<String> = app.rows().iter().map(|r| r.task.id.clone()).collect();
         assert!(ids.contains(&"t0".to_string()) && ids.contains(&"t2".to_string()));
         assert!(
             !ids.contains(&"t1".to_string()),
             "shorn hidden in Hairy view"
         );
+    }
+
+    #[test]
+    fn drawer_inbox_chip_composes_with_status_scope() {
+        // The inbox facet is the third chip in the drawer's `deps` row: toggling
+        // it sets `needs_only` on the built spec without disturbing the rest of
+        // the filter, so the inbox composes with any status scope.
+        let base = FilterSpec {
+            statuses: vec![Status::Hairy],
+            ..Default::default()
+        };
+        let mut d = Drawer::from_filter(false, &base);
+        d.row = 6; // deps row
+        d.chip_idx = 2; // inbox chip
+        d.toggle_chip();
+        let spec = d.build_spec();
+        assert!(spec.needs_only);
+        assert_eq!(spec.statuses, vec![Status::Hairy], "status scope preserved");
+        // Toggling it back off round-trips cleanly.
+        let mut d2 = Drawer::from_filter(false, &spec);
+        d2.row = 6;
+        d2.chip_idx = 2;
+        d2.toggle_chip();
+        assert!(!d2.build_spec().needs_only);
     }
 
     // -- live mutation through a temp herd --------------------------------
