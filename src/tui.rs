@@ -440,6 +440,7 @@ impl Drawer {
             search: non_empty(&self.search),
             ready_only: self.ready,
             tangled_only: self.tangled,
+            needs_only: false,
             parent: non_empty(&self.parent),
         }
     }

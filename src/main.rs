@@ -734,6 +734,7 @@ fn build_spec(f: FilterFlags) -> FilterSpec {
         search: f.search,
         ready_only: f.ready,
         tangled_only: f.tangled,
+        needs_only: false,
         parent: f.parent_of,
     }
 }

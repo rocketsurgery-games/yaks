@@ -21,6 +21,9 @@ pub struct FilterSpec {
     pub search: Option<String>,
     pub ready_only: bool,
     pub tangled_only: bool,
+    /// Keep only yaks carrying a `needs` block (the inbox predicate). Composes
+    /// with any view; the status-independent inbox is this plus no status scope.
+    pub needs_only: bool,
     /// Descendant-of scope (a task id); matches its descendants at any depth.
     pub parent: Option<String>,
 }
@@ -62,6 +65,9 @@ impl FilterSpec {
         // A `needs` block (e.g. awaiting a human) is a soft, external dependency:
         // it keeps a hairy yak out of `next` without being a status of its own.
         if self.ready_only && (has_unresolved || t.needs.is_some()) {
+            return false;
+        }
+        if self.needs_only && t.needs.is_none() {
             return false;
         }
         if self.tangled_only && !has_unresolved {
@@ -242,6 +248,19 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(ids(apply(&h, &spec, false)), vec!["c"]);
+    }
+
+    #[test]
+    fn needs_only_keeps_only_blocked_yaks() {
+        let mut h = herd();
+        // Block "d" (a hairy leaf). needs_only should keep only the blocked one,
+        // composing with whatever status scope the view carries.
+        h.iter_mut().find(|t| t.id == "d").unwrap().needs = Some("human".into());
+        let spec = FilterSpec {
+            needs_only: true,
+            ..Default::default()
+        };
+        assert_eq!(ids(apply(&h, &spec, true)), vec!["d"]);
     }
 
     #[test]

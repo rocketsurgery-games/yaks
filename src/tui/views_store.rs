@@ -78,6 +78,7 @@ fn spec_to_json(s: &FilterSpec) -> Value {
         "search": s.search,
         "ready_only": s.ready_only,
         "tangled_only": s.tangled_only,
+        "needs_only": s.needs_only,
         "parent": s.parent,
     })
 }
@@ -127,6 +128,10 @@ fn spec_from_json(d: Option<&Value>) -> FilterSpec {
             .unwrap_or(false),
         tangled_only: d
             .get("tangled_only")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false),
+        needs_only: d
+            .get("needs_only")
             .and_then(|x| x.as_bool())
             .unwrap_or(false),
         parent: opt_str("parent"),
