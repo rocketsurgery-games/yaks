@@ -4,7 +4,7 @@ title: Render preserved unknown frontmatter fields in CLI show
 type: feature
 priority: 3
 created: '2026-09-03T19:58:25Z'
-updated: '2026-09-03T19:58:25Z'
+updated: '2026-09-03T20:04:54Z'
 parent: yaks-594b
 labels:
 - cli
