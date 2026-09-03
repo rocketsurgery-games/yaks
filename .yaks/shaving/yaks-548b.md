@@ -4,7 +4,7 @@ title: 'TUI needs affordances: list badge, inbox filter/view, ask/answer keybind
 type: feature
 priority: 3
 created: '2026-09-03T17:59:19Z'
-updated: '2026-09-03T17:59:43Z'
+updated: '2026-09-03T20:02:52Z'
 parent: yaks-594b
 depends_on:
 - yaks-4e8a
