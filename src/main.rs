@@ -4,6 +4,7 @@
 //! facade): every command is parse args -> call one Herd op -> render (text or
 //! --json). Tasks live as markdown files under `.yaks/`; status is the folder.
 
+mod actor;
 mod clipboard;
 mod filter;
 mod herd;
@@ -509,7 +510,7 @@ fn main() -> Result<()> {
         } => {
             let actor = note
                 .as_ref()
-                .and_then(|_| resolve_actor(as_actor.as_deref()));
+                .and_then(|_| actor::resolve(as_actor.as_deref()));
             let edit = TaskEdit {
                 title,
                 kind,
@@ -536,7 +537,7 @@ fn main() -> Result<()> {
             needs,
             as_actor,
         } => {
-            let actor = resolve_actor(as_actor.as_deref());
+            let actor = actor::resolve(as_actor.as_deref());
             match herd.set_needs(&id, Some(needs.clone()), actor.as_deref(), note.as_deref())? {
                 None => {
                     eprintln!("error: task {id} not found");
@@ -554,7 +555,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Answer { id, note, as_actor } => {
-            let actor = resolve_actor(as_actor.as_deref());
+            let actor = actor::resolve(as_actor.as_deref());
             match herd.set_needs(&id, None, actor.as_deref(), note.as_deref())? {
                 None => {
                     eprintln!("error: task {id} not found");
@@ -723,34 +724,6 @@ fn parse_size(s: Option<&str>) -> (u16, u16) {
 }
 
 // -- CLI arg mapping ------------------------------------------------------
-
-/// Resolve the actor a note should be attributed to: an explicit `--as` value
-/// wins, then `$YAKS_ACTOR` (a harness/coordinator can pin it once per worker),
-/// then the git `user.name` (free attribution for human CLI use). Returns `None`
-/// when nothing is set, which writes a bare, unattributed note. Best-effort:
-/// never fails the command. Note this defaults an *agent* running under the
-/// human's git identity to the human's name unless it sets `--as`/$YAKS_ACTOR.
-fn resolve_actor(explicit: Option<&str>) -> Option<String> {
-    let clean = |s: &str| {
-        let t = s.trim();
-        (!t.is_empty()).then(|| t.to_string())
-    };
-    if let Some(a) = explicit.and_then(clean) {
-        return Some(a);
-    }
-    if let Some(a) = std::env::var("YAKS_ACTOR").ok().as_deref().and_then(clean) {
-        return Some(a);
-    }
-    let out = std::process::Command::new("git")
-        .args(["config", "user.name"])
-        .output()
-        .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
-        .as_deref()
-        .and_then(clean)
-}
 
 fn build_spec(f: FilterFlags) -> FilterSpec {
     FilterSpec {
