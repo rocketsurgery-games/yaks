@@ -69,6 +69,8 @@ fn parse_task(text: &str, status: Status) -> Option<Task> {
     let mut needs = None;
     let mut labels: Vec<String> = Vec::new();
     let mut depends_on: Vec<String> = Vec::new();
+    // Frontmatter keys this binary does not model, kept verbatim to re-emit.
+    let mut extra: Vec<String> = Vec::new();
 
     // Which block-list key (if any) subsequent "- item" lines belong to.
     let mut pending: Option<&str> = None;
@@ -82,6 +84,11 @@ fn parse_task(text: &str, status: Status) -> Option<Task> {
                 }
                 Some("depends_on") => {
                     depends_on.push(unquote(item.trim()));
+                    continue;
+                }
+                // Block-list items under an unknown key: keep verbatim.
+                Some("extra") => {
+                    extra.push(raw.to_string());
                     continue;
                 }
                 _ => {}
@@ -112,7 +119,14 @@ fn parse_task(text: &str, status: Status) -> Option<Task> {
                 Some(list) => depends_on = list,
                 None => pending = Some("depends_on"),
             },
-            _ => {}
+            // Unknown key: preserve the raw line. If it's block-style (empty
+            // value), its following `- ` items belong to it too (pending=extra).
+            _ => {
+                extra.push(raw.to_string());
+                if value.is_empty() {
+                    pending = Some("extra");
+                }
+            }
         }
     }
 
@@ -132,6 +146,7 @@ fn parse_task(text: &str, status: Status) -> Option<Task> {
         depends_on,
         source,
         needs,
+        extra,
         body: body.trim().to_string(),
     })
 }
@@ -243,6 +258,11 @@ pub mod write {
         }
         if let Some(n) = &t.needs {
             out.push_str(&format!("needs: {}\n", scalar(n)));
+        }
+        // Re-emit unmodeled frontmatter verbatim, after the known fields.
+        for line in &t.extra {
+            out.push_str(line);
+            out.push('\n');
         }
         out
     }
@@ -905,6 +925,7 @@ mod tests {
             depends_on: vec!["yaksrs-aaaa".into(), "yaksrs-bbbb".into()],
             source: None,
             needs: None,
+            extra: Vec::new(),
             body: "First line.\n\n---\n\u{25b8} 2026-08-19T02:00:00Z\nA note with an apostrophe: don't panic.".into(),
         }
     }
@@ -915,6 +936,37 @@ mod tests {
         let text = write::render(&t);
         let parsed = parse_task(&text, Status::Shaving).expect("should parse");
         assert_eq!(parsed, t);
+    }
+
+    #[test]
+    fn unknown_frontmatter_survives_a_round_trip() {
+        // A herd written by a newer/other tool: fields this binary doesn't model,
+        // both scalar and block-style, plus a real note. None may be dropped.
+        let text = "---\n\
+            id: yaksrs-9f0a\n\
+            title: forward compat\n\
+            type: task\n\
+            priority: 3\n\
+            assignee: alice\n\
+            reviewers:\n\
+            - bob\n\
+            - carol\n\
+            ---\n\
+            Body.\n";
+        let parsed = parse_task(text, Status::Hairy).expect("should parse");
+        // Unknown keys are captured verbatim, not lost to the `_ =>` arm.
+        assert_eq!(
+            parsed.extra,
+            vec!["assignee: alice", "reviewers:", "- bob", "- carol"]
+        );
+        // ...and a re-render keeps them (after the known fields) and re-parses equal.
+        let rendered = write::render(&parsed);
+        assert!(rendered.contains("assignee: alice"), "{rendered}");
+        assert!(
+            rendered.contains("reviewers:\n- bob\n- carol\n"),
+            "{rendered}"
+        );
+        assert_eq!(parse_task(&rendered, Status::Hairy).unwrap(), parsed);
     }
 
     #[test]
@@ -990,6 +1042,7 @@ mod move_tests {
             depends_on: vec![],
             source: None,
             needs: None,
+            extra: Vec::new(),
             body: String::new(),
         }
     }
@@ -1087,6 +1140,7 @@ mod graph_tests {
             depends_on: vec![],
             source: None,
             needs: None,
+            extra: Vec::new(),
             body: String::new(),
         };
         write::save(root, &t).unwrap();

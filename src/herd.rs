@@ -616,6 +616,7 @@ impl Herd {
             depends_on: new.depends_on,
             source: new.source,
             needs: None,
+            extra: Vec::new(),
             body: new.description.unwrap_or_default(),
         };
         store::write::save(&self.root, &task)?;
@@ -793,6 +794,7 @@ mod tests {
             depends_on: vec![],
             source: None,
             needs: None,
+            extra: Vec::new(),
             body: String::new(),
         }
     }

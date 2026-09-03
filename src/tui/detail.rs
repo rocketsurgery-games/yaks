@@ -471,6 +471,7 @@ mod detail_tests {
             depends_on: deps.iter().map(|s| s.to_string()).collect(),
             source: None,
             needs: None,
+            extra: Vec::new(),
             body: String::new(),
         }
     }
@@ -541,6 +542,7 @@ mod tests {
             depends_on: deps.iter().map(|s| s.to_string()).collect(),
             source: None,
             needs: None,
+            extra: Vec::new(),
             body: body.into(),
         }
     }
