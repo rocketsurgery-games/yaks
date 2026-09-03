@@ -2736,10 +2736,14 @@ impl App {
                     self.notification = Some("comment cancelled".into());
                     return;
                 }
+                // Attribute TUI comments like CLI ones: $YAKS_ACTOR, else git
+                // user (no --as in the TUI). Resolved lazily here so the
+                // read-only/snapshot constructor stays pure (no git subprocess).
                 self.apply_edit(
                     &id,
                     TaskEdit {
                         note: Some(text),
+                        actor: crate::actor::resolve(None),
                         ..Default::default()
                     },
                     format!("comment added to {id}"),
