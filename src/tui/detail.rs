@@ -301,6 +301,24 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
         });
     }
 
+    // Unmodeled frontmatter (`task.extra`) kept verbatim on parse. Surfaced
+    // read-only so hand-added/newer keys are visible instead of silently
+    // invisible; the raw lines are echoed as-is (they are not label/value
+    // pairs we own the formatting of).
+    if !task.extra.is_empty() {
+        out.push(empty());
+        out.push(section("Other fields:"));
+        for line in &task.extra {
+            out.push(DLine {
+                text: format!("  {line}"),
+                kind: Kind::Field,
+                links: vec![],
+                md: vec![],
+                cont: false,
+            });
+        }
+    }
+
     let body = task.body.trim();
     if !body.is_empty() {
         out.push(empty());
@@ -524,6 +542,34 @@ mod detail_tests {
         let needs_i = lines.iter().position(|l| l.starts_with("Needs:")).unwrap();
         assert_eq!(needs_i, status_i + 1);
         assert!(lines[needs_i].contains("human"));
+    }
+
+    #[test]
+    fn extra_renders_read_only_other_fields_section() {
+        let mut task = t("yak-0001", None, &[]);
+        // Empty: no section.
+        let plain: Vec<String> = build(&task, &[task.clone()])
+            .iter()
+            .map(|l| l.text.clone())
+            .collect();
+        assert!(!plain.iter().any(|l| l == "Other fields:"));
+        // Non-empty: verbatim raw frontmatter lines under a section header.
+        task.extra = vec![
+            "assignee: alice".into(),
+            "reviewers:".into(),
+            "- bob".into(),
+        ];
+        let lines = build(&task, &[task.clone()]);
+        let text: Vec<String> = lines.iter().map(|l| l.text.clone()).collect();
+        let sec = text
+            .iter()
+            .position(|l| l == "Other fields:")
+            .expect("Other fields section present");
+        assert_eq!(text[sec + 1], "  assignee: alice");
+        assert_eq!(text[sec + 2], "  reviewers:");
+        assert_eq!(text[sec + 3], "  - bob");
+        // The section carries no link targets (read-only).
+        assert!(lines[sec + 1].links.is_empty());
     }
 
     #[test]
