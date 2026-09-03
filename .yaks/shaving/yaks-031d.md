@@ -4,7 +4,7 @@ title: Preserve unknown/unmodeled frontmatter fields across a read->write round-
 type: bug
 priority: 2
 created: '2026-09-03T18:02:05Z'
-updated: '2026-09-03T18:02:05Z'
+updated: '2026-09-03T18:09:15Z'
 parent: yaks-3901
 labels:
 - store
