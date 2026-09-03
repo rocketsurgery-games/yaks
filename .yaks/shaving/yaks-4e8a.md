@@ -4,7 +4,7 @@ title: TUI detail view renders the needs field
 type: feature
 priority: 2
 created: '2026-09-03T17:59:04Z'
-updated: '2026-09-03T17:59:04Z'
+updated: '2026-09-03T18:27:12Z'
 parent: yaks-594b
 labels:
 - ui
