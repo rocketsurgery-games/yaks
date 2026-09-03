@@ -4,7 +4,7 @@ title: User feedback comments the agent can find reliably
 type: idea
 priority: 3
 created: '2026-08-23T02:49:59Z'
-updated: '2026-09-03T16:39:10Z'
+updated: '2026-09-03T17:59:54Z'
 labels:
 - agent
 ---
@@ -32,3 +32,7 @@ BUILT + verified. needs-human as a soft block on the readiness gate.
 - Commands: 'yaks ask <id> --note ... [--needs human]' sets the block + records an attributed question (uses eb66 --as). 'yaks answer <id> --note ...' clears it + records the reply (human-reserved by convention). 'yaks inbox' lists needs-blocked yaks. needs shows in 'show' + json.
 - e2e verified on a throwaway: create->next(shown)->ask->next(HIDDEN)->inbox(shown)->show(needs:human + [coordinator] question)->answer->next(RESTORED)->inbox(empty). 205 yaks + 20 CLI + 13 toque tests green; added filter test ready_only_excludes_a_needs_block.
 FOLLOW-UPS: (1) TUI inbox filter + badge (CLI is the durable part; done here). (2) inbox rows show only the yak, not the ask inline — enrich to show the latest question, or point to show/log. (3) --needs is generic (defaults human) so other external blockers (e.g. review) are expressible now. (4) clearing is convention-guarded, not enforced; the skill reserves answer for humans.
+
+---
+▸ 2026-09-03T17:59:54Z [coordinator]
+Clearing the needs block Joel set while dogfooding ('yaks ask yaks-b517' on an already-SHORN yak). That probe revealed the inbox-visibility gap: ask set needs=human but inbox (hairy+shaving only) never surfaced it — a silent block. Captured as yaks-bc68 (inbox must show every needs-blocked yak, status-independent). Restoring b517 to a clean shorn state.
