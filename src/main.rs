@@ -1026,6 +1026,14 @@ fn render_show(s: &Show) {
     if let Some(n) = &t.needs {
         println!("needs:    {n}");
     }
+    // Preserved but unmodeled frontmatter (Task.extra), surfaced read-only so a
+    // hand-added/newer key is visible in `show` without this binary owning it.
+    if !t.extra.is_empty() {
+        println!("\nOther fields:");
+        for line in &t.extra {
+            println!("  {line}");
+        }
+    }
     if !t.body.is_empty() {
         println!("\n{}", t.body);
     }
