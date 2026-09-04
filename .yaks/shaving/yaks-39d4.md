@@ -4,7 +4,7 @@ title: 'yaks doctor: herd integrity check (post-merge danglers, parent/child, du
 type: feature
 priority: 3
 created: '2026-08-30T22:52:32Z'
-updated: '2026-08-30T22:52:32Z'
+updated: '2026-09-04T04:04:08Z'
 parent: yaks-3901
 labels:
 - cli
