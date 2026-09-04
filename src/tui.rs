@@ -97,6 +97,8 @@ enum PickAction {
     State(String),
     Priority(String),
     Type(String),
+    /// Apply a state transition to every id in the multi-select set (yaks-de85).
+    BulkState(Vec<String>),
 }
 
 /// What a confirmed y/N prompt should do.
@@ -805,6 +807,10 @@ pub struct App {
     /// The in-progress `:` command line (vim `:w`/`:q`/...), layered over the
     /// active editor overlay while `Some`. See [`App::handle_cmdline_key`].
     cmdline: Option<String>,
+    /// Ids marked for multi-select bulk actions (`m` toggles the cursor's yak).
+    /// A bulk state transition (`S` with a non-empty set) loops these ids
+    /// through `herd.transition`, then clears the set. See [`App::toggle_selected`].
+    selected: HashSet<String>,
     quit: bool,
 }
 
@@ -842,6 +848,7 @@ impl App {
             last_esc: None,
             dirty_cancel: None,
             cmdline: None,
+            selected: HashSet::new(),
             quit: false,
         }
     }
@@ -1306,6 +1313,37 @@ impl App {
     }
 
     // -- overlay openers --------------------------------------------------
+
+    /// Toggle the cursor's yak in the multi-select set. `m` is the toggle key:
+    /// the natural `Space` is already collapse/expand, and vi-style `v` collides
+    /// with the `[v]iew` picker (that v-vs-view rebinding is deferred; yaks-de85).
+    fn toggle_selected(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        if self.selected.remove(&id) {
+            self.notification = Some(format!("unmarked {id} ({} marked)", self.selected.len()));
+        } else {
+            self.selected.insert(id.clone());
+            self.notification = Some(format!("marked {id} ({} marked)", self.selected.len()));
+        }
+    }
+
+    /// Open the h/s/n/x picker as a bulk action over the multi-select set. The
+    /// resolved pick loops every marked id through `herd.transition` and then
+    /// clears the set (see [`App::resolve_pick`]).
+    fn open_bulk_state_picker(&mut self) {
+        let ids: Vec<String> = self.selected.iter().cloned().collect();
+        if ids.is_empty() {
+            return;
+        }
+        let n = ids.len();
+        self.overlay = Overlay::Pick {
+            prompt: format!(
+                "State for {n} marked: h=hairy s=shaving n=shorn x=slaughter  (Esc=cancel)"
+            ),
+            keys: "hsnx".into(),
+            action: PickAction::BulkState(ids),
+        };
+    }
 
     fn open_state_picker(&mut self) {
         if let Some(id) = self.selected_id() {
@@ -2938,6 +2976,32 @@ impl App {
 
     fn resolve_pick(&mut self, action: PickAction, c: char) {
         match action {
+            PickAction::BulkState(ids) => {
+                let dest = match c {
+                    'h' => Status::Hairy,
+                    's' => Status::Shaving,
+                    'n' => Status::Shorn,
+                    'x' => Status::Dead,
+                    _ => return,
+                };
+                let Some(h) = &self.herd else { return };
+                let (mut moved, mut failed) = (0usize, 0usize);
+                for id in &ids {
+                    match h.transition(id, dest) {
+                        Ok(MoveOutcome::Moved) => moved += 1,
+                        Ok(_) => {}
+                        Err(_) => failed += 1,
+                    }
+                }
+                let total = ids.len();
+                self.selected.clear();
+                self.reload();
+                self.notification = Some(if failed > 0 {
+                    format!("{moved}/{total} → {} ({failed} failed)", status_word(dest))
+                } else {
+                    format!("{moved}/{total} → {}", status_word(dest))
+                });
+            }
             PickAction::State(id) => {
                 let dest = match c {
                     'h' => Status::Hairy,
@@ -3148,8 +3212,17 @@ fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Tab | KeyCode::Char(']') => app.switch_tab(1),
             KeyCode::BackTab | KeyCode::Char('[') => app.switch_tab(-1),
             KeyCode::Char(' ') => app.toggle_collapse(),
-            // Mutations (single-key pickers + confirm).
-            KeyCode::Char('S') => app.open_state_picker(),
+            // Multi-select: mark/unmark the cursor's yak for a bulk action.
+            KeyCode::Char('m') => app.toggle_selected(),
+            // Mutations (single-key pickers + confirm). `S` is selection-aware:
+            // with marks it drives a bulk state transition, else the single pick.
+            KeyCode::Char('S') => {
+                if app.selected.is_empty() {
+                    app.open_state_picker()
+                } else {
+                    app.open_bulk_state_picker()
+                }
+            }
             KeyCode::Char('P') => app.open_priority_picker(),
             KeyCode::Char('T') => app.open_type_picker(),
             KeyCode::Char('X') => app.open_slaughter_confirm(),
@@ -3405,6 +3478,8 @@ fn help_content() -> Vec<Line<'static>> {
         entry("[ / ]", "Previous / next view"),
         entry("l / → / Enter", "Show detail pane"),
         entry("Space", "Collapse / expand subtree"),
+        entry("m", "Mark / unmark row (multi-select)"),
+        entry("S (marked)", "Bulk state over the marked set"),
         entry("v / V", "View picker / save filter as view"),
         entry("* ", "Star / unstar (Starred view)"),
         blank(),
@@ -4149,6 +4224,7 @@ fn render_list(app: &App, frame: &mut Frame, area: Rect) {
                 r,
                 id_field_w,
                 blocked.contains(&r.task.id),
+                app.selected.contains(&r.task.id),
                 r.task.needs.is_some(),
                 app.is_starred(&r.task.id),
                 area.width,
@@ -4196,6 +4272,7 @@ fn list_item<'a>(
     r: &tree::Row<'a>,
     id_field_w: usize,
     blocked: bool,
+    selected: bool,
     needs_blocked: bool,
     starred: bool,
     width: u16,
@@ -4209,7 +4286,16 @@ fn list_item<'a>(
     };
     let width = width as usize;
     let indent = "  ".repeat(r.depth as usize);
-    let lead = if blocked { "*" } else { " " };
+    // Multi-select gutter: a marked row shows a filled dot, taking precedence
+    // over the blocked `*` (selection is the active, user-driven concern; the
+    // `*` returns once the row is unmarked).
+    let lead = if selected {
+        "\u{25cf}"
+    } else if blocked {
+        "*"
+    } else {
+        " "
+    };
     let body = format!("{indent}{}", r.task.id);
     let body_w = id_field_w.saturating_sub(1);
     let body_padded = format!("{body:<body_w$}");
@@ -4281,7 +4367,9 @@ fn list_item<'a>(
     let mut spans = vec![
         Span::styled(
             lead.to_string(),
-            if blocked {
+            if selected {
+                Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)
+            } else if blocked {
                 Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD)
             } else {
                 Style::new()
@@ -4765,6 +4853,24 @@ mod tests {
 
     fn key(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn mark_toggles_selection_and_renders_gutter_dot() {
+        let mut app = App::new(vec![
+            task("t0", "first", Status::Hairy, 3, None),
+            task("t1", "second", Status::Hairy, 3, None),
+        ]);
+        // Nothing marked yet: no selection dot on screen.
+        assert!(!draw(&app, 80, 12).contains('\u{25cf}'));
+        // `m` marks the cursor's yak; the gutter shows a filled dot.
+        handle_key(&mut app, key('m'));
+        assert!(app.selected.contains("t0"));
+        assert!(draw(&app, 80, 12).contains('\u{25cf}'));
+        // `m` again unmarks it, and the dot disappears.
+        handle_key(&mut app, key('m'));
+        assert!(!app.selected.contains("t0"));
+        assert!(!draw(&app, 80, 12).contains('\u{25cf}'));
     }
 
     fn sample() -> App {
@@ -6060,6 +6166,28 @@ mod tests {
             let t = app.task("t0").unwrap();
             assert_eq!(t.status, Status::Shorn);
             assert_eq!(app.notification.as_deref(), Some("t0 → shorn"));
+        }
+
+        #[test]
+        fn bulk_state_transition_shorns_the_marked_set() {
+            let (_dir, herd) = temp_herd(&[
+                task("t0", "one", Status::Hairy, 3, None),
+                task("t1", "two", Status::Hairy, 3, None),
+                task("t2", "three", Status::Hairy, 3, None),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            // Mark all three rows (m, j, m, j, m) -- order-independent.
+            press(&mut app, "mjmjm");
+            assert_eq!(app.selected.len(), 3);
+            // `S` with marks opens the bulk picker; `n` shorns the whole set.
+            press(&mut app, "Sn");
+            assert!(matches!(app.overlay, Overlay::None));
+            for id in ["t0", "t1", "t2"] {
+                assert_eq!(app.task(id).unwrap().status, Status::Shorn);
+            }
+            // The selection is cleared and the count is reported.
+            assert!(app.selected.is_empty());
+            assert_eq!(app.notification.as_deref(), Some("3/3 → shorn"));
         }
 
         #[test]
