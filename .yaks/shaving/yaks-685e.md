@@ -4,7 +4,7 @@ title: 'TUI: accent styling for the needs block (detail line + badge)'
 type: feature
 priority: 3
 created: '2026-09-04T04:23:24Z'
-updated: '2026-09-04T04:23:24Z'
+updated: '2026-09-04T04:25:46Z'
 parent: yaks-594b
 labels:
 - ui
