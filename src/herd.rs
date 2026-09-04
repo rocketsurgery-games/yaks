@@ -50,7 +50,7 @@ pub struct NewTask {
 }
 
 /// A set of edits to apply to a task in one operation.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct TaskEdit {
     pub title: Option<String>,
     pub kind: Option<String>,

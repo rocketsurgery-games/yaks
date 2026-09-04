@@ -255,3 +255,84 @@ fn create_positional_title_and_json() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+
+/// Return true when the `labels:` line of `yaks show` output contains `label`
+/// as a whole word.
+fn show_labels_line_has(show_out: &str, label: &str) -> bool {
+    show_out
+        .lines()
+        .find(|l| l.starts_with("labels:"))
+        .map(|l| l.split_whitespace().any(|w| w == label))
+        .unwrap_or(false)
+}
+
+/// Bulk `update` applies the same edit to every id in an explicit id-list, and a
+/// missing id in the batch is reported + exits non-zero while the good ids still
+/// apply. Explicit id-list only; filter-driven selection is deferred (yaks-7cc8).
+/// Throwaway herd built via the CLI so it never touches the shared fixture.
+#[test]
+fn update_bulk_and_partial_failure() {
+    let dir = std::env::temp_dir().join(format!("yaks-bulkupdate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Raw runner: (success, stdout, stderr) so we can assert on the failure case.
+    let raw = |args: &[&str]| -> (bool, String, String) {
+        let out = Command::cargo_bin("yaks")
+            .unwrap()
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            String::from_utf8(out.stdout).unwrap(),
+            String::from_utf8(out.stderr).unwrap(),
+        )
+    };
+    let cli = |args: &[&str]| -> String {
+        let (ok, stdout, stderr) = raw(args);
+        assert!(ok, "command {args:?} failed: {stderr:?}");
+        stdout
+    };
+    let created_id = |out: &str| -> String {
+        out.lines()
+            .find_map(|l| l.strip_prefix("Created "))
+            .and_then(|rest| rest.split(':').next())
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+
+    cli(&["init"]);
+    let a = created_id(&cli(&["create", "--title", "alpha"]));
+    let b = created_id(&cli(&["create", "--title", "beta"]));
+
+    // Bulk update: one edit, both ids get labeled.
+    let out = cli(&["update", &a, &b, "--add-label", "x"]);
+    assert!(out.contains(&format!("Updated {a}")), "a not updated: {out}");
+    assert!(out.contains(&format!("Updated {b}")), "b not updated: {out}");
+    assert!(show_labels_line_has(&cli(&["show", &a]), "x"), "a missing label x");
+    assert!(show_labels_line_has(&cli(&["show", &b]), "x"), "b missing label x");
+
+    // Partial failure: a good id followed by a missing id. The good id still
+    // applies, the missing id is reported on stderr, and the batch exits
+    // non-zero.
+    let (ok, stdout, stderr) = raw(&["update", &a, "yaks-nope", "--add-label", "y"]);
+    assert!(!ok, "batch with a missing id should exit non-zero: {stdout}");
+    assert!(
+        stdout.contains(&format!("Updated {a}")),
+        "good id skipped on partial failure: {stdout}"
+    );
+    assert!(
+        stderr.contains("yaks-nope"),
+        "missing id not reported: {stderr}"
+    );
+    assert!(
+        show_labels_line_has(&cli(&["show", &a]), "y"),
+        "good id not updated after partial failure"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
