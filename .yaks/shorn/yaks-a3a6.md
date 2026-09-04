@@ -4,7 +4,7 @@ title: Make inbox a filter/view, not a modal toggle (unify with --needs)
 type: feature
 priority: 3
 created: '2026-09-03T21:54:15Z'
-updated: '2026-09-03T22:45:51Z'
+updated: '2026-09-04T17:07:48Z'
 parent: yaks-594b
 labels:
 - ui
@@ -22,3 +22,7 @@ IMPORTANT (learned in the 2nd parallel run): FilterSpec has EXHAUSTIVE literal c
 ---
 ▸ 2026-09-03T22:45:51Z [coordinator]
 THIRD PARALLEL RUN — done, clean; VALIDATED the coordinator-prep-commit pattern for a shared-type change. Prep (yaks-f6f8): I landed FilterSpec.needs_only + matches + JSON round-trip + all constructions on main FIRST. Then two lanes off the prepped main: CLI (yaks-f81a: --needs on FilterFlags -> build_spec, main.rs) + TUI (yaks-11e9: inbox as a filter chip + built-in Inbox view, removed the App.inbox_only modal toggle, kept the badge + ask/answer). Disjoint files (main.rs/tests vs tui.rs/view.rs/views_store.rs/snapshots); ZERO-conflict --no-ff merges; 221 bin + 21 CLI green. The pattern the coordinating-yaks skill prescribes works: a shared type edited once by the coordinator lets the wiring fan out with no cross-lane churn. inbox is now composable (chip + view), not a mode. TUI worker kept Inbox unpinned (design call; pinning is a 1-line flip, noted on yaks-11e9).
+
+---
+▸ 2026-09-04T17:07:48Z [coordinator]
+COMPLETE. inbox is now a composable filter/view, not a mode: FilterSpec.needs_only predicate landed via coordinator prep-commit (f6f8), CLI --needs filter (f81a), TUI Inbox view + drawer chip with the i modal toggle removed (11e9). Delivered in the 3rd parallel run; validated the prep-commit-for-shared-types pattern.

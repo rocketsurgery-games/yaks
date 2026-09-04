@@ -4,7 +4,7 @@ title: Surface needs + attribution across the TUI/CLI
 type: task
 priority: 2
 created: '2026-09-03T17:58:45Z'
-updated: '2026-09-03T20:12:50Z'
+updated: '2026-09-04T17:07:48Z'
 parent: yaks-3901
 labels:
 - agent
@@ -26,3 +26,7 @@ OBSERVATIONS on the sub-agents: (1) file-tool gotcha did NOT bite either — exp
 FRICTION (agent-reported, actionable): 'yaks shave'/'create' don't accept --as (attribution only on note-bearing verbs) — transition attribution still relies on git author (per eb66 scoping); 'create' rejects a bare positional title, requires --title (yaks-2120). Both hit by both workers.
 
 594b cluster now: 45c7, 29a3, 548b, eeba, 1603, 1edb, 4e8a, bc68, ffa5 all shorn; only follow-ups remain (accent styling, --needs filter deferred).
+
+---
+▸ 2026-09-04T17:07:48Z [coordinator]
+COMPLETE. needs + attribution are first-class across CLI+TUI now. Attribution: shared actor::resolve (1603), TUI comment [actor] parse+render (1edb), auto-attributed TUI comments (ffa5). needs visibility: detail field (4e8a), warning accent (685e), CLI row marker (45c7), inbox status-invariant (bc68). Preserved-unknown-frontmatter render: CLI show (29a3) + TUI detail (eeba). Inbox as filter/view (a3a6). All children shorn across runs 2-5; herd stayed integrity-clean throughout (yaks doctor).
