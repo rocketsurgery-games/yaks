@@ -4,7 +4,7 @@ title: 'coordinating-yaks: file-tool fallback rung + coordinator pre-flight chec
 type: task
 priority: 3
 created: '2026-09-04T04:01:50Z'
-updated: '2026-09-04T04:01:50Z'
+updated: '2026-09-04T04:03:00Z'
 parent: yaks-a412
 labels:
 - skills
