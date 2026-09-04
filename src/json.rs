@@ -146,6 +146,15 @@ pub fn rollup_value(groups: &[Group]) -> Value {
     )
 }
 
+pub fn doctor_array(issues: &[crate::herd::Issue]) -> Value {
+    Value::Array(
+        issues
+            .iter()
+            .map(|i| json!({"kind": i.kind.code(), "message": i.message, "ids": i.ids}))
+            .collect(),
+    )
+}
+
 pub fn print(v: &Value) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(v)?);
     Ok(())

@@ -22,7 +22,7 @@ use std::env;
 
 use filter::FilterSpec;
 use herd::{
-    Commits, CreateOutcome, DepOutcome, Herd, LogEntry, MoveOutcome, NewTask, OpenError, RefKind,
+    Commits, CreateOutcome, DepOutcome, Herd, Issue, IssueKind, LogEntry, MoveOutcome, NewTask, OpenError, RefKind,
     RenameOutcome, RenamePlan, Reparent, Show, Stats, TaskEdit, TaskRefs, UpdateOutcome,
 };
 use model::{Status, Task};
@@ -296,6 +296,13 @@ enum Command {
     },
     /// Group yaks by the external issue they roll up to.
     Rollup(RollupArgs),
+    /// Read-only herd-integrity check: report duplicate-status ids and dangling
+    /// parent/depends_on references. Exits non-zero when any issue is found.
+    Doctor {
+        /// Emit the issues as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Open the interactive terminal UI.
     Tui {
         /// Drive the TUI headlessly: read actions on stdin, emit text snapshots
@@ -677,6 +684,17 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Command::Doctor { json } => {
+            let issues = herd.doctor()?;
+            if json {
+                json::print(&json::doctor_array(&issues))?;
+            } else {
+                render_doctor(&issues);
+            }
+            if !issues.is_empty() {
+                std::process::exit(1);
+            }
+        }
         Command::Tui {
             headless,
             size,
@@ -829,6 +847,23 @@ fn render_log(entries: &[LogEntry], json: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn render_doctor(issues: &[Issue]) {
+    if issues.is_empty() {
+        println!("All clear: no herd-integrity issues found.");
+        return;
+    }
+    let noun = if issues.len() == 1 { "issue" } else { "issues" };
+    println!("Found {} herd-integrity {noun}:", issues.len());
+    let mut last: Option<IssueKind> = None;
+    for i in issues {
+        if last != Some(i.kind) {
+            println!("\n{}:", i.kind.heading());
+            last = Some(i.kind);
+        }
+        println!("  {}", i.message);
+    }
 }
 
 fn render_stats(s: &Stats) {
