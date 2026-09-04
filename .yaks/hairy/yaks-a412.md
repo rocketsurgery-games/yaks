@@ -4,7 +4,7 @@ title: Skill updates from our decisions + how to VALIDATE skills
 type: task
 priority: 2
 created: '2026-09-03T22:25:55Z'
-updated: '2026-09-04T04:29:31Z'
+updated: '2026-09-04T17:32:37Z'
 parent: yaks-3901
 labels:
 - skills
@@ -53,3 +53,7 @@ VERDICT on 3 agents: it works, but the binding constraint is DISJOINT-SCOPE AVAI
 FALLBACK-RUNG VALIDATED: 2 of 3 agents hit the edit-tool-refuses-gitignored-.worktrees-path condition and used the terminal fallback; 1 agent's edit tool accepted the worktree path directly. The behavior is INCONSISTENT across agent instances -> the fallback rung (just added to coordinating-yaks) is load-bearing, not optional.
 
 NEW OBSERVATION (TUI worker): this repo's insta snapshots are STYLE-AGNOSTIC (buffer_to_string emits only cell .symbol(), no fg/bg/modifier), so a pure color/bold change produces ZERO snapshot diff -> TUI color work is low snapshot-churn, but color is NOT snapshot-tested (per-cell style capture lives in crates/toque, unused by these tui tests). Worth noting for future TUI-styling yaks.
+
+---
+▸ 2026-09-04T17:32:37Z [coordinator]
+SIXTH RUN (bulk ops, 2 lanes) + HITL DOGFOODED. Ran a real ask: yaks-7cc8 (filter-mutation safety model) sits in inbox with the needs badge, and I proceeded with the unblocked id-list/multi-select halves — the coordinator-mediated HITL flow worked exactly as the skill prescribes (ask + proceed on unblocked scope; don't block-and-wait). All 3 sub-agents this session used the edit-tool TERMINAL FALLBACK (gitignored .worktrees path refused) — now a near-certainty, confirming the fallback rung is essential. NEW drift pattern observed: the human CREATED a new yak (yaks-d4d3, a p1 eval tool) as an untracked file mid-run; treated it like all human drift — left untouched + flagged, did not commit or build it (their yak to introduce). de85 worker showed strong scope discipline: reverted a status-line tweak that would have rippled a snapshot into tests/snapshots/ (out of scope). Bulk-slaughter-via-selection skips the per-child guard (noted on de85) — a safety follow-up.
