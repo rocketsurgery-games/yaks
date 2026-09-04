@@ -205,3 +205,53 @@ fn list_needs_filters_to_blocked() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+
+/// Positional-title create works (not only `--title`), and `create --json`
+/// emits a parseable id + on-disk path. Throwaway herd built via the CLI so it
+/// never touches the shared fixture (yaks-2120).
+#[test]
+fn create_positional_title_and_json() {
+    let dir = std::env::temp_dir().join(format!("yaks-create-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let cli = |args: &[&str]| -> String {
+        let out = Command::cargo_bin("yaks")
+            .unwrap()
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "command {args:?} failed: {:?}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    };
+
+    cli(&["init"]);
+
+    // Bare positional title works (the stumble yaks-2120 fixes).
+    let out = cli(&["create", "positional wins"]);
+    let line = out.lines().find(|l| l.starts_with("Created ")).unwrap();
+    assert!(line.ends_with(": positional wins"), "unexpected: {out}");
+    let pos_id = line.strip_prefix("Created ").unwrap().split(':').next().unwrap().trim();
+    assert!(!pos_id.is_empty(), "empty id from positional create: {out}");
+
+    // `create --json` emits an object with id + path (+ basic fields).
+    let json_out = cli(&["create", "from json", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&json_out).expect("parseable JSON");
+    let id = v["id"].as_str().expect("id string");
+    assert!(!id.is_empty(), "empty id in JSON: {json_out}");
+    assert_eq!(v["title"], "from json");
+    let path = v["path"].as_str().expect("path string");
+    assert!(
+        path.ends_with(&format!("hairy/{id}.md")),
+        "path {path} should end with hairy/{id}.md"
+    );
+    assert!(std::path::Path::new(path).is_file(), "JSON path is not a file: {path}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

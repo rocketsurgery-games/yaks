@@ -4,6 +4,8 @@
 //!
 //! Pure rendering: takes typed results from `herd` and returns `Value`s.
 
+use std::path::Path;
+
 use serde_json::{Map, Value, json};
 
 use crate::herd::Stats;
@@ -61,6 +63,16 @@ pub fn task_value(t: &Task) -> Value {
 
 pub fn tasks_array(tasks: &[Task]) -> Value {
     Value::Array(tasks.iter().map(task_value).collect())
+}
+
+/// JSON for a freshly created task: the canonical task object plus its
+/// on-disk file path, for scripting `create --json`.
+pub fn create_value(t: &Task, path: &Path) -> Value {
+    let mut v = task_value(t);
+    if let Value::Object(m) = &mut v {
+        m.insert("path".into(), json!(path.display().to_string()));
+    }
+    v
 }
 
 pub fn log_array(entries: &[crate::herd::LogEntry]) -> Value {

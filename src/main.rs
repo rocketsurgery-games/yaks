@@ -141,8 +141,11 @@ enum Command {
     },
     /// Create a new task (in hairy).
     Create {
-        #[arg(long)]
-        title: String,
+        /// Task title (positional). Wins over --title if both are given.
+        title: Option<String>,
+        /// Task title (flag form). Prefer the positional; kept for back-compat.
+        #[arg(long = "title")]
+        title_flag: Option<String>,
         #[arg(long = "type")]
         kind: Option<String>,
         #[arg(long)]
@@ -157,6 +160,9 @@ enum Command {
         source: Option<String>,
         #[arg(long)]
         description: Option<String>,
+        /// Print the created task's id, path, and basic fields as JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Update fields, labels, or append a timestamped note.
     Update {
@@ -481,6 +487,7 @@ fn main() -> Result<()> {
         }
         Command::Create {
             title,
+            title_flag,
             kind,
             priority,
             parent,
@@ -488,7 +495,15 @@ fn main() -> Result<()> {
             depends_on,
             source,
             description,
+            json,
         } => {
+            let title = match title.or(title_flag) {
+                Some(t) => t,
+                None => {
+                    eprintln!("error: a title is required (positional or --title)");
+                    std::process::exit(1);
+                }
+            };
             let new = NewTask {
                 title,
                 kind,
@@ -504,7 +519,17 @@ fn main() -> Result<()> {
                     eprintln!("error: parent task {p} not found");
                     std::process::exit(1);
                 }
-                CreateOutcome::Created(t) => println!("Created {}: {}", t.id, t.title),
+                CreateOutcome::Created(t) => {
+                    if json {
+                        let path = herd
+                            .root()
+                            .join(t.status.dir())
+                            .join(format!("{}.md", t.id));
+                        json::print(&json::create_value(&t, &path))?;
+                    } else {
+                        println!("Created {}: {}", t.id, t.title);
+                    }
+                }
             }
         }
         Command::Update {
