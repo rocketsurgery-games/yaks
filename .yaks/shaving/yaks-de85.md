@@ -4,7 +4,7 @@ title: Multi-select list items for bulk mutations
 type: feature
 priority: 3
 created: '2026-08-23T02:49:48Z'
-updated: '2026-08-26T13:17:57Z'
+updated: '2026-09-04T17:14:38Z'
 labels:
 - ui
 ---
