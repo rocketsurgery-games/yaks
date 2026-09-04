@@ -4,7 +4,7 @@ title: Skill updates from our decisions + how to VALIDATE skills
 type: task
 priority: 2
 created: '2026-09-03T22:25:55Z'
-updated: '2026-09-04T04:18:40Z'
+updated: '2026-09-04T04:29:31Z'
 parent: yaks-3901
 labels:
 - skills
@@ -43,3 +43,13 @@ FOURTH PARALLEL RUN (reliability lanes) — done, clean, and it survived a HARNE
 CRASH-RECOVERY SIGNAL (strong): the harness crashed after the doctor sub-agent had a compiling+passing implementation but BEFORE it committed/sheared. Because the work lived in its worktree, nothing was lost — the coordinator inspected the uncommitted diff, ran tests (224 green), and committed+sheared it. The worktree model is crash-resilient: a lost agent session != lost work. Recovery procedure: git -C <wt> status/diff to assess, cargo test to validate, then coordinator commits+shears. The skill lane had fully committed pre-crash, so it just merged.
 
 DOCTOR = first mechanical validation predicate realized (from this yak's list): 'yaks doctor' checks dup-status-dir (add/add merge hazard) + dangling parent/depends_on, exits non-zero, CI-usable. Ran it on our REAL herd (post ~4 parallel runs / dozen merges): ALL CLEAR — validates both doctor and the disjoint-leaf merge discipline (parallelism never corrupted the herd). Next predicates to mechanize: 'every landed commit names its yak id' and 'main stayed src-clean during a worktree run' (both held every run).
+
+---
+▸ 2026-09-04T04:29:31Z [coordinator]
+FIFTH RUN — SCALED TO 3 AGENTS (the 'does 3 make sense?' experiment). Three disjoint territories: CLI (yaks-2120: positional title + create --json, main.rs/json.rs) + TUI (yaks-685e: needs-block accent, tui.rs/detail.rs) + skills (yaks-766d: working-a-yak ask guidance). Zero-conflict 3-way merge; 224 lib + 22 cli green; doctor clean.
+
+VERDICT on 3 agents: it works, but the binding constraint is DISJOINT-SCOPE AVAILABILITY + COORDINATOR ATTENTION, not agent count. Finding 3 genuinely independent low-uncertainty territories (CLI/TUI/skills here) is the gate; when they exist, 3 merges as cleanly as 2. Coordination cost (3 prompts to scope, 3 returns to verify, 3 merges) is noticeably higher than 2 but stayed manageable. Sweet spot: 2-3. I'd go to 3 only with clearly independent + low-uncertainty lanes; 4+ would likely strain coordination faster than it adds throughput (avoid unless the work is trivially partitionable, e.g. code + docs + skills + an isolated crate).
+
+FALLBACK-RUNG VALIDATED: 2 of 3 agents hit the edit-tool-refuses-gitignored-.worktrees-path condition and used the terminal fallback; 1 agent's edit tool accepted the worktree path directly. The behavior is INCONSISTENT across agent instances -> the fallback rung (just added to coordinating-yaks) is load-bearing, not optional.
+
+NEW OBSERVATION (TUI worker): this repo's insta snapshots are STYLE-AGNOSTIC (buffer_to_string emits only cell .symbol(), no fg/bg/modifier), so a pure color/bold change produces ZERO snapshot diff -> TUI color work is low snapshot-churn, but color is NOT snapshot-tested (per-cell style capture lives in crates/toque, unused by these tui tests). Worth noting for future TUI-styling yaks.
