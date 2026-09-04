@@ -25,6 +25,9 @@ pub enum Target {
 pub enum Kind {
     Field,
     Section,
+    /// A field carrying a warning accent (e.g. the `needs` blocker), styled
+    /// distinctly from a plain `Field` in `render_dline`.
+    Warn,
     Body,
     Empty,
 }
@@ -129,6 +132,18 @@ fn field(label: &str, value: &str) -> DLine {
     }
 }
 
+/// Like [`field`] but flagged [`Kind::Warn`] so the whole line reads as a
+/// blocker accent (the `needs` block).
+fn warn_field(label: &str, value: &str) -> DLine {
+    DLine {
+        text: format!("{label:<13}{value}"),
+        kind: Kind::Warn,
+        links: vec![],
+        md: vec![],
+        cont: false,
+    }
+}
+
 fn section(text: &str) -> DLine {
     DLine {
         text: text.into(),
@@ -217,9 +232,9 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
     ];
 
     // A `needs` block is state worth seeing next to Status (mirrors CLI `show`).
-    // Accent styling is deferred to the badge work (yaks-548b).
+    // Carries a warning accent (Kind::Warn) so it reads as a blocker.
     if let Some(n) = &task.needs {
-        out.insert(4, field("Needs:", n));
+        out.insert(4, warn_field("Needs:", n));
     }
 
     if !task.depends_on.is_empty() {
@@ -542,6 +557,9 @@ mod detail_tests {
         let needs_i = lines.iter().position(|l| l.starts_with("Needs:")).unwrap();
         assert_eq!(needs_i, status_i + 1);
         assert!(lines[needs_i].contains("human"));
+        // The Needs line carries the warning accent, not a plain field.
+        let dlines = build(&task, &[task.clone()]);
+        assert_eq!(dlines[needs_i].kind, Kind::Warn);
     }
 
     #[test]
