@@ -24,6 +24,13 @@ Run the yaks CLI directly. In this checkout use `./target/release/yaks` (the
    sharing the herd that it is taken. Shave its parent too if the parent is still
    hairy.
 
+**When a decision needs a human, ask and hand back — don't block-and-wait.**
+`yaks ask <id> --note "<question>"` records the question, sets the yak's `needs`
+block, and drops it from `yaks next` until it is resolved; then return control
+rather than spinning. Pending questions surface in the human's `yaks inbox`.
+Clearing the block is human-reserved (`yaks answer <id>`) — never answer your own
+ask.
+
 ## While you work
 
 - **Append progress as you go.** `yaks update <id> --note "what you found /
