@@ -164,9 +164,11 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Update fields, labels, or append a timestamped note.
+    /// Update fields, labels, or append a timestamped note. Accepts multiple
+    /// ids; the same edit is applied to each.
     Update {
-        id: String,
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
         #[arg(long)]
         title: Option<String>,
         #[arg(long = "type")]
@@ -252,9 +254,11 @@ enum Command {
         #[command(subcommand)]
         action: DepAction,
     },
-    /// Move a task under a new parent (--parent) or to top-level (--unparent).
+    /// Move one or more tasks under a new parent (--parent) or to top-level
+    /// (--unparent). Every id is reparented to the same destination.
     Reparent {
-        id: String,
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
         #[arg(long)]
         parent: Option<String>,
         #[arg(long)]
@@ -533,7 +537,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Update {
-            id,
+            ids,
             title,
             kind,
             priority,
@@ -558,14 +562,7 @@ fn main() -> Result<()> {
                 note,
                 actor,
             };
-            match herd.update(&id, edit)? {
-                UpdateOutcome::NotFound => {
-                    eprintln!("error: task {id} not found");
-                    std::process::exit(1);
-                }
-                UpdateOutcome::Updated => println!("Updated {id}"),
-                UpdateOutcome::NoChanges => println!("No changes specified."),
-            }
+            update_many(&herd, &ids, edit)?;
         }
         Command::Ask {
             id,
@@ -648,7 +645,7 @@ fn main() -> Result<()> {
             },
         },
         Command::Reparent {
-            id,
+            ids,
             parent,
             unparent,
         } => {
@@ -660,16 +657,7 @@ fn main() -> Result<()> {
                 eprintln!("error: specify --parent TASK_ID or --unparent");
                 std::process::exit(1);
             };
-            match herd.reparent(&id, new_parent)? {
-                Reparent::Error(msg) => {
-                    eprintln!("error: {msg}");
-                    std::process::exit(1);
-                }
-                Reparent::Done { new_parent: None } => println!("Promoted {id} to top-level"),
-                Reparent::Done {
-                    new_parent: Some(p),
-                } => println!("Reparented {id} under {p}"),
-            }
+            reparent_many(&herd, &ids, new_parent)?;
         }
         Command::Rollup(args) => {
             let (groups, unsourced) = herd.rollup(&build_spec(args.filter))?;
@@ -831,6 +819,80 @@ fn transition_many(
     let mut any_failed = false;
     for id in ids {
         if !transition(herd, id, dest, already, done)? {
+            any_failed = true;
+        }
+    }
+    if any_failed {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// Apply `edit` to a single id, printing the per-id result. Returns false only
+/// when the id was not found (so the caller can exit non-zero).
+fn update_one(herd: &Herd, id: &str, edit: TaskEdit) -> Result<bool> {
+    match herd.update(id, edit)? {
+        UpdateOutcome::NotFound => {
+            eprintln!("error: task {id} not found");
+            Ok(false)
+        }
+        UpdateOutcome::Updated => {
+            println!("Updated {id}");
+            Ok(true)
+        }
+        UpdateOutcome::NoChanges => {
+            println!("No changes specified.");
+            Ok(true)
+        }
+    }
+}
+
+/// Apply the same `edit` to every id, one at a time. All ids are processed even
+/// if one is missing (no abort-on-first-error); if any id was not found, the
+/// process exits non-zero after the whole batch is handled. Mirrors
+/// `transition_many`.
+fn update_many(herd: &Herd, ids: &[String], edit: TaskEdit) -> Result<()> {
+    let mut any_failed = false;
+    for id in ids {
+        if !update_one(herd, id, edit.clone())? {
+            any_failed = true;
+        }
+    }
+    if any_failed {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// Reparent a single id, printing the per-id result. Returns false on any
+/// reparent error (not found, cycle, already-a-child, ...) so the caller can
+/// exit non-zero, matching the single-id command's behavior.
+fn reparent_one(herd: &Herd, id: &str, new_parent: Option<String>) -> Result<bool> {
+    match herd.reparent(id, new_parent)? {
+        Reparent::Error(msg) => {
+            eprintln!("error: {msg}");
+            Ok(false)
+        }
+        Reparent::Done { new_parent: None } => {
+            println!("Promoted {id} to top-level");
+            Ok(true)
+        }
+        Reparent::Done {
+            new_parent: Some(p),
+        } => {
+            println!("Reparented {id} under {p}");
+            Ok(true)
+        }
+    }
+}
+
+/// Reparent every id to the same destination, one at a time. All ids are
+/// processed even if one fails; if any failed, the process exits non-zero after
+/// the whole batch is handled. Mirrors `transition_many`.
+fn reparent_many(herd: &Herd, ids: &[String], new_parent: Option<String>) -> Result<()> {
+    let mut any_failed = false;
+    for id in ids {
+        if !reparent_one(herd, id, new_parent.clone())? {
             any_failed = true;
         }
     }
