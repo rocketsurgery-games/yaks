@@ -44,6 +44,10 @@ directory, even when the worktree lives under the project root. A bare
 sees the worktree. The SOP that reliably prevents it:
 
 1. Edit through the **explicit** worktree path (`.worktrees/<name>/src/foo.rs`).
+   **Fallback:** if the harness's edit tool *refuses* that path because
+   `.worktrees/` is gitignored, make the edit through the **terminal** (cwd = the
+   worktree) with anchored replacements — never fall back to a bare path. Across
+   three runs the main tree stayed `src`-clean either way.
 2. After each edit, run `git -C <main-checkout> status --short` and confirm the
    main tree shows no stray `src/` edits.
 3. Build/test the worktree's **own** freshly built binary, not the main one.
@@ -73,6 +77,23 @@ a type is a cross-cutting change. Handle it one of two ways:
 
 Never split a shared-type change across parallel lanes. Before fanning out, scan
 for exhaustive constructions of any type a lane will modify (`grep 'TypeName {'`).
+
+## Coordinator pre-flight (accreted from runs)
+
+A tight checklist before fanning workers out; each item just points back at a
+section above.
+
+- **Scan shared types first** — `grep 'Type {'` for exhaustive constructions of
+  any type a lane will touch; a shared-type edit goes in a prep commit or stays
+  in one lane (Disjoint scoping).
+- **Spawn workers fresh from `main`** so they start with the latest human
+  feedback (Human-in-the-loop).
+- **Assign disjoint file scopes** — one writer per yak (Disjoint scoping).
+- **Expect human `.yaks/` drift and leave it untouched** — a worker's herd is
+  its own branch; it reconciles at merge, not live (Worktrees are per-branch
+  herds).
+- **Verify each lane's branch is disjoint before merging.**
+- **`--no-ff` merge with the yak id in the message** (Merge / integration).
 
 ## Attribution
 
