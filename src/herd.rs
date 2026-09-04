@@ -179,6 +179,53 @@ pub struct LogEntry {
     pub note: String,
 }
 
+/// One integrity problem found by [`Herd::doctor`]. Read-only: doctor never
+/// mutates the herd, it only reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Issue {
+    pub kind: IssueKind,
+    pub message: String,
+    /// The yak id(s) the issue concerns: the subject first, then any id it
+    /// points at (e.g. the missing parent for a dangling reference).
+    pub ids: Vec<String>,
+}
+
+/// The classes of problem `doctor` looks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueKind {
+    /// One id living in more than one status dir at once — the add/add merge
+    /// hazard where a yak was moved on two branches.
+    DuplicateStatus,
+    /// The same id parsed from two files in a single status dir.
+    DuplicateId,
+    /// A task whose `parent` names an id no task has.
+    DanglingParent,
+    /// A task whose `depends_on` names an id no task has.
+    DanglingDependsOn,
+}
+
+impl IssueKind {
+    /// A short, stable machine label (used for `--json` and grouping).
+    pub fn code(self) -> &'static str {
+        match self {
+            IssueKind::DuplicateStatus => "duplicate-status",
+            IssueKind::DuplicateId => "duplicate-id",
+            IssueKind::DanglingParent => "dangling-parent",
+            IssueKind::DanglingDependsOn => "dangling-depends-on",
+        }
+    }
+
+    /// A human heading for grouped CLI output.
+    pub fn heading(self) -> &'static str {
+        match self {
+            IssueKind::DuplicateStatus => "Duplicate status (same id in multiple status dirs)",
+            IssueKind::DuplicateId => "Duplicate id (same id twice in one status dir)",
+            IssueKind::DanglingParent => "Dangling parent",
+            IssueKind::DanglingDependsOn => "Dangling depends_on",
+        }
+    }
+}
+
 impl Herd {
     /// Discover the nearest `.yaks/` above `cwd` and apply the schema gate.
     pub fn open(cwd: &Path) -> std::result::Result<Herd, OpenError> {
@@ -433,6 +480,88 @@ impl Herd {
             title: task.title,
             entries,
         }))
+    }
+
+    /// A read-only herd-integrity pass: collect every problem worth a human's
+    /// attention without touching a single file. Ordering is deterministic
+    /// (by kind, then id) so text and `--json` output are stable and
+    /// CI-diffable.
+    ///
+    /// v1 checks: an id living in two status dirs at once (the add/add merge
+    /// hazard), the same id twice inside one status dir, and `parent` /
+    /// `depends_on` references that point at no known yak.
+    pub fn doctor(&self) -> Result<Vec<Issue>> {
+        let tasks = store::load(&self.root, &EVERY)?;
+        let known = store::all_ids(&self.root);
+        let mut issues = Vec::new();
+
+        // id -> the statuses it was loaded under (one entry per file on disk).
+        // A well-formed herd has exactly one file, hence one status, per id.
+        let mut by_id: std::collections::BTreeMap<&str, Vec<Status>> =
+            std::collections::BTreeMap::new();
+        for t in &tasks {
+            by_id.entry(t.id.as_str()).or_default().push(t.status);
+        }
+        for (id, statuses) in &by_id {
+            let mut distinct = statuses.clone();
+            distinct.sort_by_key(|s| rank(*s));
+            distinct.dedup();
+            if distinct.len() > 1 {
+                let dirs: Vec<&str> = distinct.iter().map(|s| s.dir()).collect();
+                issues.push(Issue {
+                    kind: IssueKind::DuplicateStatus,
+                    message: format!(
+                        "{id} is in {} status dirs at once: {}",
+                        dirs.len(),
+                        dirs.join(", ")
+                    ),
+                    ids: vec![(*id).to_string()],
+                });
+            } else if statuses.len() > 1 {
+                issues.push(Issue {
+                    kind: IssueKind::DuplicateId,
+                    message: format!(
+                        "{id} appears {} times in {}/",
+                        statuses.len(),
+                        distinct[0].dir()
+                    ),
+                    ids: vec![(*id).to_string()],
+                });
+            }
+        }
+
+        // Dangling references: a `parent` or `depends_on` naming no known id.
+        for t in &tasks {
+            if let Some(p) = &t.parent {
+                if !known.contains(p) {
+                    issues.push(Issue {
+                        kind: IssueKind::DanglingParent,
+                        message: format!("{} has parent {} but no such yak exists", t.id, p),
+                        ids: vec![t.id.clone(), p.clone()],
+                    });
+                }
+            }
+            for d in &t.depends_on {
+                if !known.contains(d) {
+                    issues.push(Issue {
+                        kind: IssueKind::DanglingDependsOn,
+                        message: format!("{} depends_on {} but no such yak exists", t.id, d),
+                        ids: vec![t.id.clone(), d.clone()],
+                    });
+                }
+            }
+        }
+
+        // Deterministic order: group by kind, then by the ids involved. Dedup
+        // drops any identical issue a duplicated-on-disk task could produce.
+        issues.sort_by(|a, b| {
+            issue_rank(a.kind)
+                .cmp(&issue_rank(b.kind))
+                .then_with(|| a.ids.first().cmp(&b.ids.first()))
+                .then_with(|| a.ids.get(1).cmp(&b.ids.get(1)))
+        });
+        issues.dedup();
+        Ok(issues)
     }
 
     /// Recover the git commits linked to `id` without any stored hash: commits
@@ -754,6 +883,15 @@ fn rank(s: Status) -> u8 {
     }
 }
 
+fn issue_rank(k: IssueKind) -> u8 {
+    match k {
+        IssueKind::DuplicateStatus => 0,
+        IssueKind::DuplicateId => 1,
+        IssueKind::DanglingParent => 2,
+        IssueKind::DanglingDependsOn => 3,
+    }
+}
+
 fn fold_counts<K: std::hash::Hash + Eq, I: Iterator<Item = K>>(it: I) -> Vec<(K, usize)> {
     let mut m: std::collections::HashMap<K, usize> = std::collections::HashMap::new();
     for k in it {
@@ -1027,5 +1165,62 @@ mod tests {
             root.join("shorn/yak-0003.md").is_file(),
             "the valid id must move despite a sibling failure"
         );
+    }
+
+    /// `doctor` flags a task whose formal `parent` and `depends_on` name ids no
+    /// yak has, and stays silent about references that do resolve.
+    #[test]
+    fn doctor_flags_dangling_parent_and_depends_on() {
+        let (root, herd) = temp_herd();
+        store::write::save(&root, &task("yak-0002", Status::Shorn)).unwrap();
+        let mut subject = task("yak-0001", Status::Hairy);
+        subject.parent = Some("yak-0404".into()); // no such yak
+        subject.depends_on = vec!["yak-0002".into(), "yak-0405".into()]; // one dangles
+        store::write::save(&root, &subject).unwrap();
+
+        let issues = herd.doctor().unwrap();
+        let got: Vec<(IssueKind, Vec<&str>)> = issues
+            .iter()
+            .map(|i| (i.kind, i.ids.iter().map(String::as_str).collect()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (IssueKind::DanglingParent, vec!["yak-0001", "yak-0404"]),
+                (IssueKind::DanglingDependsOn, vec!["yak-0001", "yak-0405"]),
+            ],
+            "resolvable refs (yak-0002) must not be flagged"
+        );
+    }
+
+    /// The headline check: the same id written into two status dirs (the add/add
+    /// merge hazard) is flagged once as a duplicate-status clash.
+    #[test]
+    fn doctor_flags_same_id_in_two_status_dirs() {
+        let (root, herd) = temp_herd();
+        store::write::save(&root, &task("yak-0001", Status::Hairy)).unwrap();
+        store::write::save(&root, &task("yak-0001", Status::Shorn)).unwrap();
+
+        let issues = herd.doctor().unwrap();
+        assert_eq!(issues.len(), 1, "one duplicated id -> one clash");
+        assert_eq!(issues[0].kind, IssueKind::DuplicateStatus);
+        assert_eq!(issues[0].ids, vec!["yak-0001"]);
+        assert!(
+            issues[0].message.contains("hairy") && issues[0].message.contains("shorn"),
+            "message names both dirs: {}",
+            issues[0].message
+        );
+    }
+
+    /// A well-formed herd (resolvable parent + dep, one status per id) is clean.
+    #[test]
+    fn doctor_clean_herd_has_no_issues() {
+        let (root, herd) = temp_herd();
+        let mut a = task("yak-0001", Status::Hairy);
+        a.parent = Some("yak-0002".into());
+        a.depends_on = vec!["yak-0002".into()];
+        store::write::save(&root, &a).unwrap();
+        store::write::save(&root, &task("yak-0002", Status::Shorn)).unwrap();
+        assert!(herd.doctor().unwrap().is_empty());
     }
 }
