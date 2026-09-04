@@ -4,7 +4,7 @@ title: Skill updates from our decisions + how to VALIDATE skills
 type: task
 priority: 2
 created: '2026-09-03T22:25:55Z'
-updated: '2026-09-03T22:45:51Z'
+updated: '2026-09-04T04:18:40Z'
 parent: yaks-3901
 labels:
 - skills
@@ -35,3 +35,11 @@ HOW TO VALIDATE SKILLS (ideas to develop):
 ---
 ▸ 2026-09-03T22:45:51Z [coordinator]
 SKILL-SOP REFINEMENT from run 3 (pending fold into coordinating-yaks): the file-tool SOP's 'edit via explicit .worktrees/<name>/ path' can FAIL when the harness's edit tool refuses GITIGNORED paths (.worktrees/ is gitignored) — the CLI worker's edit_file couldn't resolve the worktree path and fell back to TERMINAL-based edits (cwd=worktree, anchored replacements). Both workers stayed main-src-clean regardless. So the SOP needs a fallback rung: if the file tool won't write the gitignored worktree path, do edits through the terminal with cwd in the worktree. New validation predicate candidate: 'main tree src-clean throughout a worktree run' held for a 3rd time -> strong signal the isolation discipline is real. Also: a human's dirty working-tree yak (b517: wat:+needs:human) correctly surfaced in inbox and was left untouched by both workers + coordinator — the 'leave human drift' + 'files-are-authoritative' conventions held again.
+
+---
+▸ 2026-09-04T04:18:40Z [coordinator]
+FOURTH PARALLEL RUN (reliability lanes) — done, clean, and it survived a HARNESS CRASH mid-run. Lanes: doctor (yaks-39d4, herd.rs/json.rs/main.rs) + skill (yaks-6f21, coordinating-yaks fallback rung + pre-flight checklist). Zero-conflict merge; 224 bin + 21 CLI green.
+
+CRASH-RECOVERY SIGNAL (strong): the harness crashed after the doctor sub-agent had a compiling+passing implementation but BEFORE it committed/sheared. Because the work lived in its worktree, nothing was lost — the coordinator inspected the uncommitted diff, ran tests (224 green), and committed+sheared it. The worktree model is crash-resilient: a lost agent session != lost work. Recovery procedure: git -C <wt> status/diff to assess, cargo test to validate, then coordinator commits+shears. The skill lane had fully committed pre-crash, so it just merged.
+
+DOCTOR = first mechanical validation predicate realized (from this yak's list): 'yaks doctor' checks dup-status-dir (add/add merge hazard) + dangling parent/depends_on, exits non-zero, CI-usable. Ran it on our REAL herd (post ~4 parallel runs / dozen merges): ALL CLEAR — validates both doctor and the disjoint-leaf merge discipline (parallelism never corrupted the herd). Next predicates to mechanize: 'every landed commit names its yak id' and 'main stayed src-clean during a worktree run' (both held every run).
