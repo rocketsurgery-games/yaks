@@ -4249,7 +4249,7 @@ fn list_item<'a>(
         right_plain.push('\u{23f3}');
         right_spans.push(Span::styled(
             "\u{23f3}",
-            dim(Style::new().fg(Color::Yellow)),
+            dim(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         ));
     }
     if starred {
@@ -4380,6 +4380,10 @@ fn render_dline<'a>(
                 Style::new().fg(Color::DarkGray)
             } else if dl.kind == detail::Kind::Section {
                 Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else if dl.kind == detail::Kind::Warn {
+                // Warning accent (the `needs` blocker): the whole line, label
+                // included, reads yellow + bold so it stands out as a blocker.
+                Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else {
                 Style::new()
             };
