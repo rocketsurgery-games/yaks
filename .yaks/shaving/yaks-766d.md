@@ -4,7 +4,7 @@ title: 'working-a-yak: add needs/ask-answer guidance (hand back, don''t self-cle
 type: task
 priority: 3
 created: '2026-09-04T04:23:24Z'
-updated: '2026-09-04T04:23:24Z'
+updated: '2026-09-04T04:24:45Z'
 parent: yaks-a412
 labels:
 - skills
