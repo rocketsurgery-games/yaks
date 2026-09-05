@@ -419,3 +419,132 @@ fn update_bulk_and_partial_failure() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `yaks bulk` is filter-driven and DESTRUCTIVE-CAPABLE, so the safety model
+/// (yaks-7cc8) is exercised end to end: dry-run by default changes nothing,
+/// --commit applies, and both an unfiltered run and a mutation-less run refuse.
+/// Throwaway herd built via the CLI so it never touches the shared fixture.
+#[test]
+fn bulk_dry_run_commit_and_refusals() {
+    let dir = std::env::temp_dir().join(format!("yaks-bulk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let raw = |args: &[&str]| -> (bool, String, String) {
+        let out = Command::cargo_bin("yaks")
+            .unwrap()
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            String::from_utf8(out.stdout).unwrap(),
+            String::from_utf8(out.stderr).unwrap(),
+        )
+    };
+    let cli = |args: &[&str]| -> String {
+        let (ok, stdout, stderr) = raw(args);
+        assert!(ok, "command {args:?} failed: {stderr:?}");
+        stdout
+    };
+    let created_id = |out: &str| -> String {
+        out.lines()
+            .find_map(|l| l.strip_prefix("Created "))
+            .and_then(|rest| rest.split(':').next())
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let show_field = |show_out: &str, field: &str| -> String {
+        show_out
+            .lines()
+            .find(|l| l.starts_with(field))
+            .map(|l| l.splitn(2, ':').nth(1).unwrap().trim().to_string())
+            .unwrap_or_default()
+    };
+
+    cli(&["init"]);
+    // Two yaks carry label `pick`; one does not (the control that must never move).
+    let a = created_id(&cli(&["create", "--title", "alpha", "--labels", "pick"]));
+    let b = created_id(&cli(&["create", "--title", "beta", "--labels", "pick"]));
+    let c = created_id(&cli(&["create", "--title", "gamma", "--labels", "other"]));
+
+    // (a) Filtered DRY RUN: lists the matched set and the mutation, changes
+    // nothing. Default (no --commit) must never write.
+    let (ok, stdout, _) = raw(&["bulk", "--label", "pick", "--add-label", "sprint"]);
+    assert!(ok, "dry run should exit 0: {stdout}");
+    assert!(
+        stdout.contains("would update 2 yaks:"),
+        "dry run should preview 2 matches: {stdout}"
+    );
+    assert!(
+        stdout.contains(&a) && stdout.contains(&b),
+        "dry run missing ids: {stdout}"
+    );
+    assert!(
+        stdout.contains("sprint"),
+        "dry run should describe the mutation: {stdout}"
+    );
+    // Verify a matched yak is genuinely unchanged after the dry run.
+    assert!(
+        !show_labels_line_has(&cli(&["show", &a]), "sprint"),
+        "dry run must not apply the label"
+    );
+
+    // (b) --commit actually applies to the matched set, and only that set.
+    let out = cli(&[
+        "bulk",
+        "--label",
+        "pick",
+        "--add-label",
+        "sprint",
+        "--set-priority",
+        "1",
+        "--commit",
+    ]);
+    assert!(
+        out.contains(&format!("Updated {a}")),
+        "a not updated: {out}"
+    );
+    assert!(
+        out.contains(&format!("Updated {b}")),
+        "b not updated: {out}"
+    );
+    assert!(
+        show_labels_line_has(&cli(&["show", &a]), "sprint"),
+        "a missing sprint"
+    );
+    assert!(
+        show_labels_line_has(&cli(&["show", &b]), "sprint"),
+        "b missing sprint"
+    );
+    assert_eq!(
+        show_field(&cli(&["show", &a]), "priority:"),
+        "1",
+        "a priority not set"
+    );
+    // The unmatched control yak is untouched.
+    assert!(
+        !show_labels_line_has(&cli(&["show", &c]), "sprint"),
+        "unmatched yak must not be mutated"
+    );
+
+    // (c) No filter flag -> refuse (never operate on the whole herd).
+    let (ok, _stdout, stderr) = raw(&["bulk", "--add-label", "z"]);
+    assert!(!ok, "unfiltered bulk must exit non-zero");
+    assert!(
+        stderr.contains("filter flag"),
+        "unfiltered bulk should explain the refusal: {stderr}"
+    );
+
+    // (d) No mutation flag -> refuse.
+    let (ok, _stdout, stderr) = raw(&["bulk", "--label", "pick"]);
+    assert!(!ok, "bulk with no mutation must exit non-zero");
+    assert!(
+        stderr.contains("mutation flag"),
+        "mutation-less bulk should explain the refusal: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

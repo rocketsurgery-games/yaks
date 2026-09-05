@@ -63,6 +63,23 @@ struct FilterFlags {
     parent_of: Option<String>,
 }
 
+impl FilterFlags {
+    /// True when at least one selector is set. Bulk mutation refuses an
+    /// unfiltered run, so it uses this to guarantee the whole herd is never the
+    /// implicit target.
+    fn any_set(&self) -> bool {
+        !self.status.is_empty()
+            || !self.kind.is_empty()
+            || !self.priority.is_empty()
+            || !self.label.is_empty()
+            || self.search.is_some()
+            || self.ready
+            || self.tangled
+            || self.needs
+            || self.parent_of.is_some()
+    }
+}
+
 #[derive(Args, Default)]
 struct RollupArgs {
     #[command(flatten)]
@@ -276,6 +293,36 @@ enum Command {
         parent: Option<String>,
         #[arg(long)]
         unparent: bool,
+    },
+    /// Apply the same field edit (and/or reparent) to every yak matching a
+    /// filter. DRY-RUN BY DEFAULT: without --commit it only prints the matched
+    /// set and the mutation, changing nothing. Requires at least one filter flag
+    /// (never operates on the whole herd) and at least one mutation flag. Field
+    /// edits + reparent only — no state transitions (see yaks-7cc8).
+    Bulk {
+        #[command(flatten)]
+        filter: FilterFlags,
+        /// Labels to add to every matched yak.
+        #[arg(long = "add-label", num_args = 1..)]
+        add_label: Vec<String>,
+        /// Labels to remove from every matched yak.
+        #[arg(long = "remove-label", num_args = 1..)]
+        remove_label: Vec<String>,
+        /// Set the priority of every matched yak.
+        #[arg(long = "set-priority")]
+        set_priority: Option<u8>,
+        /// Set the type of every matched yak.
+        #[arg(long = "set-type")]
+        set_type: Option<String>,
+        /// Reparent every matched yak under this id.
+        #[arg(long)]
+        reparent: Option<String>,
+        /// Reparent every matched yak to top-level.
+        #[arg(long)]
+        unparent: bool,
+        /// Actually apply the mutation. Without it, this is a dry run.
+        #[arg(long)]
+        commit: bool,
     },
     /// Rename a yak, updating its file + id and every reference to it
     /// (parent, depends_on, and body/title mentions) across the herd.
@@ -684,6 +731,90 @@ fn main() -> Result<()> {
             };
             reparent_many(&herd, &ids, new_parent)?;
         }
+        Command::Bulk {
+            filter,
+            add_label,
+            remove_label,
+            set_priority,
+            set_type,
+            reparent,
+            unparent,
+            commit,
+        } => {
+            // Safety rule 1: never operate on the whole herd implicitly.
+            if !filter.any_set() {
+                eprintln!(
+                    "error: bulk requires at least one filter flag (e.g. --label, --status, --priority); refusing to select the whole herd"
+                );
+                std::process::exit(1);
+            }
+            // Reparent target: --reparent and --unparent are mutually exclusive.
+            if unparent && reparent.is_some() {
+                eprintln!("error: specify either --reparent ID or --unparent, not both");
+                std::process::exit(1);
+            }
+            let does_field_edit = !add_label.is_empty()
+                || !remove_label.is_empty()
+                || set_priority.is_some()
+                || set_type.is_some();
+            let does_reparent = unparent || reparent.is_some();
+            // Safety rule 2: require at least one mutation flag.
+            if !does_field_edit && !does_reparent {
+                eprintln!(
+                    "error: bulk requires at least one mutation flag (--add-label/--remove-label/--set-priority/--set-type/--reparent/--unparent)"
+                );
+                std::process::exit(1);
+            }
+
+            let rows = herd.list(build_spec(filter), false)?;
+            if rows.is_empty() {
+                println!("No yaks matched the filter; nothing to do.");
+                return Ok(());
+            }
+            let ids: Vec<String> = rows.iter().map(|t| t.id.clone()).collect();
+            let mutation = describe_bulk_mutation(
+                &add_label,
+                &remove_label,
+                set_priority,
+                set_type.as_deref(),
+                reparent.as_deref(),
+                unparent,
+            );
+
+            // Safety rule 3: dry-run is the default — print and change nothing.
+            if !commit {
+                println!("would update {} yaks:", rows.len());
+                for t in &rows {
+                    println!("  {}  {}", t.id, t.title);
+                }
+                println!("mutation: {mutation}");
+                println!("(dry run — pass --commit to apply)");
+                return Ok(());
+            }
+
+            // Safety rule 4: only with --commit do we apply, reusing the same
+            // per-id update/reparent path as the id-list commands. update_many /
+            // reparent_many exit non-zero if any id failed.
+            println!("updating {} yaks: {mutation}", rows.len());
+            if does_field_edit {
+                let edit = TaskEdit {
+                    title: None,
+                    kind: set_type,
+                    priority: set_priority,
+                    description: None,
+                    add_labels: add_label,
+                    remove_labels: remove_label,
+                    source: None,
+                    note: None,
+                    actor: None,
+                };
+                update_many(&herd, &ids, edit)?;
+            }
+            if does_reparent {
+                let new_parent = if unparent { None } else { reparent };
+                reparent_many(&herd, &ids, new_parent)?;
+            }
+        }
         Command::Rollup(args) => {
             let (groups, unsourced) = herd.rollup(&build_spec(args.filter))?;
             if args.keys {
@@ -925,6 +1056,37 @@ fn reparent_many(herd: &Herd, ids: &[String], new_parent: Option<String>) -> Res
         std::process::exit(1);
     }
     Ok(())
+}
+
+/// Human-readable one-line summary of the field edit and/or reparent a bulk run
+/// would apply. Used in both the dry-run preview and the commit log line.
+fn describe_bulk_mutation(
+    add_label: &[String],
+    remove_label: &[String],
+    set_priority: Option<u8>,
+    set_type: Option<&str>,
+    reparent: Option<&str>,
+    unparent: bool,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !add_label.is_empty() {
+        parts.push(format!("add labels [{}]", add_label.join(", ")));
+    }
+    if !remove_label.is_empty() {
+        parts.push(format!("remove labels [{}]", remove_label.join(", ")));
+    }
+    if let Some(p) = set_priority {
+        parts.push(format!("set priority {p}"));
+    }
+    if let Some(t) = set_type {
+        parts.push(format!("set type {t}"));
+    }
+    if unparent {
+        parts.push("reparent to top-level".to_string());
+    } else if let Some(id) = reparent {
+        parts.push(format!("reparent under {id}"));
+    }
+    parts.join("; ")
 }
 
 fn render_rows(rows: &[Task], json: bool, empty_msg: &str) -> Result<()> {
