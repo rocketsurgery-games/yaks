@@ -22,8 +22,9 @@ use std::env;
 
 use filter::FilterSpec;
 use herd::{
-    Commits, CreateOutcome, DepOutcome, Herd, Issue, IssueKind, LogEntry, MoveOutcome, NewTask, OpenError, RefKind,
-    RenameOutcome, RenamePlan, Reparent, Show, Stats, TaskEdit, TaskRefs, UpdateOutcome,
+    Commits, CreateOutcome, DepOutcome, Herd, Issue, IssueKind, LogEntry, MoveOutcome, NewTask,
+    OpenError, RefKind, RenameOutcome, RenamePlan, Reparent, Show, Stats, TaskEdit, TaskRefs,
+    UpdateOutcome,
 };
 use model::{Status, Task};
 
@@ -96,6 +97,18 @@ enum Command {
     /// Show the git commits linked to a yak: those naming its id and those that
     /// touched its file across status moves.
     Commits { id: String },
+    /// Scan text for tokens that are real yak-ids in this herd — a leak check
+    /// for private-mode herds (pre-commit / PR hook). Reads a FILE and/or
+    /// stdin, prints each found id as `line:col  id`, and EXITS NON-ZERO if
+    /// any are found (clean text exits zero).
+    ScanIds {
+        /// File to scan. Omit (or combine with) piped stdin; both are scanned.
+        #[arg(value_name = "FILE")]
+        file: Option<String>,
+        /// Emit machine-readable JSON instead of `line:col  id` lines.
+        #[arg(long)]
+        json: bool,
+    },
     /// List hairy tasks whose dependencies are all resolved.
     #[command(visible_alias = "ready")]
     Next {
@@ -450,6 +463,18 @@ fn main() -> Result<()> {
             }
             Some(c) => render_commits(&c),
         },
+        Command::ScanIds { file, json } => {
+            let text = read_scan_input(file.as_deref())?;
+            // Validate against the herd's real ids, the same membership test the
+            // renderer highlights links with (refs is prefix-agnostic).
+            let known = store::all_ids(herd.root());
+            let found = refs::scan_text(&text, |t| known.contains(t));
+            render_scan_ids(&found, json)?;
+            if !found.is_empty() {
+                // Non-zero so the command is usable as a pre-commit / CI gate.
+                std::process::exit(1);
+            }
+        }
         Command::Next { filter, json } => {
             let rows = herd.next(build_spec(filter))?;
             if json {
@@ -1123,6 +1148,49 @@ fn render_commits(c: &Commits) {
             println!("  {l}");
         }
     }
+}
+
+/// Gather the text `scan-ids` should scan: the contents of `file` (when given)
+/// and piped stdin (when stdin is not a terminal), so a file arg, a `... |`
+/// pipe, or both together all work. Joined with a newline so line numbers stay
+/// sane across the two sources.
+fn read_scan_input(file: Option<&str>) -> Result<String> {
+    use std::io::{IsTerminal, Read};
+    let mut text = String::new();
+    if let Some(path) = file {
+        let body = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("cannot read {path}: {e}"))?;
+        text.push_str(&body);
+    }
+    if !std::io::stdin().is_terminal() {
+        let mut s = String::new();
+        std::io::stdin().read_to_string(&mut s)?;
+        if !s.is_empty() {
+            if !text.is_empty() && !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text.push_str(&s);
+        }
+    }
+    Ok(text)
+}
+
+/// Report the yak-ids `scan-ids` found. Text mode prints one `line:col  id`
+/// per hit (nothing when clean); JSON mode emits an array of `{line,col,id}`.
+/// The non-zero exit is the caller's job so this stays a pure renderer.
+fn render_scan_ids(found: &[refs::FoundRef], json: bool) -> Result<()> {
+    if json {
+        let arr: Vec<serde_json::Value> = found
+            .iter()
+            .map(|f| serde_json::json!({ "line": f.line, "col": f.col, "id": f.id }))
+            .collect();
+        json::print(&serde_json::Value::Array(arr))?;
+    } else {
+        for f in found {
+            println!("{}:{}  {}", f.line, f.col, f.id);
+        }
+    }
+    Ok(())
 }
 
 fn render_show(s: &Show) {

@@ -197,7 +197,10 @@ fn list_needs_filters_to_blocked() {
 
     // --needs keeps only the blocked one.
     let needs = cli(&["list", "--needs"]);
-    assert!(needs.contains(&blocked), "list --needs missing blocked: {needs}");
+    assert!(
+        needs.contains(&blocked),
+        "list --needs missing blocked: {needs}"
+    );
     assert!(
         !needs.contains(&free),
         "list --needs leaked unblocked yak: {needs}"
@@ -205,7 +208,6 @@ fn list_needs_filters_to_blocked() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
-
 
 /// Positional-title create works (not only `--title`), and `create --json`
 /// emits a parseable id + on-disk path. Throwaway herd built via the CLI so it
@@ -237,7 +239,13 @@ fn create_positional_title_and_json() {
     let out = cli(&["create", "positional wins"]);
     let line = out.lines().find(|l| l.starts_with("Created ")).unwrap();
     assert!(line.ends_with(": positional wins"), "unexpected: {out}");
-    let pos_id = line.strip_prefix("Created ").unwrap().split(':').next().unwrap().trim();
+    let pos_id = line
+        .strip_prefix("Created ")
+        .unwrap()
+        .split(':')
+        .next()
+        .unwrap()
+        .trim();
     assert!(!pos_id.is_empty(), "empty id from positional create: {out}");
 
     // `create --json` emits an object with id + path (+ basic fields).
@@ -251,11 +259,71 @@ fn create_positional_title_and_json() {
         path.ends_with(&format!("hairy/{id}.md")),
         "path {path} should end with hairy/{id}.md"
     );
-    assert!(std::path::Path::new(path).is_file(), "JSON path is not a file: {path}");
+    assert!(
+        std::path::Path::new(path).is_file(),
+        "JSON path is not a file: {path}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `scan-ids` is the private-mode leak check: text carrying a real herd id is
+/// flagged and the command exits NON-ZERO (so a pre-commit hook fails), while
+/// text with only id-shaped-but-fake tokens is clean and exits zero. Runs
+/// against the shared fixture herd, whose ids are `fix-000N` (yaks-d4d3).
+#[test]
+fn scan_ids_flags_real_ids_and_is_clean_otherwise() {
+    let herd = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/herd");
+    let scan = |stdin: &str| -> (bool, String) {
+        let out = Command::cargo_bin("yaks")
+            .unwrap()
+            .current_dir(&herd)
+            .arg("scan-ids")
+            .write_stdin(stdin)
+            .output()
+            .unwrap();
+        (out.status.success(), String::from_utf8(out.stdout).unwrap())
+    };
+
+    // A real herd id (fix-0004) leaks: flagged with line:col, exits non-zero.
+    let (ok, stdout) = scan("intro line\nleaked ref fix-0004 in prose\n");
+    assert!(
+        !ok,
+        "a real id must make scan-ids exit non-zero: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("fix-0004"),
+        "real id not reported: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("2:"),
+        "missing line:col for the hit: {stdout:?}"
+    );
+
+    // Only id-shaped but non-existent tokens: clean, exits zero, no output.
+    let (ok, stdout) = scan("fix-9999 is not real\nplainword and http://x/y\n");
+    assert!(ok, "fake/non-id tokens must exit zero: {stdout:?}");
+    assert!(
+        stdout.trim().is_empty(),
+        "clean text should print nothing: {stdout:?}"
+    );
+
+    // --json emits a parseable array carrying the found id.
+    let out = Command::cargo_bin("yaks")
+        .unwrap()
+        .current_dir(&herd)
+        .args(["scan-ids", "--json"])
+        .write_stdin("see fix-0002 here\n")
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "json mode still exits non-zero on a hit"
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).expect("parseable JSON");
+    assert_eq!(v[0]["id"], "fix-0002");
+}
 
 /// Return true when the `labels:` line of `yaks show` output contains `label`
 /// as a whole word.
@@ -311,16 +379,31 @@ fn update_bulk_and_partial_failure() {
 
     // Bulk update: one edit, both ids get labeled.
     let out = cli(&["update", &a, &b, "--add-label", "x"]);
-    assert!(out.contains(&format!("Updated {a}")), "a not updated: {out}");
-    assert!(out.contains(&format!("Updated {b}")), "b not updated: {out}");
-    assert!(show_labels_line_has(&cli(&["show", &a]), "x"), "a missing label x");
-    assert!(show_labels_line_has(&cli(&["show", &b]), "x"), "b missing label x");
+    assert!(
+        out.contains(&format!("Updated {a}")),
+        "a not updated: {out}"
+    );
+    assert!(
+        out.contains(&format!("Updated {b}")),
+        "b not updated: {out}"
+    );
+    assert!(
+        show_labels_line_has(&cli(&["show", &a]), "x"),
+        "a missing label x"
+    );
+    assert!(
+        show_labels_line_has(&cli(&["show", &b]), "x"),
+        "b missing label x"
+    );
 
     // Partial failure: a good id followed by a missing id. The good id still
     // applies, the missing id is reported on stderr, and the batch exits
     // non-zero.
     let (ok, stdout, stderr) = raw(&["update", &a, "yaks-nope", "--add-label", "y"]);
-    assert!(!ok, "batch with a missing id should exit non-zero: {stdout}");
+    assert!(
+        !ok,
+        "batch with a missing id should exit non-zero: {stdout}"
+    );
     assert!(
         stdout.contains(&format!("Updated {a}")),
         "good id skipped on partial failure: {stdout}"
