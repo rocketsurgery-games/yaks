@@ -4,7 +4,7 @@ title: 'Yak editing: Crash when shift-tab''ing from description back to labels'
 type: bug
 priority: 3
 created: '2026-09-04T17:44:04Z'
-updated: '2026-09-04T17:44:04Z'
+updated: '2026-09-05T03:06:09Z'
 labels:
 - bug ui
 ---
@@ -46,3 +46,7 @@ stack backtrace:
              at /Users/joel/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
 note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
 ```
+
+---
+▸ 2026-09-05T03:06:05Z [wt-tui]
+Fixed in src/tui.rs. Root cause: on the description (content) row, BackTab fell past nav_up (guarded by '&& !is_content') into the edtui forward; edtui's KeyCode::from is unimplemented! for BackTab -> panic. Fix: BackTab now focuses the previous field on EVERY row (dropped the !is_content guard on nav_up), mirroring Tab's focus-next. Added edtui_can_handle() and guarded both create-form edtui forwards (content + single-line) so no unconvertible key (Insert, F-keys) can reach edtui. Regression tests: create_form_backtab_from_description_focuses_previous_field (BackTab from description -> no panic, focus back to labels row 3) and create_form_drops_unconvertible_editor_key_without_panic (Insert dropped, no panic). cargo test --workspace: 228 + 23 + 13 + 1 doc all pass; no snapshot changes.
