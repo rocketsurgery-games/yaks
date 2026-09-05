@@ -1403,13 +1403,19 @@ impl App {
         }
     }
 
+    /// Count a yak's live (non-dead) children. Slaughter refuses to orphan
+    /// children, so both the single path (`open_slaughter_confirm`) and the
+    /// bulk path (`PickAction::BulkState` with `x`) gate on this (yaks-5c51).
+    fn live_child_count(&self, id: &str) -> usize {
+        self.all
+            .iter()
+            .filter(|c| c.parent.as_deref() == Some(id) && c.status != Status::Dead)
+            .count()
+    }
+
     fn open_slaughter_confirm(&mut self) {
         let Some(id) = self.selected_id() else { return };
-        let kids = self
-            .all
-            .iter()
-            .filter(|c| c.parent.as_deref() == Some(id.as_str()) && c.status != Status::Dead)
-            .count();
+        let kids = self.live_child_count(&id);
         if kids > 0 {
             let noun = if kids == 1 { "child" } else { "children" };
             self.notification = Some(format!("{id} has {kids} {noun}; slaughter them first"));
@@ -3018,9 +3024,27 @@ impl App {
                     'x' => Status::Dead,
                     _ => return,
                 };
+                // Slaughter must not orphan children: mirror the single-path
+                // guard (open_slaughter_confirm) by skipping any marked id with
+                // live children and reporting the count. Non-slaughter bulk
+                // transitions are unaffected (yaks-5c51).
+                let mut skipped = 0usize;
+                let targets: Vec<&String> = if dest == Status::Dead {
+                    ids.iter()
+                        .filter(|id| {
+                            let keep = self.live_child_count(id) == 0;
+                            if !keep {
+                                skipped += 1;
+                            }
+                            keep
+                        })
+                        .collect()
+                } else {
+                    ids.iter().collect()
+                };
                 let Some(h) = &self.herd else { return };
                 let (mut moved, mut failed) = (0usize, 0usize);
-                for id in &ids {
+                for id in &targets {
                     match h.transition(id, dest) {
                         Ok(MoveOutcome::Moved) => moved += 1,
                         Ok(_) => {}
@@ -3030,11 +3054,15 @@ impl App {
                 let total = ids.len();
                 self.selected.clear();
                 self.reload();
-                self.notification = Some(if failed > 0 {
+                let mut msg = if failed > 0 {
                     format!("{moved}/{total} → {} ({failed} failed)", status_word(dest))
                 } else {
                     format!("{moved}/{total} → {}", status_word(dest))
-                });
+                };
+                if skipped > 0 {
+                    msg.push_str(&format!(" · {skipped} skipped: have children"));
+                }
+                self.notification = Some(msg);
             }
             PickAction::State(id) => {
                 let dest = match c {
@@ -3341,6 +3369,10 @@ fn handle_key(app: &mut App, k: KeyEvent) {
                     }
                 }
                 // Mutating ops mirrored from the list pane (all act on selected()).
+                // Multi-select mark, mirrored from the list pane (yaks-5c51,
+                // deferred from yaks-de85); the mark set is shared, so a bulk
+                // `S` back on the list acts on marks made here too.
+                KeyCode::Char('m') => app.toggle_selected(),
                 KeyCode::Char('S') => app.open_state_picker(),
                 KeyCode::Char('P') => app.open_priority_picker(),
                 KeyCode::Char('T') => app.open_type_picker(),
@@ -6226,6 +6258,49 @@ mod tests {
             // The selection is cleared and the count is reported.
             assert!(app.selected.is_empty());
             assert_eq!(app.notification.as_deref(), Some("3/3 → shorn"));
+        }
+
+        #[test]
+        fn bulk_slaughter_skips_yaks_with_children() {
+            // p0 has a live child (c0); t0 is childless. Marking both and bulk-
+            // slaughtering must skip the parent (would orphan c0) and only slay
+            // the childless one -- mirroring the single-path guard (yaks-5c51).
+            let (_dir, herd) = temp_herd(&[
+                task("p0", "parent", Status::Hairy, 3, None),
+                task("c0", "child", Status::Hairy, 3, Some("p0")),
+                task("t0", "solo", Status::Hairy, 3, None),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            // Mark p0 and t0 (skip over the child row c0 between them).
+            press(&mut app, "mjjm");
+            assert_eq!(app.selected.len(), 2);
+            // `S` opens the bulk picker; `x` slaughters the set.
+            press(&mut app, "Sx");
+            assert!(matches!(app.overlay, Overlay::None));
+            // The parent survives (skipped); the childless yak is dead.
+            assert_eq!(app.task("p0").unwrap().status, Status::Hairy);
+            assert_eq!(app.task("c0").unwrap().status, Status::Hairy);
+            assert_eq!(app.task("t0").unwrap().status, Status::Dead);
+            assert!(app.selected.is_empty());
+            assert_eq!(
+                app.notification.as_deref(),
+                Some("1/2 → dead · 1 skipped: have children")
+            );
+        }
+
+        #[test]
+        fn detail_pane_mirrors_multi_select_mark() {
+            // `m` marks the cursor's yak from the detail pane too (mirrored from
+            // the list pane; yaks-5c51). The mark set is shared with the list.
+            let (_dir, herd) = temp_herd(&[task("t0", "solo", Status::Hairy, 3, None)]);
+            let mut app = App::with_herd(herd).unwrap();
+            // `l` focuses the detail pane, then `m` marks t0.
+            press(&mut app, "lm");
+            assert!(matches!(app.focus, Focus::Detail));
+            assert!(app.selected.contains("t0"));
+            // `m` again unmarks it.
+            press(&mut app, "m");
+            assert!(app.selected.is_empty());
         }
 
         #[test]
