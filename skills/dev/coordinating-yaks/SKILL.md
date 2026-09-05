@@ -37,25 +37,27 @@ worktrees do not see each other's shave/update until those commits merge. So
 coordinate by disjoint scopes plus merge, not by watching each other in real
 time.
 
-**File-tool SOP (validated across runs).** Some agent harnesses root their
-file-editing tools at the main checkout, not at the terminal's working
-directory, even when the worktree lives under the project root. A bare
-`src/foo.rs` edit then silently lands in the main tree while the terminal `cd`
-sees the worktree. The SOP that reliably prevents it:
+**File-tool SOP (validated across runs).** Some agent harnesses (e.g. Zed)
+exclude git-ignored paths from the file-editing tools' project view AND root
+those tools at the main checkout, not the terminal's cwd. The SOP:
 
-1. Edit through the **explicit** worktree path (`.worktrees/<name>/src/foo.rs`).
-   **Fallback:** if the harness's edit tool *refuses* that path because
-   `.worktrees/` is gitignored, make the edit through the **terminal** (cwd = the
-   worktree) with anchored replacements — never fall back to a bare path. Across
-   three runs the main tree stayed `src`-clean either way.
-2. After each edit, run `git -C <main-checkout> status --short` and confirm the
-   main tree shows no stray `src/` edits.
+1. **Put worktrees in a NON-gitignored in-project dir** (`wt/<name>`, *not*
+   `.worktrees/`). Empirically the file tools refuse a *gitignored* worktree
+   path ("path not found") but accept a non-gitignored one — validated with real
+   sub-agents editing natively in `wt/`, no terminal fallback. This removes the
+   fallback token-tax and restores native (fuzzy/batch) editing. Tradeoff: a
+   non-gitignored worktree shows as `?? wt/` in the main checkout's `git status`
+   (gitignore is what hid the old `.worktrees/` — the tools consult
+   `git check-ignore`, so do NOT gitignore *or* `.git/info/exclude` the dir;
+   either re-triggers the refusal). It's cosmetic: always stage explicit paths,
+   never `git add .`, and `git worktree remove` after the run.
+2. **Edit via the EXPLICIT worktree path** (`wt/<name>/src/foo.rs`), never a
+   bare `src/foo.rs` (a bare path silently lands in the main tree). After each
+   edit, run `git -C <main-checkout> status --short` and confirm no stray `src/`
+   edits in main (a `?? wt/` line is expected). **Terminal fallback:** if a
+   harness still refuses the path, edit through the terminal (cwd = the
+   worktree) with anchored replacements — never a bare path.
 3. Build/test the worktree's **own** freshly built binary, not the main one.
-
-Refinement: a linked worktree's `.yaks/` never shows up in the main checkout's
-`git status` (git skips nested worktrees), so the main-clean guard effectively
-reduces to “no `src/` changes in main.” Followed faithfully, this gotcha has not
-bitten in practice.
 
 ## Disjoint scoping
 
