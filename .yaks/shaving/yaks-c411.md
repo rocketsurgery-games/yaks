@@ -4,7 +4,7 @@ title: Refresh yak skill + README for the current CLI surface
 type: task
 priority: 3
 created: '2026-09-05T03:18:30Z'
-updated: '2026-09-05T03:18:30Z'
+updated: '2026-09-05T03:20:47Z'
 parent: yaks-a412
 labels:
 - skills
