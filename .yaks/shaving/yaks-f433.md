@@ -4,7 +4,7 @@ title: 'Yak editing: Crash when shift-tab''ing from description back to labels'
 type: bug
 priority: 3
 created: '2026-09-04T17:44:04Z'
-updated: '2026-09-04T17:44:04Z'
+updated: '2026-09-05T03:03:50Z'
 labels:
 - bug ui
 ---
