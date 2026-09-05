@@ -213,6 +213,30 @@ fn delete_into(handler: &mut EditorEventHandler, state: &RefCell<EditorState>, n
     }
 }
 
+/// Whether edtui can convert this key without panicking. edtui's
+/// `KeyCode: From<crossterm::event::KeyCode>` is `unimplemented!` for anything
+/// outside this whitelist (e.g. `BackTab`, `Insert`, the F-keys), so forwarding
+/// such a key would panic the whole TUI. Guard every edtui forward with this.
+fn edtui_can_handle(code: KeyCode) -> bool {
+    matches!(
+        code,
+        KeyCode::Char(_)
+            | KeyCode::Enter
+            | KeyCode::Esc
+            | KeyCode::Backspace
+            | KeyCode::Delete
+            | KeyCode::Tab
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Home
+            | KeyCode::End
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+    )
+}
+
 /// The run of ref-chars ending at the cursor — the partial yak id being typed —
 /// as `(token, char_len)`.
 fn token_before_cursor(state: &RefCell<EditorState>) -> (String, usize) {
@@ -1570,7 +1594,11 @@ impl App {
             || (is_line_text && k.code == KeyCode::Down)
             || (line_normal && k.code == KeyCode::Char('j'))
             || (is_chip && matches!(k.code, KeyCode::Down | KeyCode::Char('j')));
-        let nav_up = (matches!(k.code, KeyCode::BackTab) && !is_content)
+        // BackTab (shift-tab) focuses the previous field on *every* row —
+        // including content blocks, where forwarding it to edtui would panic
+        // (`KeyCode::from` is `unimplemented!` for BackTab). It mirrors Tab's
+        // focus-next, so it's field navigation even inside a content block.
+        let nav_up = matches!(k.code, KeyCode::BackTab)
             || (ctrl && k.code == KeyCode::Char('p'))
             || (is_line_text && k.code == KeyCode::Up)
             || (line_normal && k.code == KeyCode::Char('k'))
@@ -1630,20 +1658,26 @@ impl App {
                 self.open_ref_picker(replace_len, &seed);
                 return;
             }
-            if let Overlay::Create(f) = &mut self.overlay {
-                if let Some(i) = f.content_index() {
-                    f.handler
-                        .on_key_event(k, &mut f.blocks[i].editor.borrow_mut());
+            // Never hand edtui a key it can't convert (it would panic).
+            if edtui_can_handle(k.code) {
+                if let Overlay::Create(f) = &mut self.overlay {
+                    if let Some(i) = f.content_index() {
+                        f.handler
+                            .on_key_event(k, &mut f.blocks[i].editor.borrow_mut());
+                    }
                 }
             }
             return;
         }
         if is_line_text {
-            if let Overlay::Create(f) = &mut self.overlay {
-                match f.row {
-                    0 => f.handler.on_key_event(k, &mut f.title.borrow_mut()),
-                    3 => f.handler.on_key_event(k, &mut f.labels.borrow_mut()),
-                    _ => {}
+            // Same guard: drop keys edtui can't handle rather than panic.
+            if edtui_can_handle(k.code) {
+                if let Overlay::Create(f) = &mut self.overlay {
+                    match f.row {
+                        0 => f.handler.on_key_event(k, &mut f.title.borrow_mut()),
+                        3 => f.handler.on_key_event(k, &mut f.labels.borrow_mut()),
+                        _ => {}
+                    }
                 }
             }
             return;
@@ -6130,6 +6164,10 @@ mod tests {
             handle_key(app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         }
 
+        fn back_tab(app: &mut App) {
+            handle_key(app, KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE));
+        }
+
         fn arrow_right(app: &mut App) {
             handle_key(app, KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
         }
@@ -6386,6 +6424,54 @@ mod tests {
             let created = app.all.iter().find(|t| t.title == "kid").expect("child");
             assert_eq!(created.parent.as_deref(), Some("p0"));
             assert_eq!(created.kind, "task");
+        }
+
+        #[test]
+        fn create_form_backtab_from_description_focuses_previous_field() {
+            // Regression (yaks-f433): shift-tab (BackTab) while editing the
+            // description content block used to forward the key straight to
+            // edtui, whose `KeyCode::from` is `unimplemented!` for BackTab and
+            // panicked the whole TUI. It must instead focus the previous field.
+            let (_dir, herd) = temp_herd(&[]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "c"); // open the create form (title row)
+            tab(&mut app); // -> type
+            tab(&mut app); // -> priority
+            tab(&mut app); // -> labels
+            tab(&mut app); // -> description (content block)
+            match &app.overlay {
+                Overlay::Create(f) => assert!(f.is_content_row(), "on the description block"),
+                _ => panic!("create form open"),
+            }
+            // Must not panic, and focus moves back to the labels row (3).
+            back_tab(&mut app);
+            match &app.overlay {
+                Overlay::Create(f) => {
+                    assert_eq!(f.row, 3, "focus moved back a field");
+                    assert!(f.is_line_text_row(), "back on the labels row");
+                }
+                _ => panic!("create form still open"),
+            }
+        }
+
+        #[test]
+        fn create_form_drops_unconvertible_editor_key_without_panic() {
+            // Belt-and-suspenders: any key edtui can't convert (here Insert)
+            // must be dropped rather than forwarded, on both the content and
+            // single-line rows. Reaching edtui with it would panic.
+            let (_dir, herd) = temp_herd(&[]);
+            let mut app = App::with_herd(herd).unwrap();
+            press(&mut app, "c"); // title row (single-line text)
+            handle_key(&mut app, KeyEvent::new(KeyCode::Insert, KeyModifiers::NONE));
+            tab(&mut app); // -> type
+            tab(&mut app); // -> priority
+            tab(&mut app); // -> labels
+            tab(&mut app); // -> description (content block)
+            handle_key(&mut app, KeyEvent::new(KeyCode::Insert, KeyModifiers::NONE));
+            match &app.overlay {
+                Overlay::Create(f) => assert!(f.is_content_row(), "still on the description"),
+                _ => panic!("create form still open"),
+            }
         }
 
         #[test]
