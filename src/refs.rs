@@ -129,6 +129,41 @@ pub fn known_from<'a>(ids: &'a HashSet<&'a str>) -> impl Fn(&str) -> bool + 'a {
     move |t: &str| ids.contains(t)
 }
 
+/// A yak-id found while scanning multi-line text, located by 1-based `line` and
+/// `col`. `col` is a char index (not a byte offset), matching [`RefMatch`]
+/// offset semantics, and is measured against the wiki-normalized line, so a
+/// `[[yak-0af1]]` alias reports the column of the bare `yak-0af1` — the same
+/// text the TUI renders.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoundRef {
+    /// 1-based line number within the scanned text.
+    pub line: usize,
+    /// 1-based column (char index) of the id's first char.
+    pub col: usize,
+    /// The resolved yak id.
+    pub id: String,
+}
+
+/// Scan arbitrary, possibly multi-line `text` for tokens that `known` confirms
+/// are real yak ids, reporting each with its 1-based line and column. This is
+/// the non-TUI, reusable primitive behind the `scan-ids` leak check: it layers
+/// line/column bookkeeping on top of [`scan`], normalizing wiki brackets per
+/// line exactly as the TUI detail scan does so detection agrees everywhere.
+pub fn scan_text(text: &str, known: impl Fn(&str) -> bool) -> Vec<FoundRef> {
+    let mut out = Vec::new();
+    for (n, raw) in text.lines().enumerate() {
+        let line = strip_wikilinks(raw);
+        for m in scan(&line, &known) {
+            out.push(FoundRef {
+                line: n + 1,
+                col: m.start + 1,
+                id: m.id,
+            });
+        }
+    }
+    out
+}
+
 /// Rewrite whole reference tokens in `text`: for each maximal ref-token,
 /// substitute it when `replace` returns `Some(new)`, otherwise leave it as-is.
 /// Only complete tokens are considered, so a longer id that merely contains the
@@ -263,6 +298,37 @@ mod tests {
         let got = scan("see yak-a1b2.1.", known_from(&set));
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].id, "yak-a1b2.1");
+    }
+
+    #[test]
+    fn scan_text_reports_line_and_col_across_lines() {
+        let set = ids(&["yak-0001", "yak-0002"]);
+        let text = "first line\nsee yak-0001 here\nand [[yak-0002]] too\nyak-9999 is fake";
+        let got = scan_text(text, known_from(&set));
+        assert_eq!(
+            got,
+            vec![
+                FoundRef {
+                    line: 2,
+                    col: 5,
+                    id: "yak-0001".into()
+                },
+                // Wiki brackets are stripped, so col points at the bare id.
+                FoundRef {
+                    line: 3,
+                    col: 5,
+                    id: "yak-0002".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_text_clean_when_no_real_ids() {
+        let set = ids(&["yak-0001"]);
+        // Id-shaped but not real, plus plain prose: nothing is flagged.
+        let got = scan_text("yak-9999 and plainword\nnothing to see", known_from(&set));
+        assert!(got.is_empty());
     }
 
     #[test]
