@@ -4,7 +4,7 @@ title: Skill updates from our decisions + how to VALIDATE skills
 type: task
 priority: 2
 created: '2026-09-03T22:25:55Z'
-updated: '2026-09-04T17:32:37Z'
+updated: '2026-09-05T03:09:03Z'
 parent: yaks-3901
 labels:
 - skills
@@ -57,3 +57,11 @@ NEW OBSERVATION (TUI worker): this repo's insta snapshots are STYLE-AGNOSTIC (bu
 ---
 ▸ 2026-09-04T17:32:37Z [coordinator]
 SIXTH RUN (bulk ops, 2 lanes) + HITL DOGFOODED. Ran a real ask: yaks-7cc8 (filter-mutation safety model) sits in inbox with the needs badge, and I proceeded with the unblocked id-list/multi-select halves — the coordinator-mediated HITL flow worked exactly as the skill prescribes (ask + proceed on unblocked scope; don't block-and-wait). All 3 sub-agents this session used the edit-tool TERMINAL FALLBACK (gitignored .worktrees path refused) — now a near-certainty, confirming the fallback rung is essential. NEW drift pattern observed: the human CREATED a new yak (yaks-d4d3, a p1 eval tool) as an untracked file mid-run; treated it like all human drift — left untouched + flagged, did not commit or build it (their yak to introduce). de85 worker showed strong scope discipline: reverted a status-line tweak that would have rippled a snapshot into tests/snapshots/ (out of scope). Bulk-slaughter-via-selection skips the per-child guard (noted on de85) — a safety follow-up.
+
+---
+▸ 2026-09-05T03:09:03Z [coordinator]
+SEVENTH RUN (2 lanes) + EDIT-TOOL ISSUE RESOLVED. Lanes: d4d3 (CLI scan-ids no-yak-ids leak check, main.rs/refs.rs) + f433 (TUI BackTab crash fix, tui.rs). Zero-conflict merge; 230 lib + 24 cli green; doctor clean. Also cleared a real human-reported crash (f433: shift-tab from description panicked edtui) and shipped a leak-prevention tool the human requested (d4d3).
+
+EDIT-TOOL TAX ELIMINATED: probed the cause (harness file tools exclude git-ignored paths), then validated the fix live — worktrees under NON-gitignored wt/ let both sub-agents edit NATIVELY (0 fallback, vs 3/3 fallback the run before). Adopted in the coordinating-yaks SOP (yaks-87ff). Impact recap for the record: reliability + correctness were always LOW/contained (6/6 clean before the fix); the real cost was token-spend (~1.3-2x on edit-heavy tasks) + lost fuzzy/batch editing — now removed. Likely Zed-specific symptom (gitignore-filtered project view); general lesson is that agent+worktree ergonomics are harness-dependent and worth probing empirically rather than assuming.
+
+HITL loop closed cleanly: human answered 7cc8 (dry-run-default for filter mutations) via the herd; needs cleared, inbox empty. Human also triaged 3 new yaks into the herd mid-session (d4d3 built, f433 built, bfee tracked). Filter-driven bulk mutation (dry-run-default per 7cc8) is the next CLI build.
