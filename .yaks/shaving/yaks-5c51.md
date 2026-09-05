@@ -4,7 +4,7 @@ title: Apply the slaughter child-guard to bulk/multi-select slaughter
 type: bug
 priority: 2
 created: '2026-09-05T03:18:30Z'
-updated: '2026-09-05T03:18:30Z'
+updated: '2026-09-05T03:20:38Z'
 parent: yaks-2ebe
 labels:
 - ui
