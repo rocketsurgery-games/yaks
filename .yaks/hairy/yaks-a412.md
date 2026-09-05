@@ -4,7 +4,7 @@ title: Skill updates from our decisions + how to VALIDATE skills
 type: task
 priority: 2
 created: '2026-09-03T22:25:55Z'
-updated: '2026-09-05T03:09:03Z'
+updated: '2026-09-05T03:26:26Z'
 parent: yaks-3901
 labels:
 - skills
@@ -65,3 +65,11 @@ SEVENTH RUN (2 lanes) + EDIT-TOOL ISSUE RESOLVED. Lanes: d4d3 (CLI scan-ids no-y
 EDIT-TOOL TAX ELIMINATED: probed the cause (harness file tools exclude git-ignored paths), then validated the fix live — worktrees under NON-gitignored wt/ let both sub-agents edit NATIVELY (0 fallback, vs 3/3 fallback the run before). Adopted in the coordinating-yaks SOP (yaks-87ff). Impact recap for the record: reliability + correctness were always LOW/contained (6/6 clean before the fix); the real cost was token-spend (~1.3-2x on edit-heavy tasks) + lost fuzzy/batch editing — now removed. Likely Zed-specific symptom (gitignore-filtered project view); general lesson is that agent+worktree ergonomics are harness-dependent and worth probing empirically rather than assuming.
 
 HITL loop closed cleanly: human answered 7cc8 (dry-run-default for filter mutations) via the herd; needs cleared, inbox empty. Human also triaged 3 new yaks into the herd mid-session (d4d3 built, f433 built, bfee tracked). Filter-driven bulk mutation (dry-run-default per 7cc8) is the next CLI build.
+
+---
+▸ 2026-09-05T03:26:26Z [coordinator]
+EIGHTH RUN — 3 lanes, all clean. yaks bulk filter-mutation w/ dry-run-default (a11b), bulk-slaughter child-guard + detail-pane multi-select mirror (5c51), yak-skill+README refresh (c411). Zero-conflict 3-way merge; 232 unit + 25 cli green; doctor clean. Verified bulk's safety gates myself (refuse unfiltered/no-mutation; dry-run writes nothing) since it's destructive-capable — coordinator verification of delegated delicate work is the right division of labor.
+
+wt/ FIX ROCK-SOLID: all 3 sub-agents used native edit tools, 0 fallback (5 agents total now across 2 runs since the switch). The gitignore-was-the-cause finding is fully confirmed; terminal-fallback tax is gone.
+
+HITL fully closed: 7cc8 (dry-run decision) answered by human -> implemented -> sheared. The ask->answer->build->shear loop worked end to end. Coordination system feels reliable now: 8 parallel runs, zero herd corruption, doctor clean every time; disjoint-scope (incl. shared-TYPE prep-commits) + wt/ native editing + HITL + crash recovery + doctor all validated and skill-encoded.

@@ -4,7 +4,7 @@ title: 'DECIDE: safety model for filter-driven bulk mutations'
 type: task
 priority: 2
 created: '2026-09-04T17:08:35Z'
-updated: '2026-09-04T18:05:31Z'
+updated: '2026-09-05T03:26:26Z'
 parent: yaks-2ebe
 labels:
 - cli
@@ -23,3 +23,7 @@ My lean: (a) dry-run-default + require --commit, and additionally never allow sl
 ---
 ▸ 2026-09-04T18:04:44Z [Joel Webber]
 Agreed on dry-run by default. This could be a pretty big foot-gun otherwise!
+
+---
+▸ 2026-09-05T03:26:26Z [coordinator]
+RESOLVED + IMPLEMENTED. Decision (dry-run-default) made by Joel; implemented as 'yaks bulk' (yaks-a11b): filter selects, dry-run by default, --commit to apply, refuses unfiltered/no-mutation, field-edits+reparent only (filter-slaughter still deferred as the scariest case). Verified the gates on the merged binary.
