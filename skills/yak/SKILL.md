@@ -21,7 +21,7 @@ The npm package is `@rocketsurgery/yaks` (the unscoped `yaks` was taken, so it's
 
 **Starting a fresh herd.** If there's no `.yaks/` directory yet, create one with `yaks init` (run in the repo root). It scaffolds `.yaks/{hairy,shaving,shorn,dead}/` plus a `config.yaml`; tune the defaults with `--prefix`, `--type`, and `--priority`. It refuses to clobber an existing herd, so it's safe to run.
 
-Add `--json` to any query command (`list`, `show`, `next`, `tangled`, `search`, `stats`, `rollup`) for machine-readable output.
+Add `--json` to any query command (`list`, `show`, `next`, `tangled`, `search`, `stats`, `rollup`, `inbox`) for machine-readable output. `yaks create --json` also prints the new yak's id and file path, which is handy when you create a yak and immediately act on it.
 
 ## Terminology (say it right)
 
@@ -76,6 +76,8 @@ Pick the hiding method that fits — they differ in blast radius:
 
 Whichever mode you're in, yaks are a **private, fine-grained layer**. Keep yak IDs and `[yaks:…]` markers out of anything a broader audience reads — **pull-request titles/descriptions and external issue trackers** (Jira, Linear, GitHub Issues). This one keeps going wrong under light guidance, so treat it as firm: leaking a yak ID upstream is almost never right.
 
+Enforce it mechanically with **`yaks scan-ids`**: it reads a file and/or piped stdin and exits non-zero if any token is a real yak-id in this herd (printing each as `line:col  id`). Wire it into a pre-commit or PR hook to catch a leaking id before it ships — especially valuable in local-only mode, where yak IDs must stay out of commit messages too.
+
 Most projects that use an external tracker don't use yaks team-wide; yaks roll **up** to those issues. When a PR or issue needs a reference, use the **external** key, not the yak ID: run `yaks rollup --keys` over the shipping set and paste that — the forge links the PR to the issue natively. The **yak-tracker** skill covers this projection in full.
 
 ## You are working alongside a human
@@ -85,6 +87,12 @@ The herd is shared. A human may be editing yaks in the `yaks tui` (or by hand) *
 - Don't revert, restage, or "clean up" `.yaks/` changes you didn't make.
 - When committing (team mode), stage **only** the specific yak files your work touched — never `git add .yaks` wholesale.
 - Treat such drift as signal, not noise: a yak the human just moved to shaving, or a note they added, often tells you what they care about right now. If it seems to redirect the work, follow it or ask.
+
+## Asking a human (ask / answer / inbox)
+
+When you hit a decision only a human should make — an ambiguous requirement, a risky tradeoff, a missing credential — **don't guess**. `yaks ask <id> --note "the question"` blocks the yak on a human: it sets the `needs` field, records your question as an attributed note, and drops the yak out of `yaks next` so you (or another agent) won't pick it back up while it waits. The human replies with `yaks answer <id> --note "the decision"`, which clears the block and returns the yak to `next`. `yaks inbox` lists everything currently awaiting a human. Attribute the note with `--as <actor>` (or set `$YAKS_ACTOR`) so the log shows who asked.
+
+In `yaks tui` the same flow is one key: `a` asks or answers the selected yak in place, an **Inbox** view lists the awaiting-a-human queue, blocked yaks carry a ⏳ badge with a warning accent, and `m` marks rows for a bulk state change over the selection.
 
 ## Workflow
 
@@ -116,11 +124,14 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | Command | What it does |
 |---------|-------------|
 | `yaks init` | Scaffold a new `.yaks/` herd in the current directory. `--prefix`, `--type`, `--priority`, `--emacs`. Works without an existing herd |
-| `yaks create` | Create a new task (in hairy). `--title` required; `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description` |
+| `yaks create` | Create a new task (in hairy). Title is positional (`yaks create "Fix the login crash"`; `--title` still works for back-compat); `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description`, `--json` (print the new id + path) |
 | `yaks list` | List tasks with optional filters (`--all` also includes dead) |
 | `yaks show` | Show full details of a task |
 | `yaks refs` | List what a task points at (parent, deps, id mentions), flagging danglers |
-| `yaks update` | Update fields, labels (`--add-label`/`--remove-label`), or append a `--note` |
+| `yaks update` | Update fields, labels (`--add-label`/`--remove-label`), or append a `--note`. Accepts multiple ids (same edit to each); `--as <actor>` attributes a note |
+| `yaks ask` | Block a yak on a human decision (sets `needs`, drops it from `next`); records the question as an attributed `--note` |
+| `yaks answer` | Clear a yak's `needs` block and record the reply; returns it to `next` |
+| `yaks inbox` | List yaks awaiting a human (the `needs` inbox) — `list --needs` across all statuses |
 | `yaks shave` | Start shaving a yak (hairy → shaving) [alias: `work`] |
 | `yaks shorn` | Mark a yak shorn (shaving → shorn) [alias: `close`] |
 | `yaks regrow` | Regrow a shorn yak (shorn → hairy) [alias: `reopen`] |
@@ -135,7 +146,11 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks rename-prefix` | Migrate all yaks from one id prefix to another; `--dry-run` to preview |
 | `yaks stats` | Show task statistics |
 | `yaks rollup` | Group yaks by the external issue they roll up to (`--keys` for just the keys) |
+| `yaks doctor` | Read-only herd-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on issues |
+| `yaks scan-ids` | Scan a file and/or stdin for tokens that are real yak-ids in this herd — a private-mode leak check; exits non-zero if any are found |
 | `yaks tui` | Open the interactive terminal UI |
+
+The state-transition verbs (`shave`, `shorn`, `regrow`, `slaughter`, `revive`) and `reparent` accept **multiple ids** in one call, applying the same move to each. Attribute any note with `--as <actor>` (else `$YAKS_ACTOR`, else the git user); attribution never implies ownership.
 
 ## Task format
 

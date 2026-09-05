@@ -86,10 +86,12 @@ when all of them are shorn (or dead), and *tangled* otherwise.
 
 | Command | What it does |
 |---------|--------------|
-| `yaks create` | Create a task (`--title`, `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description`) |
+| `yaks create` | Create a task; the title is positional (`yaks create "Fix login"`). Flags: `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description`, `--json` (emit the new id + file path) |
 | `yaks list` | List tasks; filter by `--status/--type/--priority/--label/--search`, `--ready`, `--tangled`, `--parent-of`, `--all` |
 | `yaks show <id>` | Full detail for one task, with parent + children |
 | `yaks update <id>` | Change fields/labels, set `--description`, or append a `--note` |
+| `yaks ask <id>` / `answer <id>` | Block a yak on a human (sets `needs`, drops it from `next`) / clear that block, each recording a `--note` |
+| `yaks inbox` | List yaks awaiting a human (the `needs` queue) |
 | `yaks shave <id>` | hairy → shaving (alias: `work`) |
 | `yaks shorn <id>` | shaving → shorn (alias: `close`) |
 | `yaks regrow <id>` | shorn → hairy (alias: `reopen`) |
@@ -99,9 +101,15 @@ when all of them are shorn (or dead), and *tangled* otherwise.
 | `yaks dep` / `reparent` | edit dependencies / move under a new parent |
 | `yaks rollup` | group yaks by the external issue they roll up to (`--keys` for a PR body) |
 | `yaks stats` | task statistics |
+| `yaks doctor` | herd-integrity check (duplicate ids, dangling parent/dep refs); exits non-zero on problems |
+| `yaks scan-ids [file]` | flag real yak-ids in text (file and/or stdin) — a leak check for a pre-commit / PR gate; exits non-zero if any are found |
 | `yaks tui` | open the interactive terminal UI |
 
-Add `--json` to any query command for machine-readable output.
+Add `--json` to any query command for machine-readable output. The
+state-transition verbs (`shave`, `shorn`, `regrow`, `slaughter`, `revive`) plus
+`update` and `reparent` accept **multiple ids** and apply the same change to
+each. Note-writing commands (`update`, `ask`, `answer`) take `--as <actor>` to
+attribute the note (falling back to `$YAKS_ACTOR`, then the git user).
 
 ## Interactive TUI
 
@@ -109,7 +117,10 @@ Add `--json` to any query command for machine-readable output.
 pane, inline create/edit, dependency and reparent pickers, search, and an
 embedded modal editor (vim or emacs keybindings, per `.yaks/config.yaml`). It
 auto-refreshes when the files change underneath it, so it stays in sync if you
-(or an agent) edit yaks from elsewhere.
+(or an agent) edit yaks from elsewhere. Mark rows with `m` for a bulk state
+change over the selection; `a` raises or clears a `needs` block (ask / answer);
+and an **Inbox** view lists every yak awaiting a human, each flagged inline with
+a ⏳ badge and a warning accent.
 
 ## Use with an AI coding agent
 
