@@ -4,7 +4,7 @@ title: 'yaks bulk: filter-driven field mutation (dry-run-default)'
 type: feature
 priority: 2
 created: '2026-09-05T03:18:30Z'
-updated: '2026-09-05T03:18:30Z'
+updated: '2026-09-05T03:21:11Z'
 parent: yaks-2ebe
 labels:
 - cli
