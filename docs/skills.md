@@ -4,7 +4,7 @@ Skills are prose guidance that rides *on top of* the tools — the least directi
 that measurably changes an agent's behavior. yaks keeps the tools unopinionated
 and puts methodology in skills, so different working styles fit the same core.
 
-Two skills ship in the binary and install via `yaks skills` (into
+Two skills ship in the binary and install via `yaks skills install` (into
 `~/.agents/skills` by default); two more are experimental and repo-internal
 (under `skills/dev/`, not shipped).
 

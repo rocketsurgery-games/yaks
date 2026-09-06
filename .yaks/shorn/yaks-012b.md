@@ -4,7 +4,7 @@ title: Docs + skill-name normalization + TUI doc screenshots
 type: task
 priority: 2
 created: '2026-08-30T19:34:28Z'
-updated: '2026-09-06T23:11:52Z'
+updated: '2026-09-06T23:47:17Z'
 parent: yaks-8f81
 labels:
 - skills
@@ -23,3 +23,11 @@ Seeded skills/dev/README.md and skills/dev/working-a-yak/SKILL.md. Encodes check
 ---
 ▸ 2026-09-06T23:11:52Z [coordinator]
 PROGRESS (this session): DONE — 865d (skill rename to yaks[-*], symlinks repointed, 233+25 green; recovered a broken intermediate commit where a bad git-add pathspec dropped the sed content edits) and d6d3 (docs/: README/cli/tui/skills, accurate to --help + help_content). REMAINING children: 3677 (TUI SVG screenshots — feasible, plan recorded), 8c46 (skill consistency/error pass), f85f (final docs review). Sequence continues: skill pass, screenshots, docs review.
+
+---
+▸ 2026-09-06T23:42:07Z [coordinator]
+3677 (color TUI screenshots) shorn + committed (fb92025): 4 SVGs embedded in docs/tui.md. Remaining children: 8c46 (skill consistency pass, now shaving), then f85f (docs review).
+
+---
+▸ 2026-09-06T23:47:17Z [coordinator]
+Umbrella complete — all 5 children shorn. Delivered: (865d) skill rename to yaks[-*]; (d6d3) docs/ suite — README/cli/tui/skills; (3677) color TUI screenshots via headless buffer->SVG, embedded in docs/tui.md; (8c46) skill consistency pass — 4 fixes; (f85f) docs review — 3 fixes incl. a wrong 'doctor --strict' CLI help string. Docs public-facing + memory-refreshing; skills+docs+CLI now mutually consistent, all claims verified against --help. cargo test --workspace green (233+25+13+1); yaks doctor clean.
