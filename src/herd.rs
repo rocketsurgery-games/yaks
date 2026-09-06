@@ -202,9 +202,10 @@ pub enum IssueKind {
     DanglingParent,
     /// A task whose `depends_on` names an id no task has.
     DanglingDependsOn,
-    /// A shorn or dead yak with no recorded note — a shear without evidence.
-    /// Only reported in strict mode (the working-a-yak evidence-before-shear
-    /// rule).
+    /// A shorn yak with no recorded note — a completion without evidence. Dead
+    /// (abandoned) yaks are deliberately exempt: they need no completion
+    /// evidence. Only reported in strict mode (the working-a-yak
+    /// evidence-before-shear rule).
     MissingEvidence,
 }
 
@@ -227,7 +228,7 @@ impl IssueKind {
             IssueKind::DuplicateId => "Duplicate id (same id twice in one status dir)",
             IssueKind::DanglingParent => "Dangling parent",
             IssueKind::DanglingDependsOn => "Dangling depends_on",
-            IssueKind::MissingEvidence => "Missing evidence (shorn/dead yak with no recorded note)",
+            IssueKind::MissingEvidence => "Missing evidence (shorn yak with no recorded note)",
         }
     }
 }
@@ -497,8 +498,8 @@ impl Herd {
     /// hazard), the same id twice inside one status dir, and `parent` /
     /// `depends_on` references that point at no known yak.
     ///
-    /// `strict` adds a skill-adherence check: any shorn or dead yak lacking a
-    /// recorded note is a shear without evidence.
+    /// `strict` adds a skill-adherence check: any shorn yak lacking a recorded
+    /// note is a completion without evidence. Dead (abandoned) yaks are exempt.
     pub fn doctor(&self, strict: bool) -> Result<Vec<Issue>> {
         let tasks = store::load(&self.root, &EVERY)?;
         let known = store::all_ids(&self.root);
@@ -561,13 +562,12 @@ impl Herd {
             }
         }
 
-        // Strict: a shorn or dead yak with no recorded note is a shear without
-        // evidence (the working-a-yak evidence-before-shear rule).
+        // Strict: a shorn yak with no recorded note is a completion without
+        // evidence (the working-a-yak evidence-before-shear rule). Dead
+        // (abandoned) yaks are exempt — abandonment needs no completion note.
         if strict {
             for t in &tasks {
-                if matches!(t.status, Status::Shorn | Status::Dead)
-                    && store::parse_notes(&t.body).is_empty()
-                {
+                if t.status == Status::Shorn && store::parse_notes(&t.body).is_empty() {
                     issues.push(Issue {
                         kind: IssueKind::MissingEvidence,
                         message: format!(
@@ -1254,9 +1254,10 @@ mod tests {
         assert!(herd.doctor(false).unwrap().is_empty());
     }
 
-    /// Strict mode flags a shorn yak with no recorded note (a shear without
-    /// evidence), while a shorn yak carrying a note passes. Plain `doctor`
-    /// ignores both.
+    /// Strict mode flags a shorn yak with no recorded note (a completion without
+    /// evidence), while a shorn yak carrying a note passes. A note-less DEAD
+    /// (abandoned) yak is exempt — abandonment needs no completion evidence.
+    /// Plain `doctor` ignores all of them.
     #[test]
     fn doctor_strict_flags_shorn_yak_without_a_note() {
         let (root, herd) = temp_herd();
@@ -1267,6 +1268,8 @@ mod tests {
         store::write::save(&root, &with_note).unwrap();
         // Shorn with no note at all: an evidence-before-shear violation.
         store::write::save(&root, &task("yak-0002", Status::Shorn)).unwrap();
+        // Dead with no note at all: exempt — abandonment needs no evidence.
+        store::write::save(&root, &task("yak-0003", Status::Dead)).unwrap();
 
         // Non-strict doctor ignores evidence entirely.
         assert!(
@@ -1274,9 +1277,13 @@ mod tests {
             "plain doctor must not flag missing evidence"
         );
 
-        // Strict flags only the note-less yak.
+        // Strict flags only the note-less shorn yak; the note-less dead yak is exempt.
         let issues = herd.doctor(true).unwrap();
-        assert_eq!(issues.len(), 1, "only the note-less shorn yak is flagged");
+        assert_eq!(
+            issues.len(),
+            1,
+            "only the note-less shorn yak is flagged; dead is exempt"
+        );
         assert_eq!(issues[0].kind, IssueKind::MissingEvidence);
         assert_eq!(issues[0].ids, vec!["yak-0002"]);
     }
