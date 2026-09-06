@@ -95,7 +95,7 @@ section above.
   its own branch; it reconciles at merge, not live (Worktrees are per-branch
   herds).
 - **Verify each lane's branch is disjoint before merging.**
-- **`--no-ff` merge with the yak id in the message** (Merge / integration).
+- **Squash-merge each lane with the yak id in the message** (Merge / integration).
 
 ## Attribution
 
@@ -140,6 +140,17 @@ traces the file across both). Reserve `--no-ff` for a lane that genuinely needs
 multiple commits. Avoid per-yak cherry-picking across branches; to pull
 main-side updates into a live branch use `git merge main`, all-or-nothing.
 
+## Recovery (a lost or crashed worker)
+
+A worker's work lives in its worktree/branch, so a lost agent session is **not**
+lost work. If a worker crashes or returns unusable mid-flight, don't restart
+from scratch — recover: `git -C wt/<name> status && git -C wt/<name> diff` to see
+what's uncommitted, build/test the worktree's own binary to validate it, then the
+coordinator commits + shears it (or discards and re-runs the lane). Validated
+live: a mid-run harness crash left a compiling, passing implementation
+uncommitted in its worktree, and the coordinator recovered it intact. The
+worktree model is crash-resilient.
+
 ## Human-in-the-loop
 
 Humans coordinate through the same notes. Raise a decision with `yaks ask <id>
@@ -148,6 +159,12 @@ answer <id> --note "..."` (human-reserved — an agent never clears its own bloc
 The human's queue is `yaks inbox`. Because working-a-yak re-reads notes before
 starting, feedback left on `main` is seen before work begins. Do not press past
 a note that redirects the work.
+
+**Human drift is the human's.** Expect the human to edit or create yaks in
+`main`'s `.yaks/` mid-run. Leave their working-tree edits untouched — never
+clobber a human note — and treat a human-created *untracked* yak as theirs to
+introduce: track it only when they green-light it, otherwise leave it and flag
+it. It reconciles like any other drift, at merge, not live.
 
 **Across worktrees, HITL routes through the coordinator — not live.** A worker's
 herd is its own branch; a human note on `main` does not reach an in-flight

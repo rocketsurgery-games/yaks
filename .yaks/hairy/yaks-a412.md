@@ -4,7 +4,7 @@ title: Skill updates from our decisions + how to VALIDATE skills
 type: task
 priority: 2
 created: '2026-09-03T22:25:55Z'
-updated: '2026-09-06T02:01:21Z'
+updated: '2026-09-06T16:26:10Z'
 parent: yaks-3901
 labels:
 - skills
@@ -79,3 +79,7 @@ HITL fully closed: 7cc8 (dry-run decision) answered by human -> implemented -> s
 NINTH RUN — trialed the NEW COORDINATOR-CLAIM SHAPE, and it works. Beat 1: one claim commit (dee2012) created+shaved the batch (d236 doctor--strict, 91a8 bulk-docs) + assignment notes -> main's 'shaving' immediately reflected the in-flight batch (the observability win, confirmed). Beat 2: workers branched from it, SKIPPED shave, each produced ONE commit. Beat 3: SQUASH-merged both -> clean linear history (claim + 2 squashed lanes; NO shave commits, NO merge commits) vs the old claim + 2x2 worker + 2 merge commits. Beat 4: reconcile clean (no batch yak left shaving). 233 unit + 25 cli green; doctor clean. Both workers used native wt/ edit tools (7 agents total, 0 fallback since the switch). Net: the shape is simpler, cleaner, and more observable exactly as predicted — adopt it as the default (already skill-encoded in yaks-2ab1).
 
 CAPSTONE: 'yaks doctor --strict' (d236) mechanizes the first skill-adherence predicate ('no shear without recorded evidence'). Ran it on our real herd: 7 hits (2 shorn, 5 dead without notes) — real historical gaps from before the evidence-before-shear discipline. REFINEMENT to consider: DEAD (abandoned/slaughtered) yaks arguably don't need evidence the way SHORN (completed) ones do; --strict could scope to shorn-only or rank dead separately. The 2 shorn hits (26c0, 9b8d) are pre-discipline; not backfilling now.
+
+---
+▸ 2026-09-06T16:26:10Z [coordinator]
+RECONCILED before more runs. The body's 'PENDING SKILL UPDATES' are ALL DONE and partly SUPERSEDED (body is historical). Current truth: coordinating-yaks covers file-tool SOP via wt/ (NOT the body's .worktrees/), SQUASH-default (NOT '--no-ff preferred'), disjoint-TYPE, HITL-via-coordinator, run-shape (claim->fan->squash->reconcile), attribution, + newly flushed CRASH-RECOVERY and HUMAN-DRIFT/human-created-yak (yaks-cada). working-a-yak has ask/answer (766d); the yak skill has all new commands (c411/91a8). VALIDATION mechanized: doctor (integrity) + doctor --strict (evidence-before-shear, d236). REMAINING (future BUILDS, not skill-flushes): the other predicates — 'every landed commit names its id' + 'each worker touched only its scope' (git-log/diff based; doctor-adjacent or CI) and the doctor --strict dead-vs-shorn refinement. Skill-update mission complete; a412 stays open only as the validation-predicate tracker.
