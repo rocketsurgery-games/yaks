@@ -32,7 +32,7 @@ a CLI command.
   a comment or ticket edit is fine; *posting* it requires a yes, every time.
 - **Never annotate upstream content with yak-specific markers** (`[yaks:…]`, yak
   IDs, etc.). The user may work in a shared tracker where yaks are private. (This
-  mirrors the `yak` skill's "keep yaks private" rule — treat it as firm.)
+  mirrors the `yaks` skill's "keep yaks private" rule — treat it as firm.)
 - **Never create an upstream issue automatically.** Ask where first
   (project/team/repo).
 - **Stop and tell the user** if the tracker tool you'd need isn't connected.
@@ -67,7 +67,7 @@ When the user points at an external issue and wants a yak (or a group) for it:
    `linear`) so the upstreamed yaks are easy to find later
    (`yaks list --label jira`): `yaks create … --labels jira` /
    `yaks update <id> --add-label github`. Deriving the label from the tracker
-   name keeps the taxonomy small and predictable (see the `yak` skill's label
+   name keeps the taxonomy small and predictable (see the `yaks` skill's label
    guidance).
 4. **Stop tracking.** This is "import once, then diverge" — there is no
    watermark, no later drift check. Don't promise to keep them in sync.

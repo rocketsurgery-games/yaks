@@ -21,7 +21,7 @@ The npm package is `@rocketsurgery/yaks` (the unscoped `yaks` was taken, so it's
 
 **Starting a fresh herd.** If there's no `.yaks/` directory yet, create one with `yaks init` (run in the repo root). It scaffolds `.yaks/{hairy,shaving,shorn,dead}/` plus a `config.yaml`; tune the defaults with `--prefix`, `--type`, and `--priority`. It refuses to clobber an existing herd, so it's safe to run.
 
-Add `--json` to any query command (`list`, `show`, `next`, `tangled`, `search`, `stats`, `rollup`, `inbox`) for machine-readable output. `yaks create --json` also prints the new yak's id and file path, which is handy when you create a yak and immediately act on it.
+Add `--json` to any query command (`list`, `show`, `next`, `tangled`, `search`, `stats`, `rollup`, `inbox`, `log`, `doctor`) for machine-readable output. `yaks create --json` also prints the new yak's id and file path, which is handy when you create a yak and immediately act on it.
 
 ## Terminology (say it right)
 

@@ -53,6 +53,8 @@ ask.
 ## Optional: attribution (multi-agent)
 
 When more than one agent shares a herd, name yourself in notes so others can
-trace who did what: prefix a note with an actor tag, e.g. `[opus] rebased onto
-main, tests green`. Single-agent work can ignore this. A first-class
-`--as <actor>` is a candidate primitive under `yaks-3901`.
+trace who did what. Attribution is first-class: `yaks update <id> --as <actor>
+--note "..."` stamps the note `[actor]` (the actor resolves `--as` →
+`$YAKS_ACTOR` → git `user.name`). Attribution, never ownership — the yak still
+belongs to no one. Single-agent work can ignore it. See yaks-coordinating for
+the multi-worker picture.

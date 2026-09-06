@@ -135,8 +135,8 @@ both a normal merge and `git merge --squash` satisfy it. Under the run shape
 above the **claim commit already documents the batch**, so the parallel topology
 no longer needs to live in the merge graph: **squash-merge is the default** for
 single-commit lanes (cleaner history; provenance survives because the claim
-commit and the worker commit both name the id, and `yaks commits --follow`
-traces the file across both). Reserve `--no-ff` for a lane that genuinely needs
+commit and the worker commit both name the id, and `yaks commits` traces the
+file across both). Reserve `--no-ff` for a lane that genuinely needs
 multiple commits. Avoid per-yak cherry-picking across branches; to pull
 main-side updates into a live branch use `git merge main`, all-or-nothing.
 
