@@ -4,7 +4,7 @@ title: Skill updates from our decisions + how to VALIDATE skills
 type: task
 priority: 2
 created: '2026-09-03T22:25:55Z'
-updated: '2026-09-06T16:26:10Z'
+updated: '2026-09-06T16:33:45Z'
 parent: yaks-3901
 labels:
 - skills
@@ -83,3 +83,7 @@ CAPSTONE: 'yaks doctor --strict' (d236) mechanizes the first skill-adherence pre
 ---
 ▸ 2026-09-06T16:26:10Z [coordinator]
 RECONCILED before more runs. The body's 'PENDING SKILL UPDATES' are ALL DONE and partly SUPERSEDED (body is historical). Current truth: coordinating-yaks covers file-tool SOP via wt/ (NOT the body's .worktrees/), SQUASH-default (NOT '--no-ff preferred'), disjoint-TYPE, HITL-via-coordinator, run-shape (claim->fan->squash->reconcile), attribution, + newly flushed CRASH-RECOVERY and HUMAN-DRIFT/human-created-yak (yaks-cada). working-a-yak has ask/answer (766d); the yak skill has all new commands (c411/91a8). VALIDATION mechanized: doctor (integrity) + doctor --strict (evidence-before-shear, d236). REMAINING (future BUILDS, not skill-flushes): the other predicates — 'every landed commit names its id' + 'each worker touched only its scope' (git-log/diff based; doctor-adjacent or CI) and the doctor --strict dead-vs-shorn refinement. Skill-update mission complete; a412 stays open only as the validation-predicate tracker.
+
+---
+▸ 2026-09-06T16:33:45Z [coordinator]
+TENTH RUN (2 lanes, new claim-shape). doctor --strict refinement (1832: scoped to shorn-only, dead excluded — the clean choice) + doctor docs/audit (7035: added doctor/doctor --strict/refs/commits/log to README+yak skill). Squash-merged; 233 unit + 25 cli green; doctor clean. doctor --strict on the real herd now reports 2 (shorn-without-evidence: 26c0, 9b8d) — down from 7; the 5 dead are correctly exempt. Those 2 are pre-discipline historical shears; leaving them as a truthful signal (not backfilling fake evidence). Claim-shape ran smoothly again (in-flight visible on main, workers skipped shave, one commit each, clean squash). Clean parallel work is now genuinely thinning — a wrap-up signal.
