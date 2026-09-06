@@ -4,7 +4,7 @@ title: Docs + skill-name normalization + TUI doc screenshots
 type: task
 priority: 2
 created: '2026-08-30T19:34:28Z'
-updated: '2026-09-06T23:02:22Z'
+updated: '2026-09-06T23:11:52Z'
 parent: yaks-8f81
 labels:
 - skills
@@ -19,3 +19,7 @@ Seeded skills/dev/README.md and skills/dev/working-a-yak/SKILL.md. Encodes check
 ---
 ▸ 2026-09-06T23:02:22Z [coordinator]
 [coordinator] REPURPOSING (original skills-seed work is long done). Now the umbrella for: (1) normalize skill names to yaks[-*]; (2) write docs/; (3) TUI doc screenshots; (4) consistency/error pass over all skills; (5) final docs review. Sequence per Joel: docs first, then skill pass, then docs review. Skill rename decision: yak->yaks, yak-tracker->yaks-tracker, working-a-yak->yaks-working, coordinating-yaks->yaks-coordinating (all yaks[-*], consistent with project name + each other).
+
+---
+▸ 2026-09-06T23:11:52Z [coordinator]
+PROGRESS (this session): DONE — 865d (skill rename to yaks[-*], symlinks repointed, 233+25 green; recovered a broken intermediate commit where a bad git-add pathspec dropped the sed content edits) and d6d3 (docs/: README/cli/tui/skills, accurate to --help + help_content). REMAINING children: 3677 (TUI SVG screenshots — feasible, plan recorded), 8c46 (skill consistency/error pass), f85f (final docs review). Sequence continues: skill pass, screenshots, docs review.
