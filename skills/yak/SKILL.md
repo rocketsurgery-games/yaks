@@ -142,6 +142,7 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks search` | Substring search over id/title/description |
 | `yaks dep` | Add/remove a dependency between tasks |
 | `yaks reparent` | Move a task under a new `--parent` (or `--unparent` to top-level) |
+| `yaks bulk` | Apply one field edit (and/or reparent) to every yak matching a filter. **Dry-run by default**; pass `--commit` to apply. Refuses to run without at least one filter flag *and* at least one mutation flag |
 | `yaks rename` | Rename a yak + rewrite every reference to it across the herd |
 | `yaks rename-prefix` | Migrate all yaks from one id prefix to another; `--dry-run` to preview |
 | `yaks stats` | Show task statistics |
@@ -216,3 +217,22 @@ Examples:
 - `yaks list --type bug --type feature --priority 1` — urgent bugs or features
 - `yaks list --label auth --search retry` — auth-labeled tasks mentioning "retry"
 - `yaks next --type bug` — ready bugs only
+
+## Bulk field edits
+
+`yaks bulk` applies the **same** field edit (and/or reparent) to every yak matching a filter. It reuses the same filter flags as the query commands above (`--status`/`--type`/`--priority`/`--label`/`--search`/`--ready`/`--tangled`/`--needs`/`--parent-of`) to *select* the set, then one or more mutation flags apply the change:
+
+- `--add-label L` / `--remove-label L` — add/remove labels on every matched yak
+- `--set-priority P` / `--set-type T` — set the field on every matched yak
+- `--reparent ID` / `--unparent` — move every matched yak under `ID` / to top-level
+
+Safety rails:
+
+- **Dry-run by default.** Without `--commit`, `bulk` only prints the matched set and the intended mutation — it changes nothing. Pass `--commit` to actually apply.
+- **Never operates on the whole herd.** It refuses to run without at least one filter flag, and refuses without at least one mutation flag.
+- **Field edits + reparent only** — no state transitions (use `shave`/`shorn`/`regrow`/`slaughter`/`revive` for those).
+
+Examples:
+- `yaks bulk --label auth --set-priority 1` — preview bumping every auth yak to P1 (dry run)
+- `yaks bulk --label auth --set-priority 1 --commit` — actually apply it
+- `yaks bulk --parent-of yak-c3d4 --add-label spike --commit` — label a whole subtree

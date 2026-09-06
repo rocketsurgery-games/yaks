@@ -99,6 +99,7 @@ when all of them are shorn (or dead), and *tangled* otherwise.
 | `yaks next` / `tangled` | ready tasks / dependency-blocked tasks |
 | `yaks search <q>` | substring search over id/title/description |
 | `yaks dep` / `reparent` | edit dependencies / move under a new parent |
+| `yaks bulk` | Apply one field edit (and/or reparent) to every yak matching a filter. **Dry-run by default** — pass `--commit` to apply. Requires a filter *and* a mutation flag |
 | `yaks rollup` | group yaks by the external issue they roll up to (`--keys` for a PR body) |
 | `yaks stats` | task statistics |
 | `yaks doctor` | herd-integrity check (duplicate ids, dangling parent/dep refs); exits non-zero on problems |
@@ -110,6 +111,17 @@ state-transition verbs (`shave`, `shorn`, `regrow`, `slaughter`, `revive`) plus
 `update` and `reparent` accept **multiple ids** and apply the same change to
 each. Note-writing commands (`update`, `ask`, `answer`) take `--as <actor>` to
 attribute the note (falling back to `$YAKS_ACTOR`, then the git user).
+
+`yaks bulk` is a filter-driven mass edit: the standard query filters
+(`--status`, `--type`, `--priority`, `--label`, `--search`, `--ready`,
+`--tangled`, `--needs`, `--parent-of`) *select* the set, and a mutation flag
+(`--add-label`, `--remove-label`, `--set-priority`, `--set-type`, `--reparent`,
+`--unparent`) *applies* the change to each. It is **dry-run by default**:
+without `--commit` it just prints the matched set and the intended mutation,
+changing nothing. It refuses to run without at least one filter flag (so it
+never touches the whole herd) and without at least one mutation flag. It only
+edits fields and reparents — no state transitions (use `shave`/`shorn`/etc. for
+those). Example: `yaks bulk --label auth --set-priority 1 --commit`.
 
 ## Interactive TUI
 
