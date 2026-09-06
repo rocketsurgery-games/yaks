@@ -128,6 +128,7 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks list` | List tasks with optional filters (`--all` also includes dead) |
 | `yaks show` | Show full details of a task |
 | `yaks refs` | List what a task points at (parent, deps, id mentions), flagging danglers |
+| `yaks commits` | Show the git commits linked to a yak — those naming its id and those that touched its file across status moves |
 | `yaks update` | Update fields, labels (`--add-label`/`--remove-label`), or append a `--note`. Accepts multiple ids (same edit to each); `--as <actor>` attributes a note |
 | `yaks ask` | Block a yak on a human decision (sets `needs`, drops it from `next`); records the question as an attributed `--note` |
 | `yaks answer` | Clear a yak's `needs` block and record the reply; returns it to `next` |
@@ -140,6 +141,7 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks next` | Hairy tasks whose deps are all resolved [alias: `ready`] |
 | `yaks tangled` | Hairy tasks with at least one unresolved dep [alias: `blocked`] |
 | `yaks search` | Substring search over id/title/description |
+| `yaks log` | Timestamped notes across a filtered set, oldest first (an activity log); `--since` and `--by` narrow it |
 | `yaks dep` | Add/remove a dependency between tasks |
 | `yaks reparent` | Move a task under a new `--parent` (or `--unparent` to top-level) |
 | `yaks bulk` | Apply one field edit (and/or reparent) to every yak matching a filter. **Dry-run by default**; pass `--commit` to apply. Refuses to run without at least one filter flag *and* at least one mutation flag |
@@ -147,7 +149,8 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks rename-prefix` | Migrate all yaks from one id prefix to another; `--dry-run` to preview |
 | `yaks stats` | Show task statistics |
 | `yaks rollup` | Group yaks by the external issue they roll up to (`--keys` for just the keys) |
-| `yaks doctor` | Read-only herd-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on issues |
+| `yaks doctor` | Read-only herd-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on issues, so it's CI-usable. `--json` emits issues as JSON |
+| `yaks doctor --strict` | Also flags shorn yaks with no recorded note — a shear without evidence (the evidence-before-shear rule) |
 | `yaks scan-ids` | Scan a file and/or stdin for tokens that are real yak-ids in this herd — a private-mode leak check; exits non-zero if any are found |
 | `yaks tui` | Open the interactive terminal UI |
 

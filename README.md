@@ -89,6 +89,8 @@ when all of them are shorn (or dead), and *tangled* otherwise.
 | `yaks create` | Create a task; the title is positional (`yaks create "Fix login"`). Flags: `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description`, `--json` (emit the new id + file path) |
 | `yaks list` | List tasks; filter by `--status/--type/--priority/--label/--search`, `--ready`, `--tangled`, `--parent-of`, `--all` |
 | `yaks show <id>` | Full detail for one task, with parent + children |
+| `yaks refs <id>` | List what a task points at (parent, deps, id mentions in its text), flagging any that dangle |
+| `yaks commits <id>` | Show the git commits linked to a yak — those naming its id and those that touched its file across status moves |
 | `yaks update <id>` | Change fields/labels, set `--description`, or append a `--note` |
 | `yaks ask <id>` / `answer <id>` | Block a yak on a human (sets `needs`, drops it from `next`) / clear that block, each recording a `--note` |
 | `yaks inbox` | List yaks awaiting a human (the `needs` queue) |
@@ -98,11 +100,13 @@ when all of them are shorn (or dead), and *tangled* otherwise.
 | `yaks slaughter <id>` / `revive <id>` | move to / from the hidden `dead/` |
 | `yaks next` / `tangled` | ready tasks / dependency-blocked tasks |
 | `yaks search <q>` | substring search over id/title/description |
+| `yaks log` | timestamped notes across a filtered set, oldest first (an activity log); `--since`/`--by` narrow it |
 | `yaks dep` / `reparent` | edit dependencies / move under a new parent |
 | `yaks bulk` | Apply one field edit (and/or reparent) to every yak matching a filter. **Dry-run by default** — pass `--commit` to apply. Requires a filter *and* a mutation flag |
 | `yaks rollup` | group yaks by the external issue they roll up to (`--keys` for a PR body) |
 | `yaks stats` | task statistics |
-| `yaks doctor` | herd-integrity check (duplicate ids, dangling parent/dep refs); exits non-zero on problems |
+| `yaks doctor` | read-only herd-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on problems, so it's CI-usable. `--json` for machine output |
+| `yaks doctor --strict` | also flags shorn yaks with no recorded note — a shear without evidence (the evidence-before-shear rule) |
 | `yaks scan-ids [file]` | flag real yak-ids in text (file and/or stdin) — a leak check for a pre-commit / PR gate; exits non-zero if any are found |
 | `yaks tui` | open the interactive terminal UI |
 
