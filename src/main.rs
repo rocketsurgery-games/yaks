@@ -372,6 +372,10 @@ enum Command {
         /// Emit the issues as JSON.
         #[arg(long)]
         json: bool,
+        /// Also flag shorn/dead yaks with no recorded note (a shear without
+        /// evidence — the working-a-yak evidence-before-shear rule).
+        #[arg(long)]
+        strict: bool,
     },
     /// Open the interactive terminal UI.
     Tui {
@@ -853,8 +857,8 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Command::Doctor { json } => {
-            let issues = herd.doctor()?;
+        Command::Doctor { json, strict } => {
+            let issues = herd.doctor(strict)?;
             if json {
                 json::print(&json::doctor_array(&issues))?;
             } else {

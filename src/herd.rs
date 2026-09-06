@@ -202,6 +202,10 @@ pub enum IssueKind {
     DanglingParent,
     /// A task whose `depends_on` names an id no task has.
     DanglingDependsOn,
+    /// A shorn or dead yak with no recorded note — a shear without evidence.
+    /// Only reported in strict mode (the working-a-yak evidence-before-shear
+    /// rule).
+    MissingEvidence,
 }
 
 impl IssueKind {
@@ -212,6 +216,7 @@ impl IssueKind {
             IssueKind::DuplicateId => "duplicate-id",
             IssueKind::DanglingParent => "dangling-parent",
             IssueKind::DanglingDependsOn => "dangling-depends-on",
+            IssueKind::MissingEvidence => "missing-evidence",
         }
     }
 
@@ -222,6 +227,7 @@ impl IssueKind {
             IssueKind::DuplicateId => "Duplicate id (same id twice in one status dir)",
             IssueKind::DanglingParent => "Dangling parent",
             IssueKind::DanglingDependsOn => "Dangling depends_on",
+            IssueKind::MissingEvidence => "Missing evidence (shorn/dead yak with no recorded note)",
         }
     }
 }
@@ -490,7 +496,10 @@ impl Herd {
     /// v1 checks: an id living in two status dirs at once (the add/add merge
     /// hazard), the same id twice inside one status dir, and `parent` /
     /// `depends_on` references that point at no known yak.
-    pub fn doctor(&self) -> Result<Vec<Issue>> {
+    ///
+    /// `strict` adds a skill-adherence check: any shorn or dead yak lacking a
+    /// recorded note is a shear without evidence.
+    pub fn doctor(&self, strict: bool) -> Result<Vec<Issue>> {
         let tasks = store::load(&self.root, &EVERY)?;
         let known = store::all_ids(&self.root);
         let mut issues = Vec::new();
@@ -547,6 +556,26 @@ impl Herd {
                         kind: IssueKind::DanglingDependsOn,
                         message: format!("{} depends_on {} but no such yak exists", t.id, d),
                         ids: vec![t.id.clone(), d.clone()],
+                    });
+                }
+            }
+        }
+
+        // Strict: a shorn or dead yak with no recorded note is a shear without
+        // evidence (the working-a-yak evidence-before-shear rule).
+        if strict {
+            for t in &tasks {
+                if matches!(t.status, Status::Shorn | Status::Dead)
+                    && store::parse_notes(&t.body).is_empty()
+                {
+                    issues.push(Issue {
+                        kind: IssueKind::MissingEvidence,
+                        message: format!(
+                            "{} is {} but has no recorded note (evidence before shear)",
+                            t.id,
+                            t.status.dir()
+                        ),
+                        ids: vec![t.id.clone()],
                     });
                 }
             }
@@ -889,6 +918,7 @@ fn issue_rank(k: IssueKind) -> u8 {
         IssueKind::DuplicateId => 1,
         IssueKind::DanglingParent => 2,
         IssueKind::DanglingDependsOn => 3,
+        IssueKind::MissingEvidence => 4,
     }
 }
 
@@ -1178,7 +1208,7 @@ mod tests {
         subject.depends_on = vec!["yak-0002".into(), "yak-0405".into()]; // one dangles
         store::write::save(&root, &subject).unwrap();
 
-        let issues = herd.doctor().unwrap();
+        let issues = herd.doctor(false).unwrap();
         let got: Vec<(IssueKind, Vec<&str>)> = issues
             .iter()
             .map(|i| (i.kind, i.ids.iter().map(String::as_str).collect()))
@@ -1201,7 +1231,7 @@ mod tests {
         store::write::save(&root, &task("yak-0001", Status::Hairy)).unwrap();
         store::write::save(&root, &task("yak-0001", Status::Shorn)).unwrap();
 
-        let issues = herd.doctor().unwrap();
+        let issues = herd.doctor(false).unwrap();
         assert_eq!(issues.len(), 1, "one duplicated id -> one clash");
         assert_eq!(issues[0].kind, IssueKind::DuplicateStatus);
         assert_eq!(issues[0].ids, vec!["yak-0001"]);
@@ -1221,6 +1251,33 @@ mod tests {
         a.depends_on = vec!["yak-0002".into()];
         store::write::save(&root, &a).unwrap();
         store::write::save(&root, &task("yak-0002", Status::Shorn)).unwrap();
-        assert!(herd.doctor().unwrap().is_empty());
+        assert!(herd.doctor(false).unwrap().is_empty());
+    }
+
+    /// Strict mode flags a shorn yak with no recorded note (a shear without
+    /// evidence), while a shorn yak carrying a note passes. Plain `doctor`
+    /// ignores both.
+    #[test]
+    fn doctor_strict_flags_shorn_yak_without_a_note() {
+        let (root, herd) = temp_herd();
+        // Shorn with an evidence note: clean.
+        let mut with_note = task("yak-0001", Status::Shorn);
+        with_note.body =
+            store::append_note("", "2026-01-02T00:00:00Z", Some("tester"), "did the work");
+        store::write::save(&root, &with_note).unwrap();
+        // Shorn with no note at all: an evidence-before-shear violation.
+        store::write::save(&root, &task("yak-0002", Status::Shorn)).unwrap();
+
+        // Non-strict doctor ignores evidence entirely.
+        assert!(
+            herd.doctor(false).unwrap().is_empty(),
+            "plain doctor must not flag missing evidence"
+        );
+
+        // Strict flags only the note-less yak.
+        let issues = herd.doctor(true).unwrap();
+        assert_eq!(issues.len(), 1, "only the note-less shorn yak is flagged");
+        assert_eq!(issues[0].kind, IssueKind::MissingEvidence);
+        assert_eq!(issues[0].ids, vec!["yak-0002"]);
     }
 }
