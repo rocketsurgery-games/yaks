@@ -8,6 +8,8 @@
 mod cache;
 mod content;
 mod detail;
+#[cfg(test)]
+mod docshots;
 mod headless;
 mod markdown;
 mod tree;
