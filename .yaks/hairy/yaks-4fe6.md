@@ -2,9 +2,9 @@
 id: yaks-4fe6
 title: 'Research: git as a yak store (git-bug-style op-log in refs) vs filesystem'
 type: idea
-priority: 2
+priority: 5
 created: '2026-08-31T20:46:52Z'
-updated: '2026-08-31T20:48:17Z'
+updated: '2026-09-05T03:33:49Z'
 labels:
 - git
 ---
