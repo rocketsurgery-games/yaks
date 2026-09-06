@@ -1,5 +1,5 @@
 ---
-name: yak
+name: yaks
 description: Yaks task tracking workflow. Use when a .yaks/ directory exists in the project. Provides commands and guidance for managing filesystem-native tasks stored as markdown files with YAML frontmatter.
 activation:
   - .yaks/ directory exists in the project
@@ -78,7 +78,7 @@ Whichever mode you're in, yaks are a **private, fine-grained layer**. Keep yak I
 
 Enforce it mechanically with **`yaks scan-ids`**: it reads a file and/or piped stdin and exits non-zero if any token is a real yak-id in this herd (printing each as `line:col  id`). Wire it into a pre-commit or PR hook to catch a leaking id before it ships — especially valuable in local-only mode, where yak IDs must stay out of commit messages too.
 
-Most projects that use an external tracker don't use yaks team-wide; yaks roll **up** to those issues. When a PR or issue needs a reference, use the **external** key, not the yak ID: run `yaks rollup --keys` over the shipping set and paste that — the forge links the PR to the issue natively. The **yak-tracker** skill covers this projection in full.
+Most projects that use an external tracker don't use yaks team-wide; yaks roll **up** to those issues. When a PR or issue needs a reference, use the **external** key, not the yak ID: run `yaks rollup --keys` over the shipping set and paste that — the forge links the PR to the issue natively. The **yaks-tracker** skill covers this projection in full.
 
 ## You are working alongside a human
 
@@ -115,7 +115,7 @@ Labels are for slicing the herd later (`yaks list --label ui`), not for elaborat
 - **Reuse before inventing.** Check what already exists (`yaks list`, `yaks stats`) and prefer an existing label over a near-synonym (`ui` vs `interface` vs `frontend` — pick one).
 - **Prefer broad, durable areas** (`ui`, `search`, `docs`, `skills`, `rust`) over hyper-specific one-offs. A label earns its keep only if you'd plausibly filter on it.
 - **A few is plenty.** Zero labels is fine; more than ~2–3 on one yak is usually a smell.
-- **Tracker labels:** when a yak maps to an external issue, a label named for the tracker (`jira`, `github`, `linear`) makes the upstreamed yaks easy to find. The **yak-tracker** skill covers this.
+- **Tracker labels:** when a yak maps to an external issue, a label named for the tracker (`jira`, `github`, `linear`) makes the upstreamed yaks easy to find. The **yaks-tracker** skill covers this.
 
 ## Commands
 
@@ -189,7 +189,7 @@ The prefix, default type, and default priority come from `.yaks/config.yaml` (fa
 
 Use `--source <url>` on create or update to link a yak to an external issue (Jira, GitHub Issues, Linear, etc.). The URL is stored in the `source` frontmatter field. The relationship is a **one-way projection**: the yak points at the external issue, never the reverse, and the external tracker stays unaware of yaks.
 
-Many yaks can roll up to one external issue. `yaks rollup` groups yaks by their source (a yak with no `source:` inherits its nearest ancestor's, so one stamp on an umbrella yak covers the subtree); `yaks rollup --keys` lists the external keys to paste into a PR body. For seeding a yak from an external issue or drafting a status update back to one, see the **yak-tracker** skill.
+Many yaks can roll up to one external issue. `yaks rollup` groups yaks by their source (a yak with no `source:` inherits its nearest ancestor's, so one stamp on an umbrella yak covers the subtree); `yaks rollup --keys` lists the external keys to paste into a PR body. For seeding a yak from an external issue or drafting a status update back to one, see the **yaks-tracker** skill.
 
 ## Referencing other yaks
 

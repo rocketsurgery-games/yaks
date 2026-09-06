@@ -10,10 +10,10 @@ use anyhow::{Context, Result};
 /// `(name, SKILL.md content)` for each bundled skill. Paths are relative to this
 /// source file (`src/skills.rs`), i.e. the repo-root `skills/` directory.
 const BUNDLED: &[(&str, &str)] = &[
-    ("yak", include_str!("../skills/yak/SKILL.md")),
+    ("yaks", include_str!("../skills/yaks/SKILL.md")),
     (
-        "yak-tracker",
-        include_str!("../skills/yak-tracker/SKILL.md"),
+        "yaks-tracker",
+        include_str!("../skills/yaks-tracker/SKILL.md"),
     ),
 ];
 
@@ -89,11 +89,11 @@ mod tests {
         let first = install(&base, false).unwrap();
         assert_eq!(first.len(), 2);
         assert!(first.iter().all(|i| !i.skipped));
-        assert!(base.join("yak/SKILL.md").is_file());
-        assert!(base.join("yak-tracker/SKILL.md").is_file());
+        assert!(base.join("yaks/SKILL.md").is_file());
+        assert!(base.join("yaks-tracker/SKILL.md").is_file());
         // The embedded content is the real skill (its frontmatter name).
-        let yak = std::fs::read_to_string(base.join("yak/SKILL.md")).unwrap();
-        assert!(yak.contains("name: yak"));
+        let yak = std::fs::read_to_string(base.join("yaks/SKILL.md")).unwrap();
+        assert!(yak.contains("name: yaks"));
 
         // Second run without force leaves the files alone.
         let again = install(&base, false).unwrap();

@@ -204,7 +204,7 @@ pub enum IssueKind {
     DanglingDependsOn,
     /// A shorn yak with no recorded note — a completion without evidence. Dead
     /// (abandoned) yaks are deliberately exempt: they need no completion
-    /// evidence. Only reported in strict mode (the working-a-yak
+    /// evidence. Only reported in strict mode (the yaks-working
     /// evidence-before-shear rule).
     MissingEvidence,
 }
@@ -563,7 +563,7 @@ impl Herd {
         }
 
         // Strict: a shorn yak with no recorded note is a completion without
-        // evidence (the working-a-yak evidence-before-shear rule). Dead
+        // evidence (the yaks-working evidence-before-shear rule). Dead
         // (abandoned) yaks are exempt — abandonment needs no completion note.
         if strict {
             for t in &tasks {

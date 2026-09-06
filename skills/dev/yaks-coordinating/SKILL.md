@@ -1,5 +1,5 @@
 ---
-name: coordinating-yaks
+name: yaks-coordinating
 description: How agents and humans coordinate over a shared herd across different agent harnesses, without a heavyweight process. Experimental and repo-internal (yaks dogfooding); not shipped.
 ---
 
@@ -8,7 +8,7 @@ description: How agents and humans coordinate over a shared herd across differen
 Repo-internal conventions for coordinating work over a shared herd — across
 harnesses, parallel agents, and humans. Deliberately minimal. The habits below
 scale down to one agent and up to many; reach for the smallest one that keeps
-the herd honest, and let working-a-yak carry the per-yak trail.
+the herd honest, and let yaks-working carry the per-yak trail.
 
 ## The design test (what belongs where)
 
@@ -61,7 +61,7 @@ those tools at the main checkout, not the terminal's cwd. The SOP:
 
 ## Disjoint scoping
 
-One writer per yak (working-a-yak). For parallel work, hand each worker a
+One writer per yak (yaks-working). For parallel work, hand each worker a
 non-overlapping set of files — separate before serializing. If work is shared,
 split it into child yaks first so each child has a single owner and a clean
 file scope, then fan out.
@@ -156,7 +156,7 @@ worktree model is crash-resilient.
 Humans coordinate through the same notes. Raise a decision with `yaks ask <id>
 --note "..."` (sets `needs`, drops the yak out of `next`); clear it with `yaks
 answer <id> --note "..."` (human-reserved — an agent never clears its own block).
-The human's queue is `yaks inbox`. Because working-a-yak re-reads notes before
+The human's queue is `yaks inbox`. Because yaks-working re-reads notes before
 starting, feedback left on `main` is seen before work begins. Do not press past
 a note that redirects the work.
 

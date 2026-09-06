@@ -1,5 +1,5 @@
 ---
-name: working-a-yak
+name: yaks-working
 description: Minimal, harness-agnostic conventions for taking one yak from hairy to shorn with a legible trail. Experimental and repo-internal (yaks dogfooding); not shipped.
 ---
 

@@ -358,7 +358,7 @@ enum Command {
         #[arg(long)]
         emacs: bool,
     },
-    /// Install the bundled agent skills (yak, yak-tracker) into a skills
+    /// Install the bundled agent skills (yaks, yaks-tracker) into a skills
     /// directory. Works anywhere — no herd required.
     Skills {
         #[command(subcommand)]
@@ -373,7 +373,7 @@ enum Command {
         #[arg(long)]
         json: bool,
         /// Also flag shorn/dead yaks with no recorded note (a shear without
-        /// evidence — the working-a-yak evidence-before-shear rule).
+        /// evidence — the yaks-working evidence-before-shear rule).
         #[arg(long)]
         strict: bool,
     },

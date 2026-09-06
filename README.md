@@ -147,7 +147,7 @@ shells out to the `yaks` CLI (or `npx`), so there's nothing to run as a plugin.
 Install the skill straight from the binary — no clone required:
 
 ```sh
-yaks skills install                          # -> ~/.agents/skills  (yak + yak-tracker)
+yaks skills install                          # -> ~/.agents/skills  (yaks + yaks-tracker)
 yaks skills install --dir ~/.claude/skills   # any agent's skills dir; --force to overwrite
 ```
 
