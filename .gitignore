@@ -1,3 +1,4 @@
+.DS_Store
 /target
 /dist
 # Local git worktrees used for parallel multi-agent experiments (yaks-8f81).

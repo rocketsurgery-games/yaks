@@ -7,13 +7,13 @@ there is no database and no separate state file. The files are the whole truth:
 readable, greppable, diffable, and versioned in git alongside the code they
 describe.
 
-```
+```sh
 .yaks/
-  hairy/     # not started
-  shaving/   # in progress
-  shorn/     # done
-  dead/      # abandoned (slaughtered)
-  config.yaml  schema
+  hairy/       # not started
+  shaving/     # in progress
+  shorn/       # done
+  dead/        # abandoned (slaughtered)
+  config.yaml  # schema
 ```
 
 ## The model
@@ -34,9 +34,9 @@ describe.
 yaks init                      # scaffold a .yaks/ herd here
 yaks create 'Wire up auth'     # new hairy yak (prints its id)
 yaks next                      # what's ready to work (deps met)
-yaks shave <id>                # start it (→ shaving)
-yaks update <id> --note '...'  # record progress
-yaks shorn <id>                # finish it (→ shorn)
+yaks shave [id]                # start it (→ shaving)
+yaks update [id] --note '...'  # record progress
+yaks shorn [id]                # finish it (→ shorn)
 yaks tui                       # or drive it all interactively
 ```
 

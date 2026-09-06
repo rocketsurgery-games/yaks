@@ -66,17 +66,6 @@ to the active view.
 
 **General** — `y` copy yak id; `?` toggle help; `q` / `Ctrl-C` quit.
 
-## Screenshots
-
-These are generated headlessly: the [`toque`](../crates/toque/README.md) crate
-drives the TUI into an in-memory ratatui buffer, and a small renderer walks that
-buffer cell-by-cell into a color SVG. They are deterministic and regenerate with
-the UI (no live-terminal capture), via:
-
-```sh
-cargo test -p yaks docshots -- --ignored   # writes docs/assets/*.svg
-```
-
 **List pane** — the tree of a view (here the *Shaving* tab): ids, priorities,
 types, status glyphs, titles, and dim labels. The `*` gutter marks a
 dependency-blocked yak; the `⏳` marks one awaiting a human.
@@ -100,3 +89,14 @@ It is unpinned (no tab); reach it from the view picker (`v`) or the drawer
 parent, and `ready`/`tangled`/`inbox` predicates. It composes into any view.
 
 ![yaks TUI filter drawer](assets/tui-drawer.svg)
+
+# Screenshots
+
+These are generated headlessly: the [`toque`](../crates/toque/README.md) crate
+drives the TUI into an in-memory ratatui buffer, and a small renderer walks that
+buffer cell-by-cell into a color SVG. They are deterministic and regenerate with
+the UI (no live-terminal capture), via:
+
+```sh
+cargo test -p yaks docshots -- --ignored   # writes docs/assets/*.svg
+```
