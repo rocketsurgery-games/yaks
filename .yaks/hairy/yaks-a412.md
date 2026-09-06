@@ -4,7 +4,7 @@ title: Skill updates from our decisions + how to VALIDATE skills
 type: task
 priority: 2
 created: '2026-09-03T22:25:55Z'
-updated: '2026-09-05T03:26:26Z'
+updated: '2026-09-06T02:01:21Z'
 parent: yaks-3901
 labels:
 - skills
@@ -73,3 +73,9 @@ EIGHTH RUN — 3 lanes, all clean. yaks bulk filter-mutation w/ dry-run-default 
 wt/ FIX ROCK-SOLID: all 3 sub-agents used native edit tools, 0 fallback (5 agents total now across 2 runs since the switch). The gitignore-was-the-cause finding is fully confirmed; terminal-fallback tax is gone.
 
 HITL fully closed: 7cc8 (dry-run decision) answered by human -> implemented -> sheared. The ask->answer->build->shear loop worked end to end. Coordination system feels reliable now: 8 parallel runs, zero herd corruption, doctor clean every time; disjoint-scope (incl. shared-TYPE prep-commits) + wt/ native editing + HITL + crash recovery + doctor all validated and skill-encoded.
+
+---
+▸ 2026-09-06T02:01:21Z [coordinator]
+NINTH RUN — trialed the NEW COORDINATOR-CLAIM SHAPE, and it works. Beat 1: one claim commit (dee2012) created+shaved the batch (d236 doctor--strict, 91a8 bulk-docs) + assignment notes -> main's 'shaving' immediately reflected the in-flight batch (the observability win, confirmed). Beat 2: workers branched from it, SKIPPED shave, each produced ONE commit. Beat 3: SQUASH-merged both -> clean linear history (claim + 2 squashed lanes; NO shave commits, NO merge commits) vs the old claim + 2x2 worker + 2 merge commits. Beat 4: reconcile clean (no batch yak left shaving). 233 unit + 25 cli green; doctor clean. Both workers used native wt/ edit tools (7 agents total, 0 fallback since the switch). Net: the shape is simpler, cleaner, and more observable exactly as predicted — adopt it as the default (already skill-encoded in yaks-2ab1).
+
+CAPSTONE: 'yaks doctor --strict' (d236) mechanizes the first skill-adherence predicate ('no shear without recorded evidence'). Ran it on our real herd: 7 hits (2 shorn, 5 dead without notes) — real historical gaps from before the evidence-before-shear discipline. REFINEMENT to consider: DEAD (abandoned/slaughtered) yaks arguably don't need evidence the way SHORN (completed) ones do; --strict could scope to shorn-only or rank dead separately. The 2 shorn hits (26c0, 9b8d) are pre-discipline; not backfilling now.
