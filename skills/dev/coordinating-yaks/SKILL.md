@@ -107,16 +107,38 @@ by the git author, so this is for in-file/local-mode visibility. Attribution,
 never ownership — the yak still belongs to no one. Single-agent work can ignore
 it.
 
+## Parallel run shape (claim → fan out → merge → reconcile)
+
+The coordinator runs a batch in four beats:
+
+1. **Claim, in one commit on `main`.** Create (or select) the batch's leaf
+   yaks, move each to `shaving`, and stamp each with a short assignment note
+   (owner tag, file scope, any setup context). Commit them together — e.g.
+   `kick off run: shave A, B, C`. This “licks the cookie”: `main`'s `shaving`
+   set now reflects exactly what's in flight (it otherwise wouldn't — a worker's
+   own shave lives on its branch, invisible until merge), and each yak becomes
+   self-describing for its worker.
+2. **Fan out.** Cut a worktree per lane from that commit and spawn one worker
+   each. Workers **skip the shave step** (their yak is already `shaving`); they
+   just do the work and move `shaving → shorn` with an evidence note — ideally in
+   a single commit.
+3. **Merge back.** Squash-merge each lane (see below).
+4. **Reconcile.** Any yak left `shaving` on `main` after the batch is an
+   abandoned/stalled lane — `regrow` it (shaving→hairy) or re-run. `yaks doctor`
+   surfaces stragglers.
+
 ## Merge / integration
 
 The coordinator owns integration. One hard rule: **the yak id must appear in
 whatever commit(s) land on `main`** — that is what `yaks commits` joins on, and
-both a normal merge and `git merge --squash` satisfy it. Above that rule it is
-topology taste: `--no-ff` merges are **preferred in team mode** because they
-preserve the parallel-lane topology and richer `yaks commits --follow` history
-(the yak's own notes already carry the fine-grained work-trail). Avoid per-yak
-cherry-picking across branches; to pull main-side updates into a live branch use
-`git merge main`, all-or-nothing.
+both a normal merge and `git merge --squash` satisfy it. Under the run shape
+above the **claim commit already documents the batch**, so the parallel topology
+no longer needs to live in the merge graph: **squash-merge is the default** for
+single-commit lanes (cleaner history; provenance survives because the claim
+commit and the worker commit both name the id, and `yaks commits --follow`
+traces the file across both). Reserve `--no-ff` for a lane that genuinely needs
+multiple commits. Avoid per-yak cherry-picking across branches; to pull
+main-side updates into a live branch use `git merge main`, all-or-nothing.
 
 ## Human-in-the-loop
 
