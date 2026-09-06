@@ -4,7 +4,7 @@ title: 'Write side: bulk and filter-driven mutations'
 type: feature
 priority: 2
 created: '2026-08-30T19:34:21Z'
-updated: '2026-09-04T17:32:37Z'
+updated: '2026-09-06T22:45:20Z'
 parent: yaks-3901
 labels:
 - cli
@@ -15,3 +15,7 @@ Bulk label and metadata edits by id-list or dynamic filter. Bulk state transitio
 ---
 ▸ 2026-09-04T17:32:37Z [coordinator]
 Bulk mutation by explicit ID-LIST landed (yaks-5fae): 'yaks update a b c ...' and 'yaks reparent a b c --parent P' apply one edit across many ids (per-id result, exit non-zero on any miss, single-id unchanged). TUI multi-select landed (yaks-de85): 'm' marks/unmarks the cursor yak (Space=collapse and v=view were taken; v-vs-view rebind deferred), a '●' gutter marker, and a selection-aware 'S' that bulk-transitions the marked set via existing herd.transition. Both via a 2-lane parallel run; 226 bin + 23 cli green; doctor clean. FILTER-DRIVEN mutation is the only piece left and is BLOCKED on the human decision yaks-7cc8 (in inbox).
+
+---
+▸ 2026-09-06T22:45:20Z [coordinator]
+DELIVERED. Bulk mutation done: multi-id transitions (9ccc), multi-id update/reparent (5fae), TUI multi-select + bulk action (de85) with slaughter child-guard (5c51), and filter-driven field mutation with dry-run-default (a11b, per the 7cc8 decision). Only filter-driven STATE transitions (slaughter-by-filter) deferred as the scariest footgun.

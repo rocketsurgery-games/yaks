@@ -4,7 +4,7 @@ title: Skill updates from our decisions + how to VALIDATE skills
 type: task
 priority: 2
 created: '2026-09-03T22:25:55Z'
-updated: '2026-09-06T16:33:45Z'
+updated: '2026-09-06T22:45:20Z'
 parent: yaks-3901
 labels:
 - skills
@@ -87,3 +87,7 @@ RECONCILED before more runs. The body's 'PENDING SKILL UPDATES' are ALL DONE and
 ---
 ▸ 2026-09-06T16:33:45Z [coordinator]
 TENTH RUN (2 lanes, new claim-shape). doctor --strict refinement (1832: scoped to shorn-only, dead excluded — the clean choice) + doctor docs/audit (7035: added doctor/doctor --strict/refs/commits/log to README+yak skill). Squash-merged; 233 unit + 25 cli green; doctor clean. doctor --strict on the real herd now reports 2 (shorn-without-evidence: 26c0, 9b8d) — down from 7; the 5 dead are correctly exempt. Those 2 are pre-discipline historical shears; leaving them as a truthful signal (not backfilling fake evidence). Claim-shape ran smoothly again (in-flight visible on main, workers skipped shave, one commit each, clean squash). Clean parallel work is now genuinely thinning — a wrap-up signal.
+
+---
+▸ 2026-09-06T22:45:20Z [coordinator]
+MISSION ACCOMPLISHED. Skill updates: every decision folded into coordinating-yaks (wt/ file-tool SOP, disjoint-TYPE prep-commits, HITL-via-coordinator, claim run-shape, attribution, crash-recovery, human-drift) + working-a-yak (ask/answer) + the shipped yak skill (all new commands). Validation approach established and first predicates mechanized: yaks doctor (integrity) + doctor --strict (evidence-before-shear). Remaining predicates hoisted to yaks-eb5f in the new herd (yaks-10fb). The rolling run-log (runs 1-10) above is the durable record.

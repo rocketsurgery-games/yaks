@@ -4,7 +4,7 @@ title: 'Git merge driver for .yaks/: conflict-free herd merges across branches'
 type: feature
 priority: 2
 created: '2026-08-30T22:52:32Z'
-updated: '2026-09-02T23:34:26Z'
+updated: '2026-09-06T22:45:20Z'
 parent: yaks-3901
 labels:
 - git
@@ -15,3 +15,7 @@ Per-branch worktree herds reconcile at merge. Notes are append-only, so concurre
 ---
 ▸ 2026-09-02T23:34:26Z
 [coordinator] Evidence from the first real parallel run (yaks-3901): two disjoint-scope workers each shearing only their own leaf yak merged to main with ZERO conflicts, including a genuine 3-way merge. So under the disjoint-leaf convention the driver is not needed. Keep this yak as a safety net for the UNHAPPY path only (workers forced onto the same parent/shared yak); build it only if the deliberate collision test shows the manual reconciliation is painful.
+
+---
+▸ 2026-09-06T22:45:20Z [coordinator]
+DECIDED-AGAINST -> slaughtering (not parking). The disjoint-leaf coordination model produced ZERO herd corruption across 10 parallel runs (yaks doctor clean every time), so a custom .yaks/ merge driver never earned its keep — it was always safety-net-only. We're confident we won't build it.

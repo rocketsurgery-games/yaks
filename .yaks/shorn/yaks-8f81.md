@@ -4,7 +4,7 @@ title: 'Dogfooding harness: in-repo pstack-lite skills and worktree isolation'
 type: task
 priority: 2
 created: '2026-08-30T19:34:21Z'
-updated: '2026-08-30T20:59:39Z'
+updated: '2026-09-06T22:45:20Z'
 parent: yaks-3901
 labels:
 - skills
@@ -19,3 +19,7 @@ Worktree probe: git worktree add --detach target/wt-probe HEAD, inspected, remov
 ---
 ▸ 2026-08-30T20:59:39Z
 [coordinator] Parallel worktree experiment run. Two sub-agents, disjoint scopes: wtA implemented 'yaks commits' (yaks-2610) in .worktrees/provenance; wtB wrote the coordinating-yaks skill (yaks-9dfe) in .worktrees/coord. Each tracked its own yak in its own per-branch .yaks via CWD discovery, sheared + committed code-with-yak, reported back. Merged clean (disjoint files): ff wtA, merge commit for wtB (92fe7c2). Merged main builds; 233 tests green; both [wtA]/[wtB] notes reconciled into one herd; 'yaks commits' dogfooded on yaks-2610. KEY FINDING: agent file-editing tools root at the MAIN checkout, not terminal CWD, so a bare src/ path silently edits the main tree; wtA hit this, recovered via path-scoped git restore, re-edited through .worktrees/provenance/src. Folded into coordinating-yaks (Tooling gotcha). Worktrees removed, branches deleted.
+
+---
+▸ 2026-09-06T22:45:20Z [coordinator]
+FULFILLED. Worktree isolation for parallel multi-agent work is thoroughly validated: 10 runs, zero corruption, native wt/ editing (non-gitignored fix), crash-resilient recovery, and the coordinator-claim run shape — all encoded in coordinating-yaks. Child 012b (skills-seed) remains the human's in-flight item; left untouched.

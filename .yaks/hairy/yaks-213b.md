@@ -4,8 +4,8 @@ title: 'PR-driven integration: coordinator opens id-free PRs from worker branche
 type: feature
 priority: 3
 created: '2026-08-30T22:52:32Z'
-updated: '2026-09-03T22:25:35Z'
-parent: yaks-3901
+updated: '2026-09-06T22:44:52Z'
+parent: yaks-10fb
 labels:
 - git
 ---
