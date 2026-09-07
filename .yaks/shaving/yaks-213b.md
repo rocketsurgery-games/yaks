@@ -4,7 +4,7 @@ title: 'PR-driven integration: coordinator opens id-free PRs from worker branche
 type: feature
 priority: 3
 created: '2026-08-30T22:52:32Z'
-updated: '2026-09-06T22:44:52Z'
+updated: '2026-09-07T18:42:21Z'
 parent: yaks-10fb
 labels:
 - git
@@ -15,3 +15,7 @@ Adapt the worktree flow to GitHub PRs. Privacy boundary: yak ids may appear in c
 ---
 ▸ 2026-09-03T22:25:35Z [coordinator]
 DECISION (merge vs squash, team mode): the ONLY hard rule is that the yak id must appear in whatever commit(s) land on main — that's what the 'yaks commits' grep-join relies on, and both merge and squash satisfy it (squash does NOT break provenance). Above that rule it's topology taste: --no-ff merges preserve the parallel-lane topology + richer 'yaks commits' --follow history and are PREFERRED in team mode (git history is otherwise redundant with the yak's own notes, which are the authoritative work-trail). A 'squash each lane to one well-messaged commit' hybrid is defensible and loses little. Avoid per-yak cherry-picking across branches (fiddly, fights reconcile-at-merge); to pull main-side updates into a live branch use 'git merge main', all-or-nothing.
+
+---
+▸ 2026-09-07T18:42:21Z [coordinator]
+Starting the first stab: skills-only, zero new binary code (per the design test — compose existing primitives: scan-ids for the privacy preflight, rollup --keys for the upstream link, gh for PRs). Plan: (1) PR-driven integration section in yaks-coordinating covering the MODE FORK; (2) team+tracker discouragement into yaks-tracker; (3) capture decisions here. Key practical finding to encode: in PRIVATE mode a gitignored .yaks/ is NOT carried into worktrees, so there are NO per-branch herds to reconcile — workers share ONE herd (symlink .yaks into each worktree). Yak surgery goes live/shared; the split-brain-merge problem is replaced by concurrent writes to one store. Provenance inverts: no git-side join possible, coordinator stamps the final squashed SHA back onto the yak post-merge (d695/4b52 are the frontmatter home). Candidate primitives noted, NOT built: a YAKS_DIR/--herd discovery override for worktrees; a scan-ids-over-a-commit-range preflight (eb5f).

@@ -140,6 +140,66 @@ file across both). Reserve `--no-ff` for a lane that genuinely needs
 multiple commits. Avoid per-yak cherry-picking across branches; to pull
 main-side updates into a live branch use `git merge main`, all-or-nothing.
 
+## PR-driven integration (coordinator owns the PRs)
+
+Land a batch as GitHub PRs instead of local merges to `main`. **Mode decides the
+shape** — settle it first (`git check-ignore .yaks`).
+
+**Team mode** (`.yaks/` committed). The yak status-moves ride *inside* the PR
+diff; yak ids stay allowed in commit messages; `yaks commits <id>` still recovers
+provenance post-merge (via the file-follow — see below). Reviewers see `.yaks/`
+churn in the diff; that's the tradeoff.
+
+**Private mode** (`.yaks/` gitignored — use this whenever the repo has an external
+tracker). The consequences cascade:
+
+- The yak files are **not in the PR**, and yak ids must stay out of commit
+  messages too (not just the PR body) — the whole `.yaks/` layer is invisible to
+  the shared repo.
+- **There is one herd, not per-branch herds.** A gitignored `.yaks/` isn't
+  carried into worktrees, so workers get no copy to reconcile at merge. Point
+  every worktree at the single shared herd — simplest is a symlink
+  (`ln -s ../../.yaks wt/<name>/.yaks`), so discovery inside the worktree resolves
+  to the one store. Yak surgery is therefore **live and shared**, not merged: the
+  split-brain-herd problem disappears, and concurrent CLI writes to one herd take
+  its place.
+- Because the herd is shared, the **claim commit doesn't apply to yaks** (they
+  aren't committed) — claiming is just moving the shared yak to `shaving`.
+
+**The flow (coordinator owns `gh`; workers never touch it):**
+
+1. Claim + fan out as usual — workers produce committed branches in their
+   worktrees (team mode: plus the claim commit; private mode: just move the
+   shared yak).
+2. **Coordinator pushes each branch and opens the PR with id-free title/body.**
+   Preflight the text first: `printf '%s' "$body" | yaks scan-ids` exits non-zero
+   on any leaked id. Put the upstream link in with `yaks rollup --keys`, never a
+   yak id.
+3. Merge (squash by default, per Merge / integration).
+4. **Stamp provenance back (private mode).** After merge, record the final
+   squashed SHA on the yak (a note, or the `pull-request`/branch frontmatter
+   fields) — the branch SHAs the worker knew are orphaned by the squash, and this
+   recorded SHA is the *only* yak→commit link that exists in private mode.
+
+Why coordinator-owns-PRs over each worker self-submitting: one `gh` auth, one
+privacy-enforcement point, and one actor that knows the final merged SHA. Workers
+stay pure "produce a branch" units.
+
+**Provenance, by mode.**
+
+- *Team:* `yaks commits <id>` joins on the yak **file** followed across the
+  squashed commit. Squash rewrites the message (id-free, from the PR body), so the
+  message-grep half breaks — the file-follow half survives. Anchor on the file
+  move, not the message.
+- *Private:* no git-side join is possible by design (the shared repo can't know
+  yaks exist without leaking them). The yak carries its landed SHA; the
+  coordinator stamps it post-merge (above).
+
+**Guardrails.** `yaks scan-ids` on every PR title/body — and, in private mode,
+over the landed commit-message range too. `yaks doctor` after the batch. Disjoint
+scope as always. (A one-shot preflight that runs `scan-ids` over a PR body *and* a
+commit range is a candidate primitive — yaks-eb5f.)
+
 ## Recovery (a lost or crashed worker)
 
 A worker's work lives in its worktree/branch, so a lost agent session is **not**

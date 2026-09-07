@@ -23,6 +23,15 @@ a **one-way projection, not synchronization**:
   offer. If a user asks to sync, explain the projection and do the rollup or
   import instead.
 
+**Prefer private mode when a tracker is in play.** The tracker is the shared,
+coarse layer; yaks are the private layer beneath it. Running yaks in *team* mode
+(`.yaks/` committed) on a repo that *also* has an external tracker means two
+competing shared layers, and it leaks your fine-grained history into shared git
+— discouraged. Keep `.yaks/` gitignored (see the `yaks` skill's mode guidance) so
+the projection stays one-way and private. In that private mode, yak→commit
+provenance is not recoverable from the shared repo by design; the shared link is
+PR↔issue via `rollup --keys`, and the yak's own notes carry the rest.
+
 This skill covers the three things that need judgment; the rollup itself is just
 a CLI command.
 
