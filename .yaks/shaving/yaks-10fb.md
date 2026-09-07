@@ -4,7 +4,7 @@ title: 'Yaks coordination & tooling: follow-ups (post-3901)'
 type: idea
 priority: 3
 created: '2026-09-06T22:44:52Z'
-updated: '2026-09-06T22:44:52Z'
+updated: '2026-09-06T23:55:23Z'
 labels:
 - agent
 ---
