@@ -49,6 +49,10 @@ ask.
 - **Team mode:** stage the shorn yak move together with the code that completed
   it and commit them in one commit. That commit is also what later lets you trace
   the change back to this yak (provenance, `yaks-2610`).
+- **The repo's own commit hooks are not yours.** A repo may run pre-commit hooks
+  (husky/lint-staged, formatters, test gates) on your commit. Their output — and
+  any failure they raise — is the repo's, not a yaks problem: fix the flagged
+  code and re-commit; don't mistake hook noise for a yaks error.
 
 ## Optional: attribution (multi-agent)
 

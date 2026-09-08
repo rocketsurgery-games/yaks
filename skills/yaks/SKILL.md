@@ -47,7 +47,7 @@ Yaks runs in one of two modes, with different habits. **Figure out which mode yo
 - `.yaks/` is gitignored or otherwise untracked → **local-only** (a private scratchpad).
 - `.yaks/` is committed alongside the code → **team** (a shared tracker).
 
-To check: `git check-ignore .yaks` printing a path means local-only; `git ls-files .yaks` listing files means team. If a fresh checkout is genuinely ambiguous, default to local-only — the safer assumption.
+To check, **use `git ls-files .yaks`** — it lists files in **team** mode and prints nothing when the herd is untracked (**local-only**). Prefer this signal: it is reliable across *every* hiding method. Do **not** rely on `git check-ignore .yaks` alone — the self-contained `.yaks/.gitignore` = `*` method ignores the directory's *contents*, not the `.yaks` entry itself, so `git check-ignore .yaks` reports "not ignored" for a fully-private herd. If you do use `check-ignore`, test a path *inside* it (`git check-ignore .yaks/config.yaml`). If a fresh checkout is genuinely ambiguous, default to local-only — the safer assumption.
 
 **Local-only.** The yak files live only on this machine; they're planning memory, not shared history.
 - Never `git add` yak files or include them in commits.

@@ -14,7 +14,7 @@ Run `yaks <command> --help` for full flags. Most read commands accept the shared
 
 | Command | What it does |
 |---|---|
-| `list` | List tasks (non-dead by default; `--all` includes dead). |
+| `list` | List tasks (non-dead by default; `--all` includes dead). Status renders as `[H]`/`[S]`/`[N]`/`[X]` — hairy / shaving / shor**n** / dead. |
 | `show <id>` | Show one yak: fields, references, children, body + notes. |
 | `next` (alias `ready`) | Hairy yaks whose dependencies are all resolved — the work queue. |
 | `tangled` (alias `blocked`) | Hairy yaks with at least one unresolved dependency. |

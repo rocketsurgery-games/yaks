@@ -31,11 +31,15 @@ The rich case adds nothing the minimal case needs; it just has more writers.
 
 ## Worktrees are per-branch herds
 
-Each git worktree checks out its own committed `.yaks/`, so herds are
-**per-branch** and reconcile at **merge**, not live. Two parallel agents in two
-worktrees do not see each other's shave/update until those commits merge. So
-coordinate by disjoint scopes plus merge, not by watching each other in real
-time.
+This is **team-mode** behavior. Each git worktree checks out its own committed
+`.yaks/`, so herds are **per-branch** and reconcile at **merge**, not live. Two
+parallel agents in two worktrees do not see each other's shave/update until those
+commits merge. So coordinate by disjoint scopes plus merge, not by watching each
+other in real time.
+
+(In **private mode** the opposite holds: a gitignored `.yaks/` is never checked
+out per worktree, so all lanes share the *one* herd live — see PR-driven
+integration.)
 
 **File-tool SOP (validated across runs).** Some agent harnesses (e.g. Zed)
 exclude git-ignored paths from the file-editing tools' project view AND root
@@ -156,13 +160,15 @@ tracker). The consequences cascade:
 - The yak files are **not in the PR**, and yak ids must stay out of commit
   messages too (not just the PR body) — the whole `.yaks/` layer is invisible to
   the shared repo.
-- **There is one herd, not per-branch herds.** A gitignored `.yaks/` isn't
-  carried into worktrees, so workers get no copy to reconcile at merge. Point
-  every worktree at the single shared herd — simplest is a symlink
-  (`ln -s ../../.yaks wt/<name>/.yaks`), so discovery inside the worktree resolves
-  to the one store. Yak surgery is therefore **live and shared**, not merged: the
-  split-brain-herd problem disappears, and concurrent CLI writes to one herd take
-  its place.
+- **There is one herd, not per-branch herds** — and workers need no setup to
+  reach it. A gitignored `.yaks/` isn't carried into a worktree, so there's no
+  copy to reconcile; and because `yaks` discovery walks *up* the filesystem, an
+  **in-tree** worktree (`<repo>/wt/<name>`) resolves the main checkout's shared
+  herd automatically — **no symlink required** (validated live: a bare
+  `yaks show` from `wt/a` resolved the parent `.yaks/`). Only an *out-of-tree*
+  worktree needs a bridge: `ln -s <repo>/.yaks <worktree>/.yaks`. Either way, yak
+  surgery is **live and shared**, not merged: the split-brain-herd problem
+  disappears, and concurrent CLI writes to one herd take its place.
 - Because the herd is shared, the **claim commit doesn't apply to yaks** (they
   aren't committed) — claiming is just moving the shared yak to `shaving`.
 
