@@ -39,6 +39,15 @@ cargo test --workspace   # --workspace is required: `cargo test` alone only
                          # tests the root `yaks` package, not crates/toque
 ```
 
+## Verifying changes
+
+Verify against the real artifact via the project's lever, not "tests pass"
+alone. A TUI change is verified by driving `toque` to the relevant state and
+LOOKING at the rendered frame (and via `cargo test -p yaks docshots --
+--ignored`, which renders color SVG frames to `docs/assets/`, plus the `insta`
+snapshots in `src/tui.rs`). If a change has no lever to see its effect,
+`yaks ask` rather than declare it done on faith.
+
 ## Releasing
 
 `.github/workflows/release.yml` builds the 5-platform binaries and publishes the
