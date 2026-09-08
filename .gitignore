@@ -5,6 +5,10 @@
 /.worktrees
 node_modules/
 artifacts/
+# ...but the herd's attachment store (`yaks attach`) is real, shareable evidence —
+# keep it out of the broad `artifacts/` sweep so it commits in team mode (yaks-52eb).
+!.yaks/artifacts/
+!.yaks/artifacts/**
 # Local working clone of the forked edtui repo (rocketsurgery-games/edtui).
 # Used to develop + push upstream PR branches; yaks depends on it via git, not path.
 /.edtui

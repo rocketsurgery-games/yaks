@@ -49,7 +49,10 @@ ask.
   lever — drive the TUI/browser, reproduce the state, read the actual value — and
   record it in a note: a command and its output, a test name, a file path, a
   commit SHA — or `yaks attach` the artifact itself (a screenshot, a TUI frame)
-  when the evidence is something to look at. Evidence is general: the outcome achieved and
+  when the evidence is something to look at. Attach keeps it an **external file**
+  under `.yaks/artifacts/` (committed in team mode), so it reaches the reviewer;
+  never paste a large or binary artifact (SVG included) inline into a note or
+  description. Evidence is general: the outcome achieved and
   seen, appropriate to the yak's kind (a research/decision yak's evidence is its
   finding/rationale; dead yaks are exempt).
 - **Scriptable evidence is a `verify:` command.** When the check is a command (a

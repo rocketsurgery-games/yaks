@@ -874,7 +874,9 @@ impl Herd {
 
     /// Write `data` to `.yaks/artifacts/{id}/{name}` and append a markdown image
     /// link to the task body. `name` should be a bare filename. The artifacts
-    /// tree lives inside the herd (committed alongside `.yaks/`, like Python).
+    /// tree lives inside the herd and, in team mode, commits alongside `.yaks/`
+    /// (the root `.gitignore` explicitly un-ignores `.yaks/artifacts/`, yaks-52eb)
+    /// so an attachment is shareable evidence, not just local scratch.
     pub fn attach(&self, id: &str, name: &str, data: &[u8]) -> Result<AttachOutcome> {
         let Some(mut task) = store::load_task_by_id(&self.root, id)? else {
             return Ok(AttachOutcome::NotFound);
