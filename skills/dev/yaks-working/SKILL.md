@@ -41,9 +41,20 @@ ask.
 
 ## Before you shear
 
-- **Evidence over assertion.** Do not shear on "it compiles" or a self-report.
-  Record the real evidence in a note: a command and its output, a test name, a
-  file path, a screenshot path, or a commit SHA.
+- **Evidence contract first.** The definition-of-done — what will count as proof —
+  is authored *before* the work: by the coordinator at claim time, or by the
+  working agent itself in solo mode. You shear against it, not against vibes.
+- **Evidence over assertion.** Do not shear on "it compiles", a self-report, or a
+  green proxy. Verify against the *real artifact* via the project's verification
+  lever — drive the TUI/browser, reproduce the state, read the actual value — and
+  record it in a note: a command and its output, a test name, a file path, a
+  screenshot path, or a commit SHA. Evidence is general: the outcome achieved and
+  seen, appropriate to the yak's kind (a research/decision yak's evidence is its
+  finding/rationale; dead yaks are exempt).
+- **No lever? Ask, don't shear on faith.** If the project has no way to verify
+  this kind of change (a TUI you can't snapshot, UI you can't drive, state you
+  can't reproduce), `yaks ask <id>` the human whether to go build one rather than
+  shearing on trust.
 - Write a short shorn summary (what was done, what was learned, any yaks spawned,
   the evidence), then `yaks shorn <id>`.
 - **Team mode:** stage the shorn yak move together with the code that completed
