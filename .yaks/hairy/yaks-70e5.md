@@ -4,7 +4,7 @@ title: 'Candidate primitive: yaks diff <refA> <refB> (ref-generic herd diff)'
 type: feature
 priority: 3
 created: '2026-09-03T22:25:35Z'
-updated: '2026-09-06T22:44:52Z'
+updated: '2026-09-08T23:12:05Z'
 parent: yaks-10fb
 labels:
 - cli
@@ -13,3 +13,7 @@ labels:
 Framed explicitly as REF-GENERIC, not worktree-aware (we deliberately reject worktree-awareness as a first-class concept — it violates files-authoritative/portable/degrade-gracefully). 'Show a worktree's yak-state vs main' is just a special case of 'diff the herd between two git refs', which works uniformly for branches/tags/PRs/worktrees.
 
 Today 'git diff main -- .yaks/' already does ~80%. BUILD THIS ONLY IF that raw diff proves too coarse in practice (start by just using it). If built: a read-only 'yaks diff <refA> <refB>' that shells git to enumerate .yaks/ changes between the refs and renders them as YAK-LEVEL deltas: added yaks, status transitions (hairy->shorn etc. from the dir move), and note deltas. Pure read over files-at-two-refs; no worktree semantics anywhere. TUI at most gets a 'compare against ref' view, also ref-generic. Provenance-adjacent to yaks-2610.
+
+---
+▸ 2026-09-08T23:12:05Z [coordinator]
+Assessment (pre-compact): still correctly GATED — 'git diff main -- .yaks/' covers ~80%; build ref-generic 'yaks diff' only when raw diff proves too coarse in practice. Reframed under fe5a as EVAL INSTRUMENTATION (herd-state delta between two runs/variants), not a worktree feature. But log --since/--by + commits already answer most 'what changed between runs' questions, so 70e5's marginal value has shrunk further. Hold until a real need surfaces.

@@ -4,7 +4,7 @@ title: Mechanize remaining validation predicates (commit-names-id, worker-scope-
 type: feature
 priority: 3
 created: '2026-09-06T22:44:52Z'
-updated: '2026-09-08T00:51:01Z'
+updated: '2026-09-08T23:12:05Z'
 parent: yaks-10fb
 labels:
 - agent
@@ -15,3 +15,7 @@ From a412's validation list; only doctor + doctor --strict (evidence-before-shea
 ---
 ▸ 2026-09-08T00:51:01Z [coordinator]
 pstack cross-ref (from the pstack mining, yaks-a2ca): this yak IS pstack's 'encode-lessons-in-structure' + 'build-the-lever' + 'prove-it-works' applied to yaks — mechanize skill conventions into scripted doctor/CI predicates. pstack's whole thesis ('Verification is all you need'; a good verification lever 100-1000x's a team) is an argument to PRIORITIZE this. The commit-names-id and worker-scope-adherence predicates are the concrete next levers; doctor --strict (evidence-before-shear) is the pattern to extend.
+
+---
+▸ 2026-09-08T23:12:05Z [coordinator]
+Assessment (pre-compact): the git-range enforcement partner to 213b (PR flow, shorn) and the CI complement to doctor --strict (herd-only) + verify (per-yak). Two predicates: commit-names-id (the provenance guard — most useful) and worker-scope-adherence (git diff --stat per branch vs an allowlist). Both git-aware, not files-authoritative -> a CI script or a yaks subcommand that shells git (like 'commits'); decide which. Converges with the 213b 'pr-preflight' candidate (scan-ids over a commit range + commit-names-id in one check). Least urgent now that core discipline + provenance are validated; do it when we want CI-grade enforcement of the coordination rules.
