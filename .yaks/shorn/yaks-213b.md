@@ -4,7 +4,7 @@ title: 'PR-driven integration: coordinator opens id-free PRs from worker branche
 type: feature
 priority: 3
 created: '2026-08-30T22:52:32Z'
-updated: '2026-09-08T00:21:04Z'
+updated: '2026-09-08T00:28:43Z'
 parent: yaks-10fb
 labels:
 - git
@@ -27,3 +27,11 @@ FINDING (from reading store::discover_root): discovery walks up parents to the f
 ---
 ▸ 2026-09-08T00:21:04Z [coordinator]
 VALIDATED end-to-end in a real private-mode repo (tideway, stealth-mode .yaks/.gitignore=*, yaks 0.0.6). All checks PASS: step-2 in-tree worktree resolves the shared herd with NO symlink (walk-up), worktree writes instantly visible in main (live/shared); landed history id-free + no .yaks/ paths; scan-ids guard fires on a planted id; yaks commits finds nothing (correct expected-negative for private mode); recorded SHA resolves; doctor + doctor --strict clean. Deviations (repo policy): no real main move (ran identical mechanics on a throwaway branch), no gh PR (local squash stood in). FINDINGS FOLDED IN: (1) mode-detection bug — 'git check-ignore .yaks' misreports stealth mode (.yaks/.gitignore=*) as team, since it ignores contents not the dir entry; fixed the yaks skill to lead with 'git ls-files .yaks' (reliable across all hiding methods) and to test a path INSIDE if using check-ignore. (2) symlink is redundant for in-tree worktrees; simplified yaks-coordinating to 'no symlink; walk-up finds it', symlink demoted to out-of-tree fallback; added a team-vs-private qualifier to 'Worktrees are per-branch herds'. (3) repo pre-commit hooks (husky/lint-staged) run on lane commits — added a heads-up to yaks-working so hook output isn't mistaken for a yaks error. (4) [N]=shorN glyph legend added to docs/cli.md. REMAINING for 213b: team-mode A/B validation on a committed-.yaks repo. Stealth mode confirmed still viable; only incompatible with the nested-repo multi-machine sync (the * blinds .yaks's own git), which is orthogonal to PR flow.
+
+---
+▸ 2026-09-08T00:28:28Z [coordinator]
+TEAM-MODE validated in this repo (real claim->branch->squash cycle). yaks commits yaks-f4fa returned the two-anchor trail the design predicts: grep-join surfaced ONLY the claim commit faefc09 (squash message is id-free), while the file-follow join surfaced BOTH the squash 64d8ce6 AND the claim. Isolated the mechanism: 'git log --grep=<id>' shows the claim only; 'git log --follow -- .yaks/shorn/<id>.md' shows the squash + claim. So the design holds: an id-free GitHub squash breaks the message-grep but the file-follow recovers it, anchored on the file move. Privacy preflight also confirmed: id-free squash message -> scan-ids exit 0; a message leaking yaks-f4fa -> exit 1 at 1:7. doctor clean. Did NOT push a real PR to production main (local squash is mechanically identical to GitHub's PR-body-derived squash for this local-git provenance query); the gh pr create + scan-ids-on-body half was already validated in private mode. BOTH MODES now validated end-to-end.
+
+---
+▸ 2026-09-08T00:28:43Z [coordinator]
+Shorn: mode-forked PR-driven integration guidance is landed (yaks-coordinating PR section + yaks-tracker discouragement) and validated end-to-end in BOTH modes — private in a real stealth-mode repo, team here (squash provenance). Follow-ups left as backlog, NOT part of 213b: candidate primitives (YAKS_DIR/--herd discovery override for out-of-tree worktrees; a pr-preflight composing scan-ids over PR body + commit range, eb5f) and a first-class SHA-stamp frontmatter field (d695/4b52).
