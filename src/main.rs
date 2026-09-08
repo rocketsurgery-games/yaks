@@ -114,6 +114,16 @@ enum Command {
     /// Show the git commits linked to a yak: those naming its id and those that
     /// touched its file across status moves.
     Commits { id: String },
+    /// Run a yak's recorded `verify:` command and record the PASS/FAIL as an
+    /// attributed evidence note. Explicit — yaks never auto-runs it. Exits
+    /// non-zero if any verify fails (or a yak has no `verify:` command).
+    Verify {
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+        /// Attribute the result note to this actor (stamped as `[actor]`).
+        #[arg(long = "as")]
+        as_actor: Option<String>,
+    },
     /// Scan text for tokens that are real yak-ids in this herd — a leak check
     /// for private-mode herds (pre-commit / PR hook). Reads a FILE and/or
     /// stdin, prints each found id as `line:col  id`, and EXITS NON-ZERO if
@@ -190,6 +200,9 @@ enum Command {
         source: Option<String>,
         #[arg(long)]
         description: Option<String>,
+        /// A rerunnable verification command for this yak (see `yaks verify`).
+        #[arg(long)]
+        verify: Option<String>,
         /// Print the created task's id, path, and basic fields as JSON.
         #[arg(long)]
         json: bool,
@@ -213,6 +226,9 @@ enum Command {
         remove_label: Vec<String>,
         #[arg(long)]
         source: Option<String>,
+        /// Set (or clear, with an empty string) this yak's `verify:` command.
+        #[arg(long)]
+        verify: Option<String>,
         #[arg(long)]
         note: Option<String>,
         /// Attribute the note to this actor (stamped as `[actor]`). Defaults to
@@ -515,6 +531,38 @@ fn main() -> Result<()> {
             }
             Some(c) => render_commits(&c),
         },
+        Command::Verify { ids, as_actor } => {
+            let actor = actor::resolve(as_actor.as_deref());
+            let mut all_ok = true;
+            for id in &ids {
+                let Some(show) = herd.show(id)? else {
+                    eprintln!("no such task: {id}");
+                    std::process::exit(1);
+                };
+                let Some(cmd) = show.task.verify.clone() else {
+                    eprintln!(
+                        "error: {id} has no verify: command \
+                         (set one with `yaks update {id} --verify '<cmd>'`)"
+                    );
+                    std::process::exit(1);
+                };
+                println!("verify {id}: {cmd}");
+                let (ok, verdict) = run_verify_command(&cmd)?;
+                all_ok &= ok;
+                herd.update(
+                    id,
+                    TaskEdit {
+                        note: Some(format!("verify: `{cmd}` -> {verdict}")),
+                        actor: actor.clone(),
+                        ..Default::default()
+                    },
+                )?;
+                println!("{id}: {verdict}");
+            }
+            if !all_ok {
+                std::process::exit(1);
+            }
+        }
         Command::ScanIds { file, json } => {
             let text = read_scan_input(file.as_deref())?;
             // Validate against the herd's real ids, the same membership test the
@@ -576,6 +624,7 @@ fn main() -> Result<()> {
             depends_on,
             source,
             description,
+            verify,
             json,
         } => {
             let title = match title.or(title_flag) {
@@ -594,6 +643,7 @@ fn main() -> Result<()> {
                 depends_on,
                 source,
                 description,
+                verify,
             };
             match herd.create(new)? {
                 CreateOutcome::ParentNotFound(p) => {
@@ -622,6 +672,7 @@ fn main() -> Result<()> {
             add_label,
             remove_label,
             source,
+            verify,
             note,
             as_actor,
         } => {
@@ -636,6 +687,7 @@ fn main() -> Result<()> {
                 add_labels: add_label,
                 remove_labels: remove_label,
                 source,
+                verify,
                 note,
                 actor,
             };
@@ -810,6 +862,7 @@ fn main() -> Result<()> {
                     add_labels: add_label,
                     remove_labels: remove_label,
                     source: None,
+                    verify: None,
                     note: None,
                     actor: None,
                 };
@@ -1012,6 +1065,22 @@ fn update_one(herd: &Herd, id: &str, edit: TaskEdit) -> Result<bool> {
 /// if one is missing (no abort-on-first-error); if any id was not found, the
 /// process exits non-zero after the whole batch is handled. Mirrors
 /// `transition_many`.
+/// Run a yak's `verify:` command via the shell, streaming its output live so the
+/// human/agent sees the real artifact. Returns `(passed, verdict-string)`;
+/// `passed` is true iff the command exited 0.
+fn run_verify_command(cmd: &str) -> std::io::Result<(bool, String)> {
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .status()?;
+    let verdict = match status.code() {
+        Some(0) => "PASS (exit 0)".to_string(),
+        Some(n) => format!("FAIL (exit {n})"),
+        None => "FAIL (terminated by signal)".to_string(),
+    };
+    Ok((status.success(), verdict))
+}
+
 fn update_many(herd: &Herd, ids: &[String], edit: TaskEdit) -> Result<()> {
     let mut any_failed = false;
     for id in ids {
@@ -1446,6 +1515,16 @@ fn fmt_plain_row(t: &Task) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn run_verify_command_reports_pass_and_fail() {
+        let (ok, verdict) = run_verify_command("true").unwrap();
+        assert!(ok);
+        assert_eq!(verdict, "PASS (exit 0)");
+        let (ok, verdict) = run_verify_command("exit 3").unwrap();
+        assert!(!ok);
+        assert_eq!(verdict, "FAIL (exit 3)");
+    }
+
     fn task() -> Task {
         Task {
             id: "yak-0001".into(),
@@ -1460,6 +1539,7 @@ mod tests {
             depends_on: vec![],
             source: None,
             needs: None,
+            verify: None,
             extra: vec![],
             body: String::new(),
         }

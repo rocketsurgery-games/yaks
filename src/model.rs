@@ -71,6 +71,10 @@ pub struct Task {
     /// A soft, external block: while set (e.g. `human`), the yak is not ready in
     /// `next`. Raised by `ask`, cleared by `answer`. Not ownership, not a status.
     pub needs: Option<String>,
+    /// An optional rerunnable verification command (the scriptable form of a
+    /// yak's evidence contract). `yaks verify <id>` runs it and records the
+    /// PASS/FAIL as an attributed note. Never auto-run — invoked explicitly.
+    pub verify: Option<String>,
     /// Verbatim frontmatter lines this binary does not model, captured on parse
     /// and re-emitted on write so a round-trip never drops unknown/newer fields.
     /// Keeps `.yaks/` authoritative across versions. Not rendered.

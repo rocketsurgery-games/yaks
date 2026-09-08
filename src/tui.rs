@@ -1720,6 +1720,7 @@ impl App {
                 depends_on: vec![],
                 source: None,
                 description: f.body_opt(),
+                verify: None,
             },
             other => {
                 self.overlay = other;
@@ -4894,6 +4895,7 @@ mod tests {
             depends_on: vec![],
             source: None,
             needs: None,
+            verify: None,
             extra: Vec::new(),
             body: String::new(),
         }
@@ -6484,6 +6486,7 @@ mod tests {
                     depends_on: vec![],
                     source: None,
                     description: None,
+                    verify: None,
                 })
                 .unwrap();
             app.reload_preserving_selection();

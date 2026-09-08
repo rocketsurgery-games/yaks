@@ -47,6 +47,7 @@ pub struct NewTask {
     pub depends_on: Vec<String>,
     pub source: Option<String>,
     pub description: Option<String>,
+    pub verify: Option<String>,
 }
 
 /// A set of edits to apply to a task in one operation.
@@ -59,6 +60,8 @@ pub struct TaskEdit {
     pub add_labels: Vec<String>,
     pub remove_labels: Vec<String>,
     pub source: Option<String>,
+    /// A rerunnable verification command to set on the yak (see `Task::verify`).
+    pub verify: Option<String>,
     pub note: Option<String>,
     /// Actor to attribute an appended note to (stamped as `[actor]`). Only
     /// meaningful alongside `note`; ownership is never implied.
@@ -780,6 +783,7 @@ impl Herd {
             depends_on: new.depends_on,
             source: new.source,
             needs: None,
+            verify: new.verify,
             extra: Vec::new(),
             body: new.description.unwrap_or_default(),
         };
@@ -825,6 +829,10 @@ impl Herd {
                 task.source = Some(s);
                 changed = true;
             }
+        }
+        if let Some(v) = edit.verify {
+            task.verify = if v.is_empty() { None } else { Some(v) };
+            changed = true;
         }
         if let Some(n) = edit.note {
             let ts = store::now_iso();
@@ -968,6 +976,7 @@ mod tests {
             depends_on: vec![],
             source: None,
             needs: None,
+            verify: None,
             extra: Vec::new(),
             body: String::new(),
         }

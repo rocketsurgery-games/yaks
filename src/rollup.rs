@@ -247,6 +247,7 @@ mod tests {
             depends_on: vec![],
             source: source.map(String::from),
             needs: None,
+            verify: None,
             extra: Vec::new(),
             body: String::new(),
         }

@@ -207,6 +207,7 @@ fn t(id: &str, title: &str, kind: &str, pri: u8, status: Status, parent: Option<
         depends_on: vec![],
         source: None,
         needs: None,
+        verify: None,
         extra: Vec::new(),
         body: String::new(),
     }

@@ -61,6 +61,7 @@ mod tests {
             depends_on: vec![],
             source: None,
             needs: None,
+            verify: None,
             extra: Vec::new(),
             body: String::new(),
         }

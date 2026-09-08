@@ -67,6 +67,7 @@ fn parse_task(text: &str, status: Status) -> Option<Task> {
     let mut parent = None;
     let mut source = None;
     let mut needs = None;
+    let mut verify = None;
     let mut labels: Vec<String> = Vec::new();
     let mut depends_on: Vec<String> = Vec::new();
     // Frontmatter keys this binary does not model, kept verbatim to re-emit.
@@ -111,6 +112,7 @@ fn parse_task(text: &str, status: Status) -> Option<Task> {
             "parent" => parent = non_empty(unquote(value)),
             "source" => source = non_empty(unquote(value)),
             "needs" => needs = non_empty(unquote(value)),
+            "verify" => verify = non_empty(unquote(value)),
             "labels" => match parse_inline_list(value) {
                 Some(list) => labels = list,
                 None => pending = Some("labels"),
@@ -146,6 +148,7 @@ fn parse_task(text: &str, status: Status) -> Option<Task> {
         depends_on,
         source,
         needs,
+        verify,
         extra,
         body: body.trim().to_string(),
     })
@@ -258,6 +261,9 @@ pub mod write {
         }
         if let Some(n) = &t.needs {
             out.push_str(&format!("needs: {}\n", scalar(n)));
+        }
+        if let Some(v) = &t.verify {
+            out.push_str(&format!("verify: {}\n", scalar(v)));
         }
         // Re-emit unmodeled frontmatter verbatim, after the known fields.
         for line in &t.extra {
@@ -932,6 +938,7 @@ mod tests {
             depends_on: vec!["yaksrs-aaaa".into(), "yaksrs-bbbb".into()],
             source: None,
             needs: None,
+            verify: None,
             extra: Vec::new(),
             body: "First line.\n\n---\n\u{25b8} 2026-08-19T02:00:00Z\nA note with an apostrophe: don't panic.".into(),
         }
@@ -942,6 +949,17 @@ mod tests {
         let t = sample();
         let text = write::render(&t);
         let parsed = parse_task(&text, Status::Shaving).expect("should parse");
+        assert_eq!(parsed, t);
+    }
+
+    #[test]
+    fn verify_field_round_trips() {
+        let mut t = sample();
+        // A ': ' and apostrophes force YAML quoting; the round-trip must be exact.
+        t.verify = Some("cargo test -- --ignored && echo 'ok: done'".into());
+        let text = write::render(&t);
+        let parsed = parse_task(&text, Status::Shaving).expect("should parse");
+        assert_eq!(parsed.verify, t.verify);
         assert_eq!(parsed, t);
     }
 
@@ -1049,6 +1067,7 @@ mod move_tests {
             depends_on: vec![],
             source: None,
             needs: None,
+            verify: None,
             extra: Vec::new(),
             body: String::new(),
         }
@@ -1147,6 +1166,7 @@ mod graph_tests {
             depends_on: vec![],
             source: None,
             needs: None,
+            verify: None,
             extra: Vec::new(),
             body: String::new(),
         };
