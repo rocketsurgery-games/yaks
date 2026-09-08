@@ -51,10 +51,21 @@ ask.
   screenshot path, or a commit SHA. Evidence is general: the outcome achieved and
   seen, appropriate to the yak's kind (a research/decision yak's evidence is its
   finding/rationale; dead yaks are exempt).
+- **Scriptable evidence is a `verify:` command.** When the check is a command (a
+  test, a build, an artifact producer), store it on the yak (`--verify`) and run
+  `yaks verify <id>`: it records the PASS/FAIL as a note and, because it's stored,
+  anyone (coordinator, CI, a later agent) can re-run it. `doctor --strict` then
+  enforces that a shorn yak's `verify:` last passed.
 - **No lever? Ask, don't shear on faith.** If the project has no way to verify
   this kind of change (a TUI you can't snapshot, UI you can't drive, state you
   can't reproduce), `yaks ask <id>` the human whether to go build one rather than
   shearing on trust.
+- **Don't self-shear what you can't judge.** Who judges is part of the contract.
+  A script judges when your `verify:` passes — self-shear. A subjective call (look
+  & feel) is the human's: produce the artifact and `yaks ask`. Something an agent
+  can eyeball but you shouldn't grade your own homework on: hand the artifact to
+  the coordinator. Only self-shear when the judge is a passing script or the call
+  is genuinely yours.
 - Write a short shorn summary (what was done, what was learned, any yaks spawned,
   the evidence), then `yaks shorn <id>`.
 - **Team mode:** stage the shorn yak move together with the code that completed

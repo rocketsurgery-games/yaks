@@ -122,6 +122,15 @@ The coordinator runs a batch in four beats:
    set now reflects exactly what's in flight (it otherwise wouldn't — a worker's
    own shave lives on its branch, invisible until merge), and each yak becomes
    self-describing for its worker.
+
+   **State the evidence contract and its judge in that note.** What counts as
+   done, and who decides — a `verify:` command for anything scriptable (which
+   `doctor --strict` then enforces at shear, and you can re-run at merge); a
+   required `yaks ask` for a subjective call only a human should make; otherwise
+   you judge it yourself at the merge-review gate. There is no `judge:` field —
+   the judge is derived from these signals, so an unsure coordinator just
+   escalates with `ask`. If you can't articulate acceptable evidence, that's the
+   tell the lever is missing — `ask` about building one before fanning out.
 2. **Fan out.** Cut a worktree per lane from that commit and spawn one worker
    each. Workers **skip the shave step** (their yak is already `shaving`); they
    just do the work and move `shaving → shorn` with an evidence note — ideally in

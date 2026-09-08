@@ -68,7 +68,7 @@ Run `yaks <command> --help` for full flags. Most read commands accept the shared
 |---|---|
 | `init` | Create a `.yaks/` herd in the current directory. |
 | `skills install` | Install the bundled agent skills (`yaks`, `yaks-tracker`) into a skills dir (default `~/.agents/skills`). |
-| `doctor` | Read-only integrity check: duplicate-status ids, dangling parent/deps. Exits non-zero on any issue (CI-usable). `--strict` also flags shorn yaks with no recorded note (evidence-before-shear). |
+| `doctor` | Read-only integrity check: duplicate-status ids, dangling parent/deps. Exits non-zero on any issue (CI-usable). `--strict` also flags shorn yaks with no recorded note, and shorn yaks whose `verify:` command did not last PASS (evidence-before-shear). |
 | `tui` | Open the interactive terminal UI (see [tui.md](tui.md)). |
 
 ## Attribution

@@ -210,6 +210,10 @@ pub enum IssueKind {
     /// evidence. Only reported in strict mode (the yaks-working
     /// evidence-before-shear rule).
     MissingEvidence,
+    /// A shorn yak that carries a `verify:` command whose most recent recorded
+    /// run was not a PASS (or was never run). Setting `verify:` is a commitment
+    /// that strict mode then enforces at shear. Only reported in strict mode.
+    UnverifiedShear,
 }
 
 impl IssueKind {
@@ -221,6 +225,7 @@ impl IssueKind {
             IssueKind::DanglingParent => "dangling-parent",
             IssueKind::DanglingDependsOn => "dangling-depends-on",
             IssueKind::MissingEvidence => "missing-evidence",
+            IssueKind::UnverifiedShear => "unverified-shear",
         }
     }
 
@@ -232,6 +237,9 @@ impl IssueKind {
             IssueKind::DanglingParent => "Dangling parent",
             IssueKind::DanglingDependsOn => "Dangling depends_on",
             IssueKind::MissingEvidence => "Missing evidence (shorn yak with no recorded note)",
+            IssueKind::UnverifiedShear => {
+                "Unverified shear (shorn yak whose verify: command did not last PASS)"
+            }
         }
     }
 }
@@ -581,6 +589,22 @@ impl Herd {
                         ids: vec![t.id.clone()],
                     });
                 }
+                // A `verify:` command is a commitment: a shorn yak that carries
+                // one must show a recorded PASS as its most recent verify run.
+                // (Catches shearing over a failing or never-run verify; it does
+                // not catch verify-then-edit-then-shear — that needs a re-run,
+                // which is deliberately explicit.)
+                if t.status == Status::Shorn && t.verify.is_some() && !last_verify_passed(&t.body) {
+                    issues.push(Issue {
+                        kind: IssueKind::UnverifiedShear,
+                        message: format!(
+                            "{} is shorn with a verify: command but its last verify run was \
+                             not a PASS (run `yaks verify {}`)",
+                            t.id, t.id
+                        ),
+                        ids: vec![t.id.clone()],
+                    });
+                }
             }
         }
 
@@ -920,6 +944,17 @@ fn rank(s: Status) -> u8 {
     }
 }
 
+/// True iff the most recent `yaks verify` run recorded in `body` was a PASS.
+/// Verify-run notes are the ones `yaks verify` writes: `verify: <cmd> -> PASS…`
+/// / `-> FAIL…`. A yak with no such note (verify: set but never run) is false.
+fn last_verify_passed(body: &str) -> bool {
+    store::parse_notes(body)
+        .iter()
+        .rev()
+        .find(|n| n.text.starts_with("verify: ") && n.text.contains(" -> "))
+        .is_some_and(|n| n.text.contains(" -> PASS"))
+}
+
 fn issue_rank(k: IssueKind) -> u8 {
     match k {
         IssueKind::DuplicateStatus => 0,
@@ -927,6 +962,7 @@ fn issue_rank(k: IssueKind) -> u8 {
         IssueKind::DanglingParent => 2,
         IssueKind::DanglingDependsOn => 3,
         IssueKind::MissingEvidence => 4,
+        IssueKind::UnverifiedShear => 5,
     }
 }
 
@@ -1295,5 +1331,68 @@ mod tests {
         );
         assert_eq!(issues[0].kind, IssueKind::MissingEvidence);
         assert_eq!(issues[0].ids, vec!["yak-0002"]);
+    }
+
+    /// Strict mode: a shorn yak that carries a `verify:` command must show a
+    /// PASS as its most recent recorded verify run. A failing, never-run, or
+    /// stale-then-failing verify is flagged; a passing (or fail-then-pass) one
+    /// is clean; a yak with no `verify:` command is not subject to the check.
+    #[test]
+    fn doctor_strict_flags_shorn_yak_whose_verify_did_not_pass() {
+        let (root, herd) = temp_herd();
+        let note = |ts: &str, text: &str| store::append_note("", ts, Some("t"), text);
+
+        // verify: + last run PASS -> clean.
+        let mut ok = task("yak-0001", Status::Shorn);
+        ok.verify = Some("true".into());
+        ok.body = note("2026-01-02T00:00:00Z", "verify: `true` -> PASS (exit 0)");
+        store::write::save(&root, &ok).unwrap();
+
+        // verify: + last run FAIL -> flagged.
+        let mut bad = task("yak-0002", Status::Shorn);
+        bad.verify = Some("false".into());
+        bad.body = note("2026-01-02T00:00:00Z", "verify: `false` -> FAIL (exit 1)");
+        store::write::save(&root, &bad).unwrap();
+
+        // verify: set but never run (has a note, so MissingEvidence is quiet) -> flagged.
+        let mut never = task("yak-0003", Status::Shorn);
+        never.verify = Some("true".into());
+        never.body = note("2026-01-02T00:00:00Z", "did the work");
+        store::write::save(&root, &never).unwrap();
+
+        // No verify: command -> not subject to this check.
+        let mut plain = task("yak-0004", Status::Shorn);
+        plain.body = note("2026-01-02T00:00:00Z", "did it");
+        store::write::save(&root, &plain).unwrap();
+
+        // Multiple runs: FAIL then PASS -> the most recent wins -> clean.
+        let mut recovered = task("yak-0005", Status::Shorn);
+        recovered.verify = Some("flaky".into());
+        let b = note("2026-01-02T00:00:00Z", "verify: `flaky` -> FAIL (exit 1)");
+        recovered.body = store::append_note(
+            &b,
+            "2026-01-03T00:00:00Z",
+            Some("t"),
+            "verify: `flaky` -> PASS (exit 0)",
+        );
+        store::write::save(&root, &recovered).unwrap();
+
+        // Plain doctor ignores verification entirely.
+        assert!(
+            herd.doctor(false)
+                .unwrap()
+                .iter()
+                .all(|i| i.kind != IssueKind::UnverifiedShear)
+        );
+
+        let mut flagged: Vec<String> = herd
+            .doctor(true)
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.kind == IssueKind::UnverifiedShear)
+            .flat_map(|i| i.ids)
+            .collect();
+        flagged.sort();
+        assert_eq!(flagged, vec!["yak-0002", "yak-0003"]);
     }
 }

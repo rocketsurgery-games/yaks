@@ -388,8 +388,8 @@ enum Command {
         /// Emit the issues as JSON.
         #[arg(long)]
         json: bool,
-        /// Also flag shorn yaks with no recorded note (a shear without
-        /// evidence — the yaks-working evidence-before-shear rule). Dead
+        /// Also flag shorn yaks with no recorded note, and shorn yaks whose
+        /// `verify:` command did not last PASS (evidence-before-shear). Dead
         /// (abandoned) yaks are exempt.
         #[arg(long)]
         strict: bool,
