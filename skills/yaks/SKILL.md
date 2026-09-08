@@ -130,7 +130,7 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks refs` | List what a task points at (parent, deps, id mentions), flagging danglers |
 | `yaks commits` | Show the git commits linked to a yak — those naming its id and those that touched its file across status moves |
 | `yaks update` | Update fields, labels (`--add-label`/`--remove-label`), or append a `--note`. Accepts multiple ids (same edit to each); `--as <actor>` attributes a note; `--verify '<cmd>'` sets/clears the yak's verification command |
-| `yaks verify` | Run a yak's recorded `verify:` command and record the PASS/FAIL as an attributed note (exits non-zero on failure). Explicit — never auto-run. Gives a yak a rerunnable proof-of-correctness |
+| `yaks verify` | Run a yak's verification command (its own `verify:` field, else the config `verify:` default resolved by label) and record the PASS/FAIL as an attributed note (exits non-zero on failure). Explicit — never auto-run. Gives a yak a rerunnable proof-of-correctness |
 | `yaks ask` | Block a yak on a human decision (sets `needs`, drops it from `next`); records the question as an attributed `--note` |
 | `yaks answer` | Clear a yak's `needs` block and record the reply; returns it to `next` |
 | `yaks inbox` | List yaks awaiting a human (the `needs` inbox) — `list --needs` across all statuses |
@@ -184,7 +184,7 @@ Child tasks use `--parent <id>` on create. Every ID is flat (`{prefix}-{4hex}`) 
 
 > Older herds may still contain dotted IDs (e.g. `yak-a1b2.1`) created before this change. Those dots are now just opaque characters — the `parent:` field is authoritative — so don't parse IDs to infer hierarchy.
 
-The prefix, default type, and default priority come from `.yaks/config.yaml` (falling back to `yak` / `task` / `3`).
+The prefix, default type, and default priority come from `.yaks/config.yaml` (falling back to `yak` / `task` / `3`). A nested `verify:` map there (label → command, plus an optional `default`) supplies the default verification command for a yak that has no explicit `verify:` field, resolved by the yak's labels — so the project's levers are named once (e.g. `ui: cargo test docshots`).
 
 ### External source linking
 

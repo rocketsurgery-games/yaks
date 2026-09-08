@@ -1,1 +1,9 @@
 prefix: yaks
+# Default verification commands, resolved by a yak's labels when it has no
+# explicit `verify:` field (see `yaks verify`). First matching label wins;
+# `default` is the fallback. The project's levers, named once.
+verify:
+  ui: cargo test -p yaks docshots -- --ignored
+  cli: cargo test -p yaks
+  skills: cargo test -p yaks skills
+  default: cargo test --workspace

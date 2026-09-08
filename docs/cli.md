@@ -42,7 +42,16 @@ Run `yaks <command> --help` for full flags. Most read commands accept the shared
 
 | Command | What it does |
 |---|---|
-| `verify <ids…>` | Run each yak's recorded `verify:` command (set via `create`/`update --verify`) with live output, and record `verify: <cmd> -> PASS/FAIL (exit N)` as an attributed note. Exits non-zero if any fails. Explicit only — never auto-run. The scriptable form of a yak's evidence contract: the yak carries a check anyone (or CI) can re-run. |
+| `verify <ids…>` | Run each yak's verification command with live output, and record `verify: <cmd> -> PASS/FAIL (exit N)` as an attributed note. Exits non-zero if any fails. Explicit only — never auto-run. The command is the yak's own `verify:` field if set, else the config default resolved by the yak's labels (see below). The scriptable form of a yak's evidence contract: a check anyone (or CI) can re-run. |
+
+Default verify commands live in `.yaks/config.yaml` under a nested `verify:` map (label → command, plus an optional `default`); a yak with no explicit `verify:` field resolves its command from the first of its labels with an entry, else `default`. Name the project's levers once:
+
+```yaml
+verify:
+  ui: cargo test -p yaks docshots -- --ignored
+  cli: cargo test -p yaks
+  default: cargo test --workspace
+```
 
 ## State transitions (all accept multiple ids)
 

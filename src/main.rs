@@ -533,20 +533,30 @@ fn main() -> Result<()> {
         },
         Command::Verify { ids, as_actor } => {
             let actor = actor::resolve(as_actor.as_deref());
+            let cfg = herd.config();
             let mut all_ok = true;
             for id in &ids {
                 let Some(show) = herd.show(id)? else {
                     eprintln!("no such task: {id}");
                     std::process::exit(1);
                 };
-                let Some(cmd) = show.task.verify.clone() else {
-                    eprintln!(
-                        "error: {id} has no verify: command \
-                         (set one with `yaks update {id} --verify '<cmd>'`)"
-                    );
-                    std::process::exit(1);
+                // Explicit per-yak verify: wins; otherwise fall back to the
+                // config `verify:` default resolved by the yak's labels.
+                let (cmd, source) = match show.task.verify.clone() {
+                    Some(c) => (c, "yak".to_string()),
+                    None => match cfg.resolve_verify(&show.task.labels) {
+                        Some(c) => (c, "config".to_string()),
+                        None => {
+                            eprintln!(
+                                "error: {id} has no verify: command and no config default \
+                                 for its labels (set one with `yaks update {id} --verify \
+                                 '<cmd>'`, or add a config `verify:` entry)"
+                            );
+                            std::process::exit(1);
+                        }
+                    },
                 };
-                println!("verify {id}: {cmd}");
+                println!("verify {id} ({source}): {cmd}");
                 let (ok, verdict) = run_verify_command(&cmd)?;
                 all_ok &= ok;
                 herd.update(

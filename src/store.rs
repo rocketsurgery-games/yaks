@@ -380,6 +380,23 @@ pub struct Config {
     pub default_priority: u8,
     /// When true, embedded editors use vim keybindings; otherwise emacs.
     pub vim_mode: bool,
+    /// Optional default verification commands, keyed by label (plus a `default`
+    /// key). A yak with no explicit `verify:` field resolves its command here by
+    /// label. The project's levers, named once (see `resolve_verify`).
+    pub verify: std::collections::HashMap<String, String>,
+}
+
+impl Config {
+    /// Resolve a default verify command for a yak's labels: the first of
+    /// `labels` that has a config entry (label order), else the `default` entry,
+    /// else none. The yak's own explicit `verify:` field always wins over this.
+    pub fn resolve_verify(&self, labels: &[String]) -> Option<String> {
+        labels
+            .iter()
+            .find_map(|l| self.verify.get(l))
+            .or_else(|| self.verify.get("default"))
+            .cloned()
+    }
 }
 
 /// Read `.yaks/config.yaml`; missing file/keys fall back to the built-in
@@ -390,12 +407,27 @@ pub fn read_config(root: &Path) -> Config {
         default_type: "task".to_string(),
         default_priority: 3,
         vim_mode: true,
+        verify: std::collections::HashMap::new(),
     };
     if let Ok(text) = fs::read_to_string(root.join("config.yaml")) {
+        // Track the nested `verify:` block: after a `verify:` line (empty value),
+        // indented `  label: cmd` lines are its entries until a non-indented line
+        // (mirrors the block-list handling in `parse_task`).
+        let mut in_verify = false;
         for line in text.lines() {
+            let indented = line.starts_with(' ') || line.starts_with('\t');
             let Some((k, v)) = line.split_once(':') else {
+                in_verify = false;
                 continue;
             };
+            if in_verify && indented {
+                let cmd = unquote(v.trim());
+                if !cmd.is_empty() {
+                    c.verify.insert(k.trim().to_string(), cmd);
+                }
+                continue;
+            }
+            in_verify = false;
             let v = unquote(v.trim());
             match k.trim() {
                 "prefix" if !v.is_empty() => c.prefix = v,
@@ -406,6 +438,8 @@ pub fn read_config(root: &Path) -> Config {
                     }
                 }
                 "vim_mode" => c.vim_mode = matches!(v.as_str(), "true" | "True" | "yes" | "1"),
+                // A `verify:` line with no inline value opens the nested block.
+                "verify" if v.is_empty() => in_verify = true,
                 _ => {}
             }
         }
@@ -1071,6 +1105,62 @@ mod move_tests {
             extra: Vec::new(),
             body: String::new(),
         }
+    }
+
+    #[test]
+    fn config_parses_verify_map_and_block_closes() {
+        let root = temp_root();
+        // A key AFTER the nested verify block (vim_mode) must still parse — i.e.
+        // the non-indented line closes the block.
+        fs::write(
+            root.join("config.yaml"),
+            "prefix: yaks\nverify:\n  ui: cargo test docshots\n  cli: cargo test -p yaks\n  default: cargo test --workspace\nvim_mode: false\n",
+        )
+        .unwrap();
+        let c = read_config(&root);
+        assert_eq!(c.prefix, "yaks");
+        assert!(!c.vim_mode, "vim_mode after the verify block still parsed");
+        assert_eq!(
+            c.verify.get("ui").map(String::as_str),
+            Some("cargo test docshots")
+        );
+        assert_eq!(
+            c.verify.get("cli").map(String::as_str),
+            Some("cargo test -p yaks")
+        );
+        assert_eq!(
+            c.verify.get("default").map(String::as_str),
+            Some("cargo test --workspace")
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn config_resolve_verify_precedence() {
+        let root = temp_root();
+        fs::write(
+            root.join("config.yaml"),
+            "verify:\n  ui: UI\n  cli: CLI\n  default: DEF\n",
+        )
+        .unwrap();
+        let c = read_config(&root);
+        // First of the yak's labels with an entry wins (label order, not config order).
+        assert_eq!(
+            c.resolve_verify(&["cli".into(), "ui".into()]).as_deref(),
+            Some("CLI")
+        );
+        // No matching label -> the `default` entry.
+        assert_eq!(c.resolve_verify(&["docs".into()]).as_deref(), Some("DEF"));
+        assert_eq!(c.resolve_verify(&[]).as_deref(), Some("DEF"));
+        let _ = fs::remove_dir_all(&root);
+
+        // With no `default`, an unmatched label resolves to nothing.
+        let root2 = temp_root();
+        fs::write(root2.join("config.yaml"), "verify:\n  ui: UI\n").unwrap();
+        let c2 = read_config(&root2);
+        assert_eq!(c2.resolve_verify(&["docs".into()]), None);
+        assert_eq!(c2.resolve_verify(&["ui".into()]).as_deref(), Some("UI"));
+        let _ = fs::remove_dir_all(&root2);
     }
 
     #[test]

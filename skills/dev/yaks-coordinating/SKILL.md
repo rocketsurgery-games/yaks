@@ -127,7 +127,10 @@ The coordinator runs a batch in four beats:
    done, and who decides — a `verify:` command for anything scriptable (which
    `doctor --strict` then enforces at shear, and you can re-run at merge); a
    required `yaks ask` for a subjective call only a human should make; otherwise
-   you judge it yourself at the merge-review gate. There is no `judge:` field —
+   you judge it yourself at the merge-review gate. Name the project's levers once
+   in `.yaks/config.yaml`'s `verify:` map (label → command) so `yaks verify`
+   resolves the right command by label — no need to retype it per yak (set an
+   explicit `verify:` on the yak when you want `doctor --strict` to enforce it). There is no `judge:` field —
    the judge is derived from these signals, so an unsure coordinator just
    escalates with `ask`. If you can't articulate acceptable evidence, that's the
    tell the lever is missing — `ask` about building one before fanning out.
