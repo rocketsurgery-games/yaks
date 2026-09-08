@@ -124,12 +124,13 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | Command | What it does |
 |---------|-------------|
 | `yaks init` | Scaffold a new `.yaks/` herd in the current directory. `--prefix`, `--type`, `--priority`, `--emacs`. Works without an existing herd |
-| `yaks create` | Create a new task (in hairy). Title is positional (`yaks create "Fix the login crash"`; `--title` still works for back-compat); `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description`, `--json` (print the new id + path) |
+| `yaks create` | Create a new task (in hairy). Title is positional (`yaks create "Fix the login crash"`; `--title` still works for back-compat); `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description`, `--verify`, `--json` (print the new id + path) |
 | `yaks list` | List tasks with optional filters (`--all` also includes dead) |
 | `yaks show` | Show full details of a task |
 | `yaks refs` | List what a task points at (parent, deps, id mentions), flagging danglers |
 | `yaks commits` | Show the git commits linked to a yak — those naming its id and those that touched its file across status moves |
-| `yaks update` | Update fields, labels (`--add-label`/`--remove-label`), or append a `--note`. Accepts multiple ids (same edit to each); `--as <actor>` attributes a note |
+| `yaks update` | Update fields, labels (`--add-label`/`--remove-label`), or append a `--note`. Accepts multiple ids (same edit to each); `--as <actor>` attributes a note; `--verify '<cmd>'` sets/clears the yak's verification command |
+| `yaks verify` | Run a yak's recorded `verify:` command and record the PASS/FAIL as an attributed note (exits non-zero on failure). Explicit — never auto-run. Gives a yak a rerunnable proof-of-correctness |
 | `yaks ask` | Block a yak on a human decision (sets `needs`, drops it from `next`); records the question as an attributed `--note` |
 | `yaks answer` | Clear a yak's `needs` block and record the reply; returns it to `next` |
 | `yaks inbox` | List yaks awaiting a human (the `needs` inbox) — `list --needs` across all statuses |

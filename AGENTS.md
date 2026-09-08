@@ -48,6 +48,15 @@ LOOKING at the rendered frame (and via `cargo test -p yaks docshots --
 snapshots in `src/tui.rs`). If a change has no lever to see its effect,
 `yaks ask` rather than declare it done on faith.
 
+## Keeping docs current
+
+A user-facing change is not done until its docs are. When you add or change a CLI
+command or flag, a TUI key or behavior, or a workflow, update `docs/` **and** the
+bundled skills (`skills/yaks`, `skills/yaks-tracker`) in the **same** change —
+never a follow-up. The bundled skills are embedded in the binary
+(`src/skills.rs`), so `cargo test -p yaks skills` guards them; `docs/` has no such
+gate, so treat docs↔reality parity as part of the change's evidence.
+
 ## Releasing
 
 `.github/workflows/release.yml` builds the 5-platform binaries and publishes the

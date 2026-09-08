@@ -30,13 +30,19 @@ Run `yaks <command> --help` for full flags. Most read commands accept the shared
 
 | Command | What it does |
 |---|---|
-| `create '<title>'` | New hairy yak. Title is positional or `--title`; `--type`/`--priority`/`--parent`/`--labels`/`--depends-on`/`--source`/`--description`; `--json` prints id + file path. |
-| `update <ids…>` | Update fields/labels or append a `--note`; the same edit applies to every id. `--as <actor>` attributes the note. |
+| `create '<title>'` | New hairy yak. Title is positional or `--title`; `--type`/`--priority`/`--parent`/`--labels`/`--depends-on`/`--source`/`--description`/`--verify`; `--json` prints id + file path. |
+| `update <ids…>` | Update fields/labels or append a `--note`; the same edit applies to every id. `--as <actor>` attributes the note. `--verify '<cmd>'` sets (or, empty, clears) the yak's verification command. |
 | `dep add\|remove <id> <dep>` | Add / remove a dependency. |
 | `reparent <ids…> --parent <id>` | Move yaks under a new parent (or `--unparent` to top-level). |
 | `rename <old> <new>` | Rename a yak's id, updating every reference across the herd. |
 | `rename-prefix <old> <new>` | Migrate every id from one prefix to another (e.g. `yaksrs` → `yaks`). |
 | `bulk <filter> <mutation>` | Filter-driven field edit. **Dry-run by default** — prints the matched set + the mutation and changes nothing without `--commit`. Requires ≥1 filter flag (never the whole herd) and ≥1 mutation flag (`--add-label`/`--remove-label`/`--set-priority`/`--set-type`/`--reparent`/`--unparent`). Field edits + reparent only — no state transitions. |
+
+## Verification
+
+| Command | What it does |
+|---|---|
+| `verify <ids…>` | Run each yak's recorded `verify:` command (set via `create`/`update --verify`) with live output, and record `verify: <cmd> -> PASS/FAIL (exit N)` as an attributed note. Exits non-zero if any fails. Explicit only — never auto-run. The scriptable form of a yak's evidence contract: the yak carries a check anyone (or CI) can re-run. |
 
 ## State transitions (all accept multiple ids)
 
