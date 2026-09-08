@@ -48,7 +48,8 @@ ask.
   green proxy. Verify against the *real artifact* via the project's verification
   lever — drive the TUI/browser, reproduce the state, read the actual value — and
   record it in a note: a command and its output, a test name, a file path, a
-  screenshot path, or a commit SHA. Evidence is general: the outcome achieved and
+  commit SHA — or `yaks attach` the artifact itself (a screenshot, a TUI frame)
+  when the evidence is something to look at. Evidence is general: the outcome achieved and
   seen, appropriate to the yak's kind (a research/decision yak's evidence is its
   finding/rationale; dead yaks are exempt).
 - **Scriptable evidence is a `verify:` command.** When the check is a command (a
@@ -62,9 +63,9 @@ ask.
   shearing on trust.
 - **Don't self-shear what you can't judge.** Who judges is part of the contract.
   A script judges when your `verify:` passes — self-shear. A subjective call (look
-  & feel) is the human's: produce the artifact and `yaks ask`. Something an agent
-  can eyeball but you shouldn't grade your own homework on: hand the artifact to
-  the coordinator. Only self-shear when the judge is a passing script or the call
+  & feel) is the human's: `yaks attach` the artifact and `yaks ask`. Something an
+  agent can eyeball but you shouldn't grade your own homework on: attach it and
+  hand to the coordinator. Only self-shear when the judge is a passing script or the call
   is genuinely yours.
 - Write a short shorn summary (what was done, what was learned, any yaks spawned,
   the evidence), then `yaks shorn <id>`.

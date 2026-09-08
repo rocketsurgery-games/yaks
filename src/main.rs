@@ -22,11 +22,12 @@ use std::env;
 
 use filter::FilterSpec;
 use herd::{
-    Commits, CreateOutcome, DepOutcome, Herd, Issue, IssueKind, LogEntry, MoveOutcome, NewTask,
-    OpenError, RefKind, RenameOutcome, RenamePlan, Reparent, Show, Stats, TaskEdit, TaskRefs,
-    UpdateOutcome,
+    AttachOutcome, Commits, CreateOutcome, DepOutcome, Herd, Issue, IssueKind, LogEntry,
+    MoveOutcome, NewTask, OpenError, RefKind, RenameOutcome, RenamePlan, Reparent, Show, Stats,
+    TaskEdit, TaskRefs, UpdateOutcome,
 };
 use model::{Status, Task};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
@@ -121,6 +122,19 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         ids: Vec<String>,
         /// Attribute the result note to this actor (stamped as `[actor]`).
+        #[arg(long = "as")]
+        as_actor: Option<String>,
+    },
+    /// Attach a local file to a yak as evidence: copy it under
+    /// `.yaks/artifacts/<id>/` and link it in the body. Use for artifact
+    /// evidence a human or coordinator can look at (screenshots, TUI frames).
+    Attach {
+        id: String,
+        /// Path to the local file to attach.
+        path: PathBuf,
+        /// An optional attributed note to record alongside the attachment.
+        #[arg(long)]
+        note: Option<String>,
         #[arg(long = "as")]
         as_actor: Option<String>,
     },
@@ -571,6 +585,44 @@ fn main() -> Result<()> {
             }
             if !all_ok {
                 std::process::exit(1);
+            }
+        }
+        Command::Attach {
+            id,
+            path,
+            note,
+            as_actor,
+        } => {
+            let data = match std::fs::read(&path) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("error reading {}: {e}", path.display());
+                    std::process::exit(1);
+                }
+            };
+            let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+                eprintln!("error: attachment path has no filename: {}", path.display());
+                std::process::exit(1);
+            };
+            match herd.attach(&id, name, &data)? {
+                AttachOutcome::NotFound => {
+                    eprintln!("no such task: {id}");
+                    std::process::exit(1);
+                }
+                AttachOutcome::Attached(n) => {
+                    println!("attached {n} to {id} (.yaks/artifacts/{id}/{n})");
+                    if let Some(text) = note {
+                        let actor = actor::resolve(as_actor.as_deref());
+                        herd.update(
+                            &id,
+                            TaskEdit {
+                                note: Some(text),
+                                actor,
+                                ..Default::default()
+                            },
+                        )?;
+                    }
+                }
             }
         }
         Command::ScanIds { file, json } => {
