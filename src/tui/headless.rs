@@ -1,8 +1,8 @@
 //! Adapter: implement [`toque::HeadlessApp`] for the yaks [`App`], so the TUI
 //! can be driven headlessly (agent exploration + snapshot tests). All the
-//! generic machinery — the stdin protocol, the style encoders, the stable-id
-//! registry — lives in the `toque` crate; this file only wires the yaks types
-//! into that seam.
+//! generic machinery — the stdin protocol and the plain-text snapshot encoder —
+//! lives in the `toque` crate; this file only wires the yaks types into that
+//! seam.
 //!
 //! This adapter lives in a child module of `tui`, so it can reach `App`'s
 //! private fields (`page`, `detail_page`, `quit`) and private methods without
@@ -45,7 +45,7 @@ impl HeadlessApp for App {
 mod tests {
     use super::*;
     use crate::model::{Status, Task};
-    use toque::{DriverOpts, Session, StyleEncoding};
+    use toque::{DriverOpts, Session};
 
     fn sample_task(id: &str, title: &str) -> Task {
         Task {
@@ -67,7 +67,7 @@ mod tests {
         }
     }
 
-    fn drive(script: &[&str], style: Option<StyleEncoding>) -> String {
+    fn drive(script: &[&str]) -> String {
         let app = App::new(vec![
             sample_task("a0", "Root A"),
             sample_task("a1", "Child A1"),
@@ -77,7 +77,6 @@ mod tests {
             DriverOpts {
                 width: 60,
                 height: 10,
-                style,
                 diff: false,
             },
         );
@@ -91,35 +90,13 @@ mod tests {
 
     #[test]
     fn snapshot_has_header_and_grid() {
-        let out = drive(&["key j"], None);
+        let out = drive(&["key j"]);
         // Two frames (initial + after j); each framed with a state header.
         assert_eq!(out.matches("=== frame ").count(), 2);
         assert!(out.contains("focus=list"));
         assert!(out.contains("cursor=0")); // initial frame
         assert!(out.contains("cursor=1")); // after moving down
         assert!(out.contains("Root A"));
-    }
-
-    #[test]
-    fn style_layer_emitted_and_aligned() {
-        let out = drive(&[], Some(StyleEncoding::Parallel));
-        assert!(out.contains("--- styles ---"));
-        assert!(out.contains("legend:"));
-        assert!(out.contains("default"));
-    }
-
-    #[test]
-    fn spans_encoding_has_legend_and_no_style_grid() {
-        let out = drive(&[], Some(StyleEncoding::Spans));
-        assert!(out.contains("legend:"));
-        assert!(!out.contains("--- styles ---"));
-    }
-
-    #[test]
-    fn interleaved_encoding_has_legend_and_no_style_grid() {
-        let out = drive(&[], Some(StyleEncoding::Interleaved));
-        assert!(out.contains("legend:"));
-        assert!(!out.contains("--- styles ---"));
     }
 
     #[test]
@@ -132,7 +109,6 @@ mod tests {
             DriverOpts {
                 width: 60,
                 height: 10,
-                style: None,
                 diff: false,
             },
         );
@@ -151,7 +127,6 @@ mod tests {
             DriverOpts {
                 width: 50,
                 height: 8,
-                style: None,
                 diff: true,
             },
         );

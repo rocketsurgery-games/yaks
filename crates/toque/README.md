@@ -7,9 +7,9 @@ tiny line protocol and get back a deterministic, plain-text snapshot after each 
 It does two things, both from a hidden position:
 
 - **Drive** — feed keystrokes (`key j`, `key C-c`, `type hello`, `resize 80 24`).
-- **Observe** — emit a text snapshot: a state header (internal facts you choose to expose), the
-  character grid (layout), and, optionally, per-cell **style** encoded so a language model can
-  actually use it (selection, focus, links, borders, dimming).
+- **Observe** — emit a text snapshot: a state header (internal facts you choose to expose) and the
+  character grid (layout). The text snapshot is the cheap, greppable, diffable channel and carries
+  no colour; when you need to *see* a frame, render the same buffer to **SVG**.
 
 Because a frame is a pure function of the app plus the terminal size, the output is deterministic —
 good for **agent-driven exploration** of a TUI *and* for `insta`-style **snapshot tests** of any
@@ -20,7 +20,7 @@ ratatui UI.
 Implement `HeadlessApp`, then drive it:
 
 ```rust
-use toque::{HeadlessApp, DriverOpts, StyleEncoding, run};
+use toque::{HeadlessApp, DriverOpts, run};
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyEvent;
 
@@ -32,11 +32,7 @@ impl HeadlessApp for MyApp {
     // optional: on_resize, state_header, should_quit
 }
 
-run(MyApp { /* … */ }, DriverOpts {
-    width: 80, height: 24,
-    style: Some(StyleEncoding::Spans),
-    diff: false,
-}).unwrap();
+run(MyApp { /* … */ }, DriverOpts { width: 80, height: 24, diff: false }).unwrap();
 ```
 
 `run` reads the protocol from stdin and writes frames to stdout. For tests, drive a `Session`
@@ -61,62 +57,34 @@ A frame looks like:
 
 ```text
 === frame 3 · 80x24 · focus=list cursor=1 … ===
-<body: char grid, then style information if requested>
+<body: the character grid, one line per row>
 === end ===
 ```
 
 With `diff: true`, after the first (full) frame only changed body lines are emitted as `L<i>:
 <line>` — a large token saving across a multi-step session.
 
-## Style encodings
+## Visual output (SVG)
 
-The hard question isn't the character grid (layout serializes trivially) — it's how to encode
-per-cell **style** so a model can use it, and at what token cost. `StyleEncoding` offers three, all
-keyed by a persistent registry so style-ids stay stable across frames (keeping diffs compact):
+The text snapshot deliberately carries no colour — layout plus the state header are what a model
+needs for cheap, diffable verification. When you need to *see* a frame (colour, bold/dim, borders),
+render the same buffer to a self-contained SVG:
 
-| encoding | form |
-|----------|------|
-| `Spans` (default) | each row inline as `id[run text]`; default-styled cells left literal |
-| `Interleaved` | each text row followed by an aligned row of style-ids |
-| `Parallel` | the whole char grid, then a second aligned grid of style-ids |
+- `render_to_svg(&app, w, h) -> String` — drive and render in one call.
+- `buffer_to_svg(&buffer) -> String` — render a buffer you already have.
 
-Each frame ends with a `legend:` mapping ids to concrete styles (`fg=cyan`, `bg=idx237`, `bold`,
-`reversed`, …).
+The SVG is lean and row-ordered: one `<style>` class block for the palette, coalesced background
+rects, and one `<text>` per row whose runs are `<tspan>`s pinned by an absolute `x` (a run breaks
+after a wide glyph so an emoji can't shove the rest of the row out of column). It embeds directly in
+Markdown/HTML and rasterises cleanly to PNG (e.g. via a headless browser) when a pixel image is
+wanted — which also lets you control the resolution handed to a vision model.
 
-### Why `spans` is the default (evaluation summary)
-
-We evaluated six encodings against a battery of layout/alignment questions, scored by a frontier
-model, with real token counts. The full write-up lives in the yaks repo (`docs/tui-style-eval.md`);
-the short version:
-
-- **Accuracy saturated.** On simple *and* deliberately adversarial layouts (subtle 1-column
-  misalignment, nested-vs-disjoint boxes, a list inside a box next to a same-format decoy), every
-  style-bearing encoding scored ~perfectly. Accuracy did **not** discriminate the encodings at this
-  model tier — so the deciding axis is **token cost**.
-- **Cost (dense-list fixture, vs plain-only = 132 tokens):**
-
-  | encoding | tokens | × plain |
-  |----------|-------:|--------:|
-  | **spans** | **259** | **1.96×** |
-  | interleaved | 338 | 2.56× |
-  | parallel | 364 | 2.76× |
-  | runlist *(relational; not shipped)* | 451 | 3.42× |
-  | ruler *(coordinate anchors; not shipped)* | 508 | 3.85× |
-  | doublewidth *(id+char interleave; dead)* | 836 | 6.33× |
-
-- **`spans` survives vertical alignment** — the surprising result. It preserves inter-run whitespace
-  **literally**, so a model recovers a column by *summing whitespace (arithmetic)*, not by seeing
-  it. It stayed correct on cue-free cumulative-offset stress out to ~16 columns / ~100 wide, with no
-  false positives. Human-legibility and model-legibility diverge here.
-
-**Load-bearing constraint:** because `spans` leans on literal whitespace, `SnapshotEncoder` never
-collapses runs of spaces. Don't normalize them.
-
-**Caveat:** all probes ran on a single frontier model family (Claude Opus 4.8). Cross-model-family
-behavior at this specific capability is untested, and weaker models would likely crack the
-whitespace arithmetic first — it's reasonable to require a frontier model for UI work. `interleaved`
-is the explicit aligned-grid fallback if you want a column grid handed to you rather than
-reconstructed; it dominates `parallel`.
+> **History.** toque previously offered three *text* style-encodings (`spans`/`interleaved`/
+> `parallel`) that packed per-cell colour into the snapshot. They were retired once SVG became the
+> visual channel: SVG renders style natively and better, and the semantic style that matters
+> (selection, focus, blocked) already rides in the state header as plain facts. The original
+> evaluation that picked `spans` is kept for the record at
+> [`docs/research/tui-style-eval.md`](https://github.com/rocketsurgery-games/yaks/blob/main/docs/research/tui-style-eval.md).
 
 ## Status
 

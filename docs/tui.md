@@ -93,9 +93,9 @@ parent, and `ready`/`tangled`/`inbox` predicates. It composes into any view.
 # Screenshots
 
 These are generated headlessly: the [`toque`](../crates/toque/README.md) crate
-drives the TUI into an in-memory ratatui buffer, and a small renderer walks that
-buffer cell-by-cell into a color SVG. They are deterministic and regenerate with
-the UI (no live-terminal capture), via:
+drives the TUI into an in-memory ratatui buffer and renders it to a self-contained
+color SVG (`toque::render_to_svg`). They are deterministic and regenerate with the
+UI (no live-terminal capture), via:
 
 ```sh
 cargo test -p yaks docshots -- --ignored   # writes docs/assets/*.svg

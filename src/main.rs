@@ -417,13 +417,6 @@ enum Command {
         /// Terminal size for headless mode, e.g. "100x30" (default 80x24).
         #[arg(long)]
         size: Option<String>,
-        /// In headless mode, also emit style information after the char grid.
-        #[arg(long)]
-        style: bool,
-        /// Headless style encoding: parallel | interleaved | spans. Implies
-        /// --style; defaults to parallel when only --style is given.
-        #[arg(long)]
-        style_encoding: Option<String>,
         /// Headless: after the first frame, emit only changed body lines.
         #[arg(long)]
         diff: bool,
@@ -987,29 +980,16 @@ fn main() -> Result<()> {
         Command::Tui {
             headless,
             size,
-            style,
-            style_encoding,
             diff,
         } => {
             let app = tui::App::with_herd(herd)?;
             if headless {
                 let (w, h) = parse_size(size.as_deref());
-                let encoding = match style_encoding.as_deref() {
-                    Some(name) => match toque::StyleEncoding::parse(name) {
-                        Some(e) => Some(e),
-                        None => anyhow::bail!(
-                            "unknown --style-encoding '{name}' (expected parallel|interleaved|spans)"
-                        ),
-                    },
-                    None if style => Some(toque::StyleEncoding::Parallel),
-                    None => None,
-                };
                 toque::run(
                     app,
                     toque::DriverOpts {
                         width: w,
                         height: h,
-                        style: encoding,
                         diff,
                     },
                 )?;

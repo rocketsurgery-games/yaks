@@ -1,8 +1,17 @@
 # Encoding TUI snapshots for LLMs: a style-encoding evaluation
 
-Research report behind the agent-drivable TUI snapshot format used by the
-`toque` crate. It documents why `spans` is the default style encoding and is the
-justification seed for `toque`'s README.
+> **Archived (historical).** The text *style-encodings* this report evaluates
+> (`spans`/`interleaved`/`parallel`) have been **retired** from `toque`. Once the
+> headless buffer→SVG renderer landed, SVG became the channel for *visual* style
+> (it renders colour natively and better), and the semantic style that matters
+> (selection, focus, blocked) already rides in the state header as plain facts —
+> so packing per-cell colour into the text snapshot was redundant. The text
+> snapshot is now plain grid + state header only. This document is kept for the
+> record: it justified `spans` as the original default *and*, by the same
+> reasoning, its removal. It is not a description of current behaviour.
+
+Research report behind the agent-drivable TUI snapshot format once used by the
+`toque` crate. It documents why `spans` *was* the default style encoding.
 
 ## Problem
 

@@ -27,9 +27,10 @@ root; reusable pieces live under `crates/`.
 - `src/tui.rs` (+ `src/tui/`) — the interactive TUI; `src/tui/headless.rs` is a
   thin adapter implementing `toque::HeadlessApp` for `App`.
 - `crates/toque/` — publishable library: drive any ratatui app headlessly
-  (inject keys, capture LLM-/test-legible text snapshots with per-cell style).
-  yaks is its first consumer. See `crates/toque/README.md`, and
-  `docs/tui-style-eval.md` for the style-encoding research behind it.
+  (inject keys, capture LLM-/test-legible plain-text snapshots, and render frames
+  to SVG for visual inspection). yaks is its first consumer. See
+  `crates/toque/README.md`; `docs/research/tui-style-eval.md` archives the
+  now-retired text style-encoding research.
 
 ## Build
 
