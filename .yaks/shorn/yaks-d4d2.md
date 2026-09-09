@@ -4,7 +4,7 @@ title: 'yaks verify: per-yak verify command + runner (automated evidence)'
 type: feature
 priority: 2
 created: '2026-09-08T02:07:57Z'
-updated: '2026-09-08T02:17:09Z'
+updated: '2026-09-08T02:20:47Z'
 parent: yaks-6624
 labels:
 - eval,cli
@@ -28,3 +28,7 @@ verify: `cargo test -p yaks verify` -> PASS (exit 0)
 ---
 ▸ 2026-09-08T02:17:09Z [coordinator]
 Shorn. Delivered: Task.verify field (round-trips, byte-stable — test store::verify_field_round_trips); create/update --verify to set/clear; 'yaks verify <id>...' runs the command via sh -c with live stdio, records 'verify: <cmd> -> PASS/FAIL (exit N)' as an attributed note, exits non-zero on any FAIL; a yak with no verify: errors cleanly + nonzero (confirmed on yaks-6624). Runner extracted as run_verify_command (test tests::run_verify_command_reports_pass_and_fail). cargo test --workspace GREEN (235 unit + 25 cli + 13 toque). LIVE (used the lever on ITSELF): d4d2's verify: = 'cargo test -p yaks verify' -> PASS (exit 0) recorded; a scratch yak with verify:false -> FAIL (exit 1) recorded + command exited nonzero. d4d2 keeps its verify: so it stays re-runnable. Safety: explicit only, never auto-run by doctor. Next in 6624: c3b1 (config supplies default verify per change-type); doctor --strict could require a recorded verify-PASS before shear (79a9).
+
+---
+▸ 2026-09-08T02:20:47Z [Joel Webber]
+verify: `cargo test -p yaks verify` -> PASS (exit 0)

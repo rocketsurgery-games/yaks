@@ -4,8 +4,7 @@ title: 'TUI-snapshot evidence: emit toque LLM-text vs SVG?'
 type: idea
 priority: 4
 created: '2026-09-08T22:56:46Z'
-updated: '2026-09-08T22:56:46Z'
-parent: yaks-10fb
+updated: '2026-09-08T23:09:47Z'
 labels:
 - ui,docs
 ---

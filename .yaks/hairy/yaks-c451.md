@@ -4,8 +4,7 @@ title: Animated TUI doc examples via SMIL (SVG animation)
 type: idea
 priority: 4
 created: '2026-09-06T23:25:51Z'
-updated: '2026-09-06T23:25:51Z'
-parent: yaks-10fb
+updated: '2026-09-08T23:09:07Z'
 labels:
 - docs
 - ui
