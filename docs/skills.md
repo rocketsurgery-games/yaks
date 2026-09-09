@@ -53,6 +53,12 @@ The load-bearing ideas, all validated by dogfooding:
 - **Human-in-the-loop routes through the coordinator.** Workers `ask` and hand
   back; the human answers on `main` (`yaks inbox`); the next spawn starts fresh
   from `main`. No live cross-worktree feedback.
+- **Human-driven interactive lane.** A thorny, iterative design problem can run
+  as its own worktree lane *in parallel* without a fan-out: a peer lane the human
+  drives, landed through the coordinator (or the human is the coordinator). It
+  starts yak-less, emits code or a fresh herd, and — because the human opens the
+  worktree as the harness root — dodges the spawned-worker file-tool pitfall by
+  construction.
 - **Recovery.** A worker's work lives in its worktree, so a lost session isn't
   lost work — recover from the worktree rather than restarting.
 - **Integrity.** `yaks doctor` after a batch catches merge damage; across many
@@ -70,3 +76,7 @@ The load-bearing ideas, all validated by dogfooding:
 - **Parallel agents:** the coordinator drives the claim → fan-out → squash →
   reconcile shape above, with `ask`/`answer`/`inbox` for human decisions and
   `doctor` for integrity.
+- **Interactive lane alongside parallel work:** a human-driven worktree lane for
+  design problems that aren't fire-and-forget — same worktree mechanics, landed
+  through the coordinator; in private mode its emitted yaks are shared live, so
+  only the code has to land.

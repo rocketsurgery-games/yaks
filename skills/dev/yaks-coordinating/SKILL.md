@@ -156,6 +156,65 @@ file across both). Reserve `--no-ff` for a lane that genuinely needs
 multiple commits. Avoid per-yak cherry-picking across branches; to pull
 main-side updates into a live branch use `git merge main`, all-or-nothing.
 
+## Human-driven interactive lane (parallel, without a fan-out)
+
+Sometimes the work is a thorny design problem the human and an agent iterate on
+together — not breakable into fire-and-forget leaves up front — and it needs to
+run **in parallel** with other lanes without disturbing them. That is not a new
+role. It is a **peer lane the human drives directly**: same worktree + branch
+mechanics as a worker lane, landed through the coordinator — or, if no
+coordinator is running, **the human is the coordinator** and just merges it.
+Three things make it feel different, none of them structural: the human drives
+it, it is long-lived, and it often **starts yak-less** (pure conversation) and
+emits either code or a fresh herd.
+
+**The file-tool pitfall inverts in your favor.** A *spawned* worker's file tools
+root at the main checkout (the recurring stray-edit bug above). Here the human
+opens `wt/<name>` as the harness root, so the agent's file tools root at the
+**worktree** by construction. The load-bearing manual step is exactly that —
+point the harness at the worktree dir — and everything else follows.
+
+**Kickoff.** `git worktree add wt/<name> -b <branch>` (in-tree, per the
+file-tool SOP), then **the human opens `wt/<name>` as the harness root** — an
+agent can't re-root its own harness, so this one step can't be delegated — and
+*defer the yak* until there is an artifact to make. Talking needs no yak; the moment the session
+commits to producing something, open a thin `shaving` "design lane: X" yak —
+which in private mode *is* the claim (below). The invariant holds without
+friction.
+
+**Herd behavior splits by mode** (same split as PR-driven integration):
+
+- **Private mode:** the gitignored `.yaks/` is the *one shared live herd* the
+  worktree resolves by walk-up, so yaks the lane drops on the board are visible
+  to a running coordinator **instantly** — an emitted herd is a no-op to share,
+  and only the *code* has to land. The only coordination cost is **claiming**:
+  move held yaks to `shaving` (or tag them) so the coordinator's `yaks next`
+  skips work you are actively holding.
+- **Team mode:** new yaks live on the lane's branch, invisible until merge. So
+  **land the herd early** — a `.yaks/`-only commit can go up as soon as the
+  design converges, letting the coordinator fan the emitted herd out while your
+  interactive code work continues on the same branch. Land the code when it is
+  ready.
+
+**Handoff ("we're done, merge up").** Landing is a coordinator responsibility
+(owns `main`, first-pass review, conflicts), degrading gracefully:
+
+- *No coordinator active:* you are the coordinator — squash-merge to `main`,
+  stamp provenance (private mode: record the landed SHA), shear, and
+  `git worktree remove`.
+- *Coordinator active:* produce a **committed branch** and signal readiness —
+  cheapest first: tell the coordinator thread "land `wt/<name>`"; in private mode
+  drop a note/label on the shared yak it will see; `yaks ask` if the handoff
+  carries a real decision. The coordinator does the land, per Merge /
+  integration.
+
+**Non-goals (stay off the ledge).** No worktree-awareness in the CLI — the lane
+is legible through `git worktree list` plus the herd. No live cross-worktree
+HITL: the human in the loop is *physically at this worktree*, so there is no
+cross-worktree feedback to route (unlike a spawned worker, which must hand back).
+A first-class "ready-to-land" marker (`needs: land`, or a label) is left to prose
+for now — it graduates to a field only if message-passing proves lossy.
+
 ## PR-driven integration (coordinator owns the PRs)
 
 Land a batch as GitHub PRs instead of local merges to `main`. **Mode decides the
