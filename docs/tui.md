@@ -79,6 +79,12 @@ human-in-the-loop exchange).
 
 ![yaks TUI detail pane](assets/tui-detail.svg)
 
+Once you scroll past the frontmatter (`j`/`k`/`d`/`u`/`G`), a sticky one-line
+header pins the yak's status, id, type, priority, and title to the top of the
+pane, so a long body never leaves you wondering which yak you're reading.
+
+![yaks TUI detail pane with a pinned header](assets/tui-detail-pinned.svg)
+
 **Inbox** — the flat, cross-status list of every yak carrying a `needs` block.
 It is unpinned (no tab); reach it from the view picker (`v`) or the drawer
 `inbox` chip.

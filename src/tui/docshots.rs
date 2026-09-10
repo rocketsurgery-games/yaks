@@ -183,4 +183,14 @@ fn docshots() {
     let mut app = app_at(w, h);
     press(&mut app, 'f');
     write_svg("tui-drawer", &app, w, h);
+
+    // 5. Pinned detail header: open the HITL yak's detail in a short pane and
+    //    scroll to the end (`G`) so the frontmatter is off-screen — the sticky
+    //    one-line header keeps its id / state / type / title in view.
+    let ph = 18u16;
+    let mut app = app_at(w, ph);
+    view_to(&mut app, "inbox");
+    press_key(&mut app, KeyCode::Enter); // open detail on the sole inbox row
+    press(&mut app, 'G'); // jump to the last line -> scrolls; the header pins
+    write_svg("tui-detail-pinned", &app, w, ph);
 }

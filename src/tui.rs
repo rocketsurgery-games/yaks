@@ -1315,14 +1315,25 @@ impl App {
             let s = filter_summary(&self.filter);
             if s.is_empty() { "-".to_string() } else { s }
         };
-        format!(
+        let base = format!(
             "focus={focus} · view={} · cursor={} · rows={} · sel={sel} · blocked={blocked} · collapsed={} · filter={filter} · overlay={}",
             self.active_view().name,
             self.cursor,
             self.rows().len(),
             self.collapsed.len(),
             overlay_name(&self.overlay),
-        )
+        );
+        // In the detail pane, expose the scroll offset and whether the sticky
+        // header is showing (the frontmatter top has scrolled off).
+        if self.focus == Focus::Detail {
+            format!(
+                "{base} · detail_scroll={} · pinned={}",
+                self.detail_scroll,
+                if self.detail_scroll > 0 { "yes" } else { "no" }
+            )
+        } else {
+            base
+        }
     }
 
     fn toggle_collapse(&mut self) {
@@ -4456,11 +4467,51 @@ fn list_item<'a>(
     ListItem::new(Line::from(spans))
 }
 
+/// A one-line sticky summary of the task — status emoji, id, type, priority,
+/// title, star — pinned above the detail content when it has scrolled past the
+/// frontmatter, so you never lose track of which yak you're reading. Filled with
+/// a faint background band so it reads as a header rather than a content row.
+fn pinned_header_line(task: &Task, starred: bool, width: u16) -> Line<'static> {
+    let bg = Color::Indexed(236);
+    let w = width as usize;
+    let emoji = task.status.emoji(); // display width 2
+    let type_s = format!("{:8}", task.kind);
+    let pri_s = format!("p{}", task.priority);
+    let star = if starred { " \u{2b50}" } else { "" };
+    let star_w = disp_width(star);
+
+    // Left cluster: " 🪒 yaks-b517  feature  p2  "
+    let left_plain = format!(" {emoji} {}  {type_s} {pri_s}  ", task.id);
+    let left_w = disp_width(&left_plain);
+    let title_avail = w.saturating_sub(left_w + star_w);
+    let title = truncate_disp(&task.title, title_avail);
+    let pad = w.saturating_sub(left_w + disp_width(&title) + star_w);
+
+    let band = Style::new().bg(bg);
+    let mut spans = vec![
+        Span::styled(format!(" {emoji} "), band),
+        Span::styled(task.id.clone(), band.fg(Color::Blue)),
+        Span::styled("  ".to_string(), band),
+        Span::styled(type_s, band.fg(Color::Cyan)),
+        Span::styled(" ".to_string(), band),
+        Span::styled(pri_s, priority_style(task.priority).bg(bg)),
+        Span::styled("  ".to_string(), band),
+        Span::styled(title, band.add_modifier(Modifier::BOLD)),
+    ];
+    if pad > 0 {
+        spans.push(Span::styled(" ".repeat(pad), band));
+    }
+    if starred {
+        spans.push(Span::styled(star.to_string(), band));
+    }
+    Line::from(spans)
+}
+
 fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
     let focused = app.focus == Focus::Detail;
     // The left divider is drawn by render() via right_divider(); we render the
     // content into the already-inset area.
-    if app.selected().is_none() {
+    let Some(task) = app.selected() else {
         let p = Paragraph::new(Span::styled("(no task)", Style::new().fg(Color::DarkGray)));
         frame.render_widget(p, area);
         return;
@@ -4468,6 +4519,20 @@ fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
     // Capture the content width so the row-indexed model (and event handlers)
     // wrap to exactly what's rendered here.
     app.detail_width.set(area.width);
+    // When scrolled past the frontmatter, reserve the top row for a sticky
+    // header and push the content down one row (nothing is hidden — the pin adds
+    // a row rather than overlaying one).
+    let pinned = app.detail_scroll > 0 && area.height > 1;
+    let content_area = if pinned {
+        Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: area.height - 1,
+        }
+    } else {
+        area
+    };
     let lines = app.detail_dlines();
     let jumps = detail::jumplist(&lines);
     // The "current" link is whichever link sits on the line cursor.
@@ -4504,7 +4569,11 @@ fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
         .collect();
     // No wrap: link/match highlight columns must stay valid.
     let p = Paragraph::new(rendered).scroll((app.detail_scroll, 0));
-    frame.render_widget(p, area);
+    frame.render_widget(p, content_area);
+    if pinned {
+        let header = pinned_header_line(task, app.is_starred(&task.id), area.width);
+        frame.render_widget(Paragraph::new(header), Rect { height: 1, ..area });
+    }
 }
 
 /// Render one detail line by computing a per-char style (base -> link ->

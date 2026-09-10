@@ -138,4 +138,34 @@ mod tests {
         assert!(s.contains(" · diff · "));
         assert!(s.contains("\nL")); // at least one changed-line label
     }
+
+    #[test]
+    fn detail_pins_sticky_header_once_scrolled() {
+        // A task whose body overflows a short detail pane, so scrolling to the
+        // end pushes the frontmatter off-screen and the sticky header engages.
+        let mut long = sample_task("a0", "Root A with a long body");
+        long.body = (1..=40)
+            .map(|i| format!("body line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let app = App::new(vec![long, sample_task("a1", "Child A1")]);
+        let mut s = Session::new(
+            app,
+            DriverOpts {
+                width: 60,
+                height: 10,
+                diff: false,
+            },
+        );
+        let mut out: Vec<u8> = Vec::new();
+        s.emit(&mut out).unwrap(); // list
+        s.step("key Enter", &mut out).unwrap(); // open detail (not scrolled yet)
+        s.step("key G", &mut out).unwrap(); // jump to end -> scrolls; header pins
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("focus=detail"));
+        // The header is absent before scrolling and present after: the state
+        // header flips pinned=no -> pinned=yes, and the pin renders only then.
+        assert!(out.contains("pinned=no"));
+        assert!(out.contains("pinned=yes")); // implies detail_scroll > 0
+    }
 }
