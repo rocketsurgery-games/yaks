@@ -2,8 +2,8 @@
 source: src/tui.rs
 expression: "draw(&app, 72, 14)"
 ---
- 🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4) starred a0
-
+ 🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starr
+starred a0
  a0   p2 task     🦬  Root A                                           ⭐
    a1 p3 task     🦬  Child A1
 

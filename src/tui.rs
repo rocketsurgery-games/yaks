@@ -4259,37 +4259,61 @@ fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
     // Right-aligned slot on the tab row: a transient notification takes it when
     // present (Python placement); otherwise the persistent herd-scope indicator
     // for tree views. `~` marks a view inheriting the global default (auto) vs
-    // an explicit per-view override. The indicator yields rather than overwrite
-    // tabs when the strip is too wide to fit it.
-    let right: Option<(String, Style)> = if let Some(n) = &app.notification {
-        Some((
-            n.clone(),
-            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        ))
+    // an explicit per-view override.
+    if let Some(n) = &app.notification {
+        // The ephemeral status message wants its usual right-aligned slot on the
+        // tab row, but it must not scribble over the tabs. When it fits beside
+        // them (the last tab already contributes a trailing space to `tabs_w`),
+        // keep it inline; otherwise drop it to the blank gap row directly below
+        // the tab strip (`area.y + 1`, guaranteed by the top-of-frame layout in
+        // `render`), left-aligned on that otherwise-empty line. Pure render-time
+        // geometry, so it re-evaluates on every resize.
+        let style = Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+        let full = disp_width(n);
+        let w = (full as u16).min(area.width);
+        if w > 0 {
+            let rect = if tabs_w + full <= area.width as usize {
+                Rect {
+                    x: area.x + area.width - w,
+                    y: area.y,
+                    width: w,
+                    height: 1,
+                }
+            } else {
+                Rect {
+                    x: area.x,
+                    y: area.y + 1,
+                    width: w,
+                    height: 1,
+                }
+            };
+            frame.render_widget(Paragraph::new(Span::styled(n.clone(), style)), rect);
+        }
     } else {
         let av = app.active_view();
-        if av.is_flat() || av.key == "working-set" {
-            None
-        } else {
+        if !(av.is_flat() || av.key == "working-set") {
             let (marker, val) = match app.herd_scope.get(&av.key) {
                 Some(s) => ("", s.as_str()),
                 None => ("~", view::HerdScope::DEFAULT.as_str()),
             };
             let label = format!("herd: {marker}{val}");
-            let fits = tabs_w + disp_width(&label) < area.width as usize;
-            fits.then(|| (label, Style::new().fg(Color::DarkGray)))
-        }
-    };
-    if let Some((text, style)) = right {
-        let w = (disp_width(&text) as u16).min(area.width);
-        if w > 0 {
-            let rect = Rect {
-                x: area.x + area.width - w,
-                y: area.y,
-                width: w,
-                height: 1,
-            };
-            frame.render_widget(Paragraph::new(Span::styled(text, style)), rect);
+            // The indicator yields rather than overwrite tabs when the strip is
+            // too wide to fit it.
+            if tabs_w + disp_width(&label) < area.width as usize {
+                let w = (disp_width(&label) as u16).min(area.width);
+                if w > 0 {
+                    let rect = Rect {
+                        x: area.x + area.width - w,
+                        y: area.y,
+                        width: w,
+                        height: 1,
+                    };
+                    frame.render_widget(
+                        Paragraph::new(Span::styled(label, Style::new().fg(Color::DarkGray))),
+                        rect,
+                    );
+                }
+            }
         }
     }
 }
@@ -7127,5 +7151,46 @@ mod tests {
             assert!(app.task("c0").unwrap().parent.is_none());
             assert_eq!(app.notification.as_deref(), Some("c0 moved to top level"));
         }
+    }
+
+    // -- ephemeral status line placement ----------------------------------
+
+    #[test]
+    fn status_notification_drops_below_tabs_when_it_would_overlap() {
+        // The ephemeral yellow status line lives right-aligned on the tab row,
+        // but must not scribble over the tabs. At a narrow width it can't fit
+        // beside them, so it drops to the blank gap row directly below the tabs;
+        // at a wide width it stays inline on the tab row. This is a pure
+        // render-time decision, so the same App re-lays-out on width alone.
+        const NOTE: &str = "quarterly-planning";
+        let mut app = sample();
+        app.notification = Some("saved view: quarterly-planning".into());
+
+        // Narrow: no room beside the tabs -> dropped to the gap row (row 1).
+        let narrow = draw(&app, 90, 8);
+        let nlines: Vec<&str> = narrow.lines().collect();
+        assert!(
+            !nlines[0].contains(NOTE),
+            "narrow: the tab row must not carry the notification\n{narrow}"
+        );
+        assert!(
+            nlines[1].contains(NOTE),
+            "narrow: the notification drops to the blank row below the tabs\n{narrow}"
+        );
+        insta::assert_snapshot!("status_notification_below_tabs_narrow", narrow);
+
+        // Wide: fits beside the tabs -> stays inline on the tab row (row 0),
+        // leaving the gap row blank.
+        let wide = draw(&app, 160, 8);
+        let wlines: Vec<&str> = wide.lines().collect();
+        assert!(
+            wlines[0].contains(NOTE),
+            "wide: the notification stays inline on the tab row\n{wide}"
+        );
+        assert!(
+            !wlines[1].contains(NOTE),
+            "wide: the gap row below the tabs stays blank\n{wide}"
+        );
+        insta::assert_snapshot!("status_notification_inline_wide", wide);
     }
 }

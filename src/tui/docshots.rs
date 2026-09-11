@@ -193,4 +193,14 @@ fn docshots() {
     press_key(&mut app, KeyCode::Enter); // open detail on the sole inbox row
     press(&mut app, 'G'); // jump to the last line -> scrolls; the header pins
     write_svg("tui-detail-pinned", &app, w, ph);
+
+    // 6. Ephemeral status line placement: at a narrow width the yellow
+    //    notification can't fit beside the tabs, so instead of scribbling over
+    //    them it drops to the blank row directly below the tab strip. (Set the
+    //    field directly — a child module can reach `App`'s private fields — to
+    //    freeze the transient message that a live mutation would otherwise set.)
+    let sw = 90u16;
+    let mut app = app_at(sw, 12);
+    app.notification = Some("saved view: quarterly-planning".into());
+    write_svg("tui-status-below-tabs", &app, sw, 12);
 }
