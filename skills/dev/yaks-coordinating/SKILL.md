@@ -84,6 +84,32 @@ a type is a cross-cutting change. Handle it one of two ways:
 Never split a shared-type change across parallel lanes. Before fanning out, scan
 for exhaustive constructions of any type a lane will modify (`grep 'TypeName {'`).
 
+**When one file is unavoidable, scope by function — don't prescribe an
+architecture.** Some codebases funnel most changes through one large file (a
+monolithic UI module, a god-object), so disjoint *files* is impossible. That does
+not block a parallel run: scope each lane to a disjoint **function/region** of the
+shared file and lean harder on the shared-type scan, since the collision surface
+shrinks to (a) any shared type a lane edits and (b) any region two lanes both
+touch. Rules of thumb, from a run of three lanes over one ~7k-line file that
+merged clean:
+
+- **Prefer yaks that need no shared-type change.** If each lane can implement
+  without adding a field to the god-struct (reuse existing fields; put new state
+  on a lane-local type), the one exhaustive construction site stays untouched and
+  the lanes merge cleanly *despite sharing the file*.
+- **Anchor briefs by symbol, not line number.** Line numbers drift the moment a
+  sibling lane lands (a lane cut *after* a merge sees everything shifted) — point
+  workers at `fn name` / `grep` targets so the anchor survives.
+- **Pre-warn about snapshot ripple.** A change to a shared render/format path can
+  invalidate a committed snapshot that looks unrelated; tell the lane to
+  re-accept *and eyeball* such ripples, not rubber-stamp them.
+
+This is a coordination *technique*, not architectural advice: whether the file
+*should* be split is the project's call, expressed as its own yak — the skill
+stays neutral about how you factor your code. That a monolith forces
+function-level scoping is simply a consequence worth naming; if the friction
+recurs, splitting is one remedy a project may choose.
+
 ## Coordinator pre-flight (accreted from runs)
 
 A tight checklist before fanning workers out; each item just points back at a
@@ -95,6 +121,8 @@ section above.
 - **Spawn workers fresh from `main`** so they start with the latest human
   feedback (Human-in-the-loop).
 - **Assign disjoint file scopes** — one writer per yak (Disjoint scoping).
+- **If one file is unavoidable, scope by function and anchor briefs by symbol,
+  not line number** — line numbers drift as sibling lanes land (Disjoint scoping).
 - **Expect human `.yaks/` drift and leave it untouched** — a worker's herd is
   its own branch; it reconciles at merge, not live (Worktrees are per-branch
   herds).
@@ -311,3 +339,13 @@ it **hands back** — `yaks ask` on its leaf plus a clear final message — rath
 than blocking and waiting. The coordinator relays to the human and re-spawns with
 the answer, or makes the call. Live cross-worktree human→worker feedback is a
 non-goal.
+
+**Two worktree×ask gotchas (both about *committed* state).** (1) A human's `yaks
+answer` on `main` is an **uncommitted working-tree edit** until you commit it; a
+worktree cut afterward reads only committed state, so **commit the answer to
+`main` before cutting the worker's worktree**, or the worker won't see it. (2) A
+worker's own `yaks ask` — e.g. a visual-review request only the human can judge —
+is recorded **on the worker's branch**, so it does not appear in `main`'s `yaks
+inbox` until the lane merges. When the code is already gated green and only a
+subjective sign-off remains, **merge the lane first**, then route the human's
+sign-off as the answer to the ask now visible on `main`.
