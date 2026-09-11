@@ -185,7 +185,7 @@ Child tasks use `--parent <id>` on create. Every ID is flat (`{prefix}-{4hex}`) 
 
 > Older herds may still contain dotted IDs (e.g. `yak-a1b2.1`) created before this change. Those dots are now just opaque characters — the `parent:` field is authoritative — so don't parse IDs to infer hierarchy.
 
-The prefix, default type, and default priority come from `.yaks/config.yaml` (falling back to `yak` / `task` / `3`). A nested `verify:` map there (label → command, plus an optional `default`) supplies the default verification command for a yak that has no explicit `verify:` field, resolved by the yak's labels — so the project's levers are named once (e.g. `ui: cargo test docshots`).
+The prefix, default type, and default priority come from `.yaks/config.yaml` (falling back to `yak` / `task` / `3`). A nested `verify:` map there (label → command, plus an optional `default`) supplies the default verification command for a yak that has no explicit `verify:` field, resolved by the yak's labels — so the project's levers are named once (e.g. `ui: cargo test -p yaks`).
 
 ### External source linking
 

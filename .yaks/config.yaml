@@ -3,7 +3,10 @@ prefix: yaks
 # explicit `verify:` field (see `yaks verify`). First matching label wins;
 # `default` is the fallback. The project's levers, named once.
 verify:
-  ui: cargo test -p yaks docshots -- --ignored
+  # ui = the pass/fail GATE (the tui insta snapshot tests). SVGs are a separate
+  # visual channel, generated on demand (cargo test -p yaks docshots -- --ignored)
+  # and attached for human review — not a shear gate. See yaks-6c93.
+  ui: cargo test -p yaks
   cli: cargo test -p yaks
   skills: cargo test -p yaks skills
   default: cargo test --workspace

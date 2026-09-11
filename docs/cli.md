@@ -49,10 +49,12 @@ Default verify commands live in `.yaks/config.yaml` under a nested `verify:` map
 
 ```yaml
 verify:
-  ui: cargo test -p yaks docshots -- --ignored
+  ui: cargo test -p yaks
   cli: cargo test -p yaks
   default: cargo test --workspace
 ```
+
+A lever is the pass/fail **gate** for its label — what `doctor --strict` enforces at shear. For UI yaks that's the tui snapshot tests (`cargo test -p yaks`); the SVG docshots are a separate *visual* channel, generated on demand (`cargo test -p yaks docshots -- --ignored`) and attached for human review, not a gate.
 
 ## State transitions (all accept multiple ids)
 
