@@ -4,11 +4,10 @@ title: Split src/tui.rs monolith into a render/ module tree
 type: task
 priority: 3
 created: '2026-09-10T23:45:35Z'
-updated: '2026-09-11T01:39:46Z'
+updated: '2026-09-11T01:45:19Z'
 labels:
 - meta
 - ui
-needs: human
 ---
 
 src/tui.rs is ~7K lines / 270KB, funnelling nearly all UI work through one file and defeating file-disjoint parallel scoping (see the coordinating-skill yak). Splitting render_* and the handle_*_key handlers into a render/ (and handlers/) module tree would give future parallel batches real file-level disjointness. Corollary of dogfooding the UI batch.
@@ -20,3 +19,7 @@ RESEARCH & PLAN. tui.rs = 7043 lines. MAP: (1) imports + mod decls (1-57); (2) s
 ---
 ▸ 2026-09-11T01:39:46Z [coordinator]
 Arc execution decision (provenance): merge cadence for the persistent worktree. (A) squash-merge each completed phase to main at its checkpoint -- keeps main's herd honest, de-risks integration per phase, natural checkpoints (branch re-syncs via 'git merge main' after each); or (B) one merge at arc end -- simpler history, but main's b1cc children look stale for the whole arc. Coordinator lean: (A) per-phase checkpoints -- matches the serial, checkpointed nature and surfaces integration issues early. Also FYI my execution lean: coordinator drives each phase directly in the worktree (avoids the sub-agent file-tool SOP tax on this delicate snapshot-preserving refactor), spawning sub-agents only for bulk mechanical moves. Your call on cadence (A/B).
+
+---
+▸ 2026-09-11T01:45:19Z [Joel Webber]
+Strong agreement on aggressive checkpointing, especially in team mode (so the yaks stay in sync)
