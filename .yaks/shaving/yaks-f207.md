@@ -4,10 +4,9 @@ title: Changing priority (or anything that causes a list resort) in detail mode 
 type: bug
 priority: 3
 created: '2026-08-23T18:26:53Z'
-updated: '2026-09-10T23:47:07Z'
+updated: '2026-09-10T23:57:22Z'
 labels:
 - ui
-needs: human
 verify: cargo test -p yaks
 ---
 
@@ -20,3 +19,7 @@ LANE C (wt/resort). Scope: src/tui.rs apply_edit (3149) ONLY -- one-liner: self.
 ---
 ▸ 2026-09-10T23:47:07Z [coordinator]
 Design decision needed before lane C starts: when a priority change pushes the selected yak OUT of the current filtered/sorted list entirely, what should the detail pane do? (a) close the detail pane; or (b) keep it open, unchanged, no longer tracking a list slot. Coordinator lean: (a) close -- simplest, matches 'the thing you were looking at is no longer here'. Please 'yaks answer yaks-f207 --note ...' with a or b.
+
+---
+▸ 2026-09-10T23:56:53Z [Joel Webber]
+Agreed, let's just close the detail pane when it gets filtered out.
