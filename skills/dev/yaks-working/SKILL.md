@@ -52,7 +52,9 @@ ask.
   when the evidence is something to look at. Attach keeps it an **external file**
   under `.yaks/artifacts/` (committed in team mode), so it reaches the reviewer;
   never paste a large or binary artifact (SVG included) inline into a note or
-  description. Evidence is general: the outcome achieved and
+  description. Note that `yaks attach` also **modifies the tracked yak file** (it
+  links the artifact in the body), so expect the yak `.md` to show as changed and
+  stage it deliberately alongside the artifact. Evidence is general: the outcome achieved and
   seen, appropriate to the yak's kind (a research/decision yak's evidence is its
   finding/rationale; dead yaks are exempt).
 - **Scriptable evidence is a `verify:` command.** When the check is a command (a
@@ -60,6 +62,12 @@ ask.
   `yaks verify <id>`: it records the PASS/FAIL as a note and, because it's stored,
   anyone (coordinator, CI, a later agent) can re-run it. `doctor --strict` then
   enforces that a shorn yak's `verify:` last passed.
+- **Authoring a *new* snapshot/golden needs your tool's accept step.** A fresh
+  snapshot fails its first run by design (the tool writes a `.new` and errors),
+  so know the accept path before you shear — e.g. with Rust `insta`, `cargo insta
+  accept` or `INSTA_UPDATE=always cargo test` (plain `cargo test` writes
+  `.snap.new` and fails; one test emitting two new snapshots can't self-bootstrap
+  in a single plain run).
 - **No lever? Ask, don't shear on faith.** If the project has no way to verify
   this kind of change (a TUI you can't snapshot, UI you can't drive, state you
   can't reproduce), `yaks ask <id>` the human whether to go build one rather than
