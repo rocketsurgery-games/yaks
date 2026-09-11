@@ -3169,7 +3169,21 @@ impl App {
         let Some(h) = &self.herd else { return };
         match h.update(id, edit) {
             Ok(UpdateOutcome::Updated) => {
-                self.reload();
+                // Follow the edited yak to its new sorted slot. The cursor is
+                // index-based, so an edit that changes the sort key (e.g.
+                // priority) would otherwise leave it pointing at whatever yak
+                // now sits in that slot (yaks-f207). Capture the id first so we
+                // can tell whether the edit filtered it out of view.
+                let edited = self.selected_id();
+                self.reload_preserving_selection();
+                // If the edit pushed the yak out of the current filtered/sorted
+                // list entirely, close the detail pane -- what you were looking
+                // at is no longer here (human-confirmed drop-out behavior).
+                if self.focus == Focus::Detail
+                    && edited.is_some_and(|id| !self.rows().iter().any(|r| r.task.id == id))
+                {
+                    self.focus = Focus::List;
+                }
                 self.notification = Some(ok_msg);
             }
             Ok(UpdateOutcome::NoChanges) => self.notification = Some(format!("{id} unchanged")),
@@ -6673,6 +6687,62 @@ mod tests {
             app.reload_preserving_selection();
             assert!(app.all.iter().any(|t| t.title == "third"), "picked up add");
             assert_eq!(app.selected_id().as_deref(), Some("t1"), "cursor kept");
+        }
+
+        #[test]
+        fn priority_change_follows_selection_to_new_slot() {
+            // yaks-f207: bumping the open yak's priority resorts the list; the
+            // index-based cursor must follow it to its new slot rather than
+            // point at whatever yak now occupies the old one.
+            let (_dir, herd) = temp_herd(&[
+                task("t0", "first", Status::Hairy, 1, None),
+                task("t1", "second", Status::Hairy, 2, None),
+                task("t2", "third", Status::Hairy, 3, None),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            // Roots sort by priority ascending: t0, t1, t2. Cursor is on t0.
+            assert_eq!(app.selected_id().as_deref(), Some("t0"));
+            press(&mut app, "l"); // open t0 in the detail pane
+            assert!(matches!(app.focus, Focus::Detail));
+            press(&mut app, "P5"); // t0 -> p5, resorting it last: t1, t2, t0
+            assert_eq!(app.task("t0").unwrap().priority, 5);
+            // The cursor followed t0 to its new (last) slot.
+            assert_eq!(
+                app.selected_id().as_deref(),
+                Some("t0"),
+                "cursor follows the edited yak"
+            );
+            assert_eq!(app.cursor, 2, "t0 moved to the last slot");
+            // Still in the list, so the detail pane stays open.
+            assert!(matches!(app.focus, Focus::Detail));
+        }
+
+        #[test]
+        fn priority_change_out_of_view_closes_detail() {
+            // yaks-f207: when a priority change filters the open yak out of the
+            // current view, the detail pane -- which tracks a list slot -- must
+            // close (human-confirmed drop-out behavior (a): close, not keep).
+            let (_dir, herd) = temp_herd(&[
+                task("t0", "leaving", Status::Hairy, 1, None),
+                task("t1", "survivor", Status::Hairy, 1, None),
+            ]);
+            let mut app = App::with_herd(herd).unwrap();
+            // Constrain the live view to p1; both tasks match, cursor on t0.
+            app.filter.priorities = vec![1];
+            assert_eq!(app.selected_id().as_deref(), Some("t0"));
+            press(&mut app, "l"); // open t0 in the detail pane
+            assert!(matches!(app.focus, Focus::Detail));
+            press(&mut app, "P5"); // t0 -> p5, dropping it out of the p1 view
+            assert_eq!(app.task("t0").unwrap().priority, 5);
+            assert!(
+                app.rows().iter().all(|r| r.task.id != "t0"),
+                "t0 filtered out of the view"
+            );
+            // Detail closed: focus is back on the list.
+            assert!(
+                matches!(app.focus, Focus::List),
+                "detail closes when the yak drops out"
+            );
         }
 
         #[test]

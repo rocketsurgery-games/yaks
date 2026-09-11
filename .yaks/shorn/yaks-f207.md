@@ -4,7 +4,7 @@ title: Changing priority (or anything that causes a list resort) in detail mode 
 type: bug
 priority: 3
 created: '2026-08-23T18:26:53Z'
-updated: '2026-09-10T23:57:22Z'
+updated: '2026-09-11T00:08:52Z'
 labels:
 - ui
 verify: cargo test -p yaks
@@ -23,3 +23,11 @@ Design decision needed before lane C starts: when a priority change pushes the s
 ---
 ▸ 2026-09-10T23:56:53Z [Joel Webber]
 Agreed, let's just close the detail pane when it gets filtered out.
+
+---
+▸ 2026-09-11T00:08:44Z [Joel Webber]
+verify: `cargo test -p yaks` -> PASS (exit 0)
+
+---
+▸ 2026-09-11T00:08:50Z [lane-c]
+Fixed in src/tui.rs apply_edit: capture selected_id() before reload, call reload_preserving_selection() (follow behavior), then close the detail pane (focus=List) when the edited id is no longer in rows() and focus==Detail. Human-confirmed drop-out (a): close. Evidence: two new live tests in tui::tests::live -- priority_change_follows_selection_to_new_slot (cursor follows t0 to its new sorted slot, cursor==2, detail stays open) and priority_change_out_of_view_closes_detail (p1-filtered view, t0->p5 drops out, focus returns to List). cargo test -p yaks: 242 unit + 25 CLI PASS, 1 ignored. yaks verify yaks-f207: PASS (exit 0).
