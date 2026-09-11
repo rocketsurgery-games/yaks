@@ -49,6 +49,10 @@ LOOKING at the rendered frame (and via `cargo test -p yaks docshots --
 snapshots in `src/tui.rs`). If a change has no lever to see its effect,
 `yaks ask` rather than declare it done on faith.
 
+To actually *look* at an SVG frame, rasterize it to PNG with headless Chrome
+(recipe in `docs/tui.md`) — yaks stays out of rasterization, and a pure-Rust
+rasterizer botches the color emoji, so a browser engine is the lever.
+
 ## Keeping docs current
 
 A user-facing change is not done until its docs are. When you add or change a CLI

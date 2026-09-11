@@ -107,3 +107,24 @@ UI (no live-terminal capture), via:
 ```sh
 cargo test -p yaks docshots -- --ignored   # writes docs/assets/*.svg
 ```
+
+## Rasterizing an SVG to view it
+
+The frames render **color emoji**, so view them with a real **browser engine** — a
+pure-Rust rasterizer (`resvg`) renders our emoji glyphs as tofu. `yaks` stays out
+of rasterization on purpose (it's a self-contained task-tracker binary, not an
+image tool), so this is a recipe, not a subcommand. Headless Chrome writes a PNG
+you — or an agent whose file tools only read in-project paths — can then open;
+keep it in a gitignored dir such as `target/`:
+
+```sh
+mkdir -p target/svgcmp
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --headless=new --disable-gpu --force-device-scale-factor=2 \
+  --screenshot=target/svgcmp/out.png \
+  --window-size=<W>,<H> docs/assets/tui-list.svg
+```
+
+`<W>`/`<H>` are the SVG's `width`/`height` (the first line of the file). A higher
+`--force-device-scale-factor` yields a crisper image / more pixels to hand an LLM.
+To pixel-diff two renders: `magick compare -metric AE a.png b.png /dev/null`.
