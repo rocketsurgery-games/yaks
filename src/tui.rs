@@ -7,9 +7,11 @@
 
 mod cache;
 mod content;
+mod create;
 mod detail;
 #[cfg(test)]
 mod docshots;
+mod drawer;
 mod editor;
 mod headless;
 mod markdown;
@@ -47,7 +49,7 @@ use ratatui::crossterm::terminal::{
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::{Frame, Terminal};
 
 use crate::filter::{self, FilterSpec};
@@ -57,6 +59,8 @@ use crate::herd::{
 };
 use crate::model::{Status, Task};
 
+use create::*;
+use drawer::*;
 use editor::*;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -167,27 +171,6 @@ const TYPE_CHOICES: [&str; 4] = ["task", "bug", "feature", "idea"];
 const PRI_CHOICES: [u8; 5] = [1, 2, 3, 4, 5];
 const DEPS_CHOICES: [&str; 3] = ["ready", "tangled", "inbox"];
 
-/// The filter drawer: a small form of chip facets (status/type/priority/deps)
-/// and text facets (labels/search/parent). Editing it previews live on the
-/// list; Enter applies, Esc reverts to `saved`. Reproduces Python `_DrawerState`.
-struct Drawer {
-    saved: FilterSpec,
-    statuses: Vec<Status>,
-    types: Vec<String>,
-    priorities: Vec<u8>,
-    ready: bool,
-    tangled: bool,
-    /// The inbox facet: keep only yaks carrying a `needs` block. Composes with
-    /// the rest of the filter (replaces the old modal `i` toggle).
-    needs: bool,
-    labels: RefCell<EditorState>,
-    search: RefCell<EditorState>,
-    parent: RefCell<EditorState>,
-    handler: EditorEventHandler,
-    row: usize,
-    chip_idx: usize,
-}
-
 fn text_field(seed: &str, vim: bool) -> RefCell<EditorState> {
     let mut st = EditorState::new(Lines::from(seed));
     st.set_single_line(true);
@@ -219,119 +202,6 @@ fn toggle<T: PartialEq>(v: &mut Vec<T>, val: T) {
     }
 }
 
-impl Drawer {
-    fn from_filter(vim: bool, f: &FilterSpec) -> Self {
-        Drawer {
-            saved: clone_spec(f),
-            statuses: f.statuses.clone(),
-            types: f.types.clone(),
-            priorities: f.priorities.clone(),
-            ready: f.ready_only,
-            tangled: f.tangled_only,
-            needs: f.needs_only,
-            labels: text_field(&f.labels.join(", "), vim),
-            search: text_field(f.search.as_deref().unwrap_or(""), vim),
-            parent: text_field(f.parent.as_deref().unwrap_or(""), vim),
-            handler: make_handler(vim),
-            row: 0,
-            chip_idx: 0,
-        }
-    }
-
-    fn is_text_row(&self) -> bool {
-        matches!(self.row, 3 | 4 | 5)
-    }
-
-    /// The editor backing the current text row (labels/search/parent), if on one.
-    fn text_editor(&self) -> Option<&RefCell<EditorState>> {
-        match self.row {
-            3 => Some(&self.labels),
-            4 => Some(&self.search),
-            5 => Some(&self.parent),
-            _ => None,
-        }
-    }
-
-    fn chip_count(&self) -> usize {
-        match self.row {
-            0 => STATUS_CHOICES.len(),
-            1 => TYPE_CHOICES.len(),
-            2 => PRI_CHOICES.len(),
-            6 => DEPS_CHOICES.len(),
-            _ => 0,
-        }
-    }
-
-    fn toggle_chip(&mut self) {
-        match self.row {
-            0 => toggle(&mut self.statuses, STATUS_CHOICES[self.chip_idx]),
-            1 => toggle(&mut self.types, TYPE_CHOICES[self.chip_idx].to_string()),
-            2 => toggle(&mut self.priorities, PRI_CHOICES[self.chip_idx]),
-            6 => match self.chip_idx {
-                0 => self.ready = !self.ready,
-                1 => self.tangled = !self.tangled,
-                _ => self.needs = !self.needs,
-            },
-            _ => {}
-        }
-    }
-
-    fn clear(&mut self) {
-        self.statuses.clear();
-        self.types.clear();
-        self.priorities.clear();
-        self.ready = false;
-        self.tangled = false;
-        self.needs = false;
-        *self.labels.borrow_mut() = {
-            let mut s = EditorState::new(Lines::from(""));
-            s.set_single_line(true);
-            s.mode = EditorMode::Insert;
-            s
-        };
-        *self.search.borrow_mut() = {
-            let mut s = EditorState::new(Lines::from(""));
-            s.set_single_line(true);
-            s.mode = EditorMode::Insert;
-            s
-        };
-        *self.parent.borrow_mut() = {
-            let mut s = EditorState::new(Lines::from(""));
-            s.set_single_line(true);
-            s.mode = EditorMode::Insert;
-            s
-        };
-    }
-
-    fn text_of(cell: &RefCell<EditorState>) -> String {
-        cell.borrow().lines.to_string()
-    }
-
-    fn build_spec(&self) -> FilterSpec {
-        let labels: Vec<String> = Self::text_of(&self.labels)
-            .split(',')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect();
-        let non_empty = |cell: &RefCell<EditorState>| {
-            let s = Self::text_of(cell).trim().to_string();
-            if s.is_empty() { None } else { Some(s) }
-        };
-        FilterSpec {
-            statuses: self.statuses.clone(),
-            types: self.types.clone(),
-            priorities: self.priorities.clone(),
-            labels,
-            search: non_empty(&self.search),
-            ready_only: self.ready,
-            tangled_only: self.tangled,
-            needs_only: self.needs,
-            parent: non_empty(&self.parent),
-        }
-    }
-}
-
 /// Max gap between two `Esc` presses for them to count as a double-tap cancel.
 const DOUBLE_ESC_MS: u64 = 300;
 
@@ -340,171 +210,12 @@ const DOUBLE_ESC_MS: u64 = 300;
 // block_index`, so the total row count is dynamic (`CreateForm::row_count`).
 const HEADER_ROWS: usize = 4;
 
-/// One editable content block in the form: the task's description, or a single
-/// comment (carrying its original timestamp so it round-trips unchanged).
-struct ContentBlock {
-    kind: content::BlockKind,
-    editor: RefCell<EditorState>,
-}
-
-/// The create/edit task form: a right-pane form modeled on `Drawer`. Two chip
-/// rows (type/priority) are **single-select** — the cursor *is* the value —
-/// plus single-line title/labels rows and a stack of multi-line **content**
-/// blocks (description + comments). `Ctrl-N/P`/Tab walk every row; the focused
-/// block expands to a live editor (accordion). `Ctrl-S` commits (create or
-/// update), `Esc`/`Ctrl-C` cancels. Shared by `c`/`C` (create) and `E` (edit).
-struct CreateForm {
-    title: RefCell<EditorState>,
-    labels: RefCell<EditorState>,
-    /// `blocks[0]` is always the description; `blocks[1..]` are comments.
-    blocks: Vec<ContentBlock>,
-    /// Index into `TYPE_CHOICES` (single-select cursor==value).
-    kind_idx: usize,
-    /// Index into `PRI_CHOICES` (single-select cursor==value; default → p3).
-    pri_idx: usize,
-    row: usize,
-    /// Create: the (optional) parent for the new task. Edit: unused (reparent
-    /// is a separate action); shown in the header for context.
-    parent: Option<String>,
-    /// `Some(id)` when editing an existing task; `None` when creating.
-    edit_id: Option<String>,
-    handler: EditorEventHandler,
-}
-
 fn kind_index(kind: &str) -> usize {
     TYPE_CHOICES.iter().position(|&k| k == kind).unwrap_or(0)
 }
 
 fn pri_index(p: u8) -> usize {
     PRI_CHOICES.iter().position(|&x| x == p).unwrap_or(2)
-}
-
-impl CreateForm {
-    fn new(vim: bool, parent: Option<String>) -> Self {
-        CreateForm {
-            title: text_field("", vim),
-            labels: text_field("", vim),
-            blocks: vec![ContentBlock {
-                kind: content::BlockKind::Description,
-                editor: multiline_field("", vim),
-            }],
-            kind_idx: 0,           // task
-            pri_idx: pri_index(3), // p3
-            row: 0,
-            parent,
-            edit_id: None,
-            handler: make_handler(vim),
-        }
-    }
-
-    /// Seed the form from an existing task for editing: the body is split into a
-    /// description block plus one block per comment.
-    fn for_edit(vim: bool, task: &Task) -> Self {
-        let blocks = content::parse(&task.body)
-            .into_iter()
-            .map(|b| ContentBlock {
-                kind: b.kind,
-                editor: multiline_field(&b.text, vim),
-            })
-            .collect();
-        CreateForm {
-            title: text_field(&task.title, vim),
-            labels: text_field(&task.labels.join(", "), vim),
-            blocks,
-            kind_idx: kind_index(&task.kind),
-            pri_idx: pri_index(task.priority),
-            row: 0,
-            parent: task.parent.clone(),
-            edit_id: Some(task.id.clone()),
-            handler: make_handler(vim),
-        }
-    }
-
-    fn is_editing(&self) -> bool {
-        self.edit_id.is_some()
-    }
-
-    fn row_count(&self) -> usize {
-        HEADER_ROWS + self.blocks.len()
-    }
-
-    /// The content-block index for the current row, when the cursor is on one.
-    fn content_index(&self) -> Option<usize> {
-        self.row
-            .checked_sub(HEADER_ROWS)
-            .filter(|&i| i < self.blocks.len())
-    }
-
-    fn is_content_row(&self) -> bool {
-        self.content_index().is_some()
-    }
-
-    /// Single-line text rows (title, labels); content blocks are multi-line and
-    /// handled separately.
-    fn is_line_text_row(&self) -> bool {
-        matches!(self.row, 0 | 3)
-    }
-
-    /// The editor backing the current single-line text row (title/labels).
-    fn line_editor(&self) -> Option<&RefCell<EditorState>> {
-        match self.row {
-            0 => Some(&self.title),
-            3 => Some(&self.labels),
-            _ => None,
-        }
-    }
-
-    /// Move the single-select chip cursor on a chip row (wrapping).
-    fn move_chip(&mut self, delta: i32) {
-        match self.row {
-            1 => {
-                let n = TYPE_CHOICES.len() as i32;
-                self.kind_idx = (self.kind_idx as i32 + delta).rem_euclid(n) as usize;
-            }
-            2 => {
-                let n = PRI_CHOICES.len() as i32;
-                self.pri_idx = (self.pri_idx as i32 + delta).rem_euclid(n) as usize;
-            }
-            _ => {}
-        }
-    }
-
-    fn title_text(&self) -> String {
-        self.title.borrow().lines.to_string().trim().to_string()
-    }
-
-    fn labels_vec(&self) -> Vec<String> {
-        self.labels
-            .borrow()
-            .lines
-            .to_string()
-            .split(',')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect()
-    }
-
-    /// Reassemble the full body from the description + comment blocks (emptied
-    /// comments are dropped, so saving an emptied comment deletes it).
-    fn assembled_body(&self) -> String {
-        let blocks: Vec<content::Block> = self
-            .blocks
-            .iter()
-            .map(|b| content::Block {
-                kind: b.kind.clone(),
-                text: b.editor.borrow().lines.to_string(),
-            })
-            .collect();
-        content::assemble(&blocks)
-    }
-
-    /// Body for a *create* (empty → no body). A create form only has the one
-    /// description block.
-    fn body_opt(&self) -> Option<String> {
-        let b = self.assembled_body();
-        if b.trim().is_empty() { None } else { Some(b) }
-    }
 }
 
 /// Sort key for a flat view field (ISO timestamps sort lexically; priority is
@@ -3497,263 +3208,9 @@ fn render_help(scroll: u16, frame: &mut Frame, area: Rect) {
     frame.render_widget(Paragraph::new(help_content()).scroll((scroll, 0)), body);
 }
 
-fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
-    let rows = Layout::vertical([
-        Constraint::Length(1), // header
-        Constraint::Length(1), // status chips
-        Constraint::Length(1), // type chips
-        Constraint::Length(1), // priority chips
-        Constraint::Length(1), // labels
-        Constraint::Length(1), // search
-        Constraint::Length(1), // parent
-        Constraint::Length(1), // deps chips
-        Constraint::Min(0),
-    ])
-    .split(area);
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            "Filter",
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        )),
-        rows[0],
-    );
-    let statuses: Vec<(String, bool)> = STATUS_CHOICES
-        .iter()
-        .map(|&s| (status_word(s).to_string(), d.statuses.contains(&s)))
-        .collect();
-    let types: Vec<(String, bool)> = TYPE_CHOICES
-        .iter()
-        .map(|&k| (k.to_string(), d.types.iter().any(|t| t == k)))
-        .collect();
-    let pris: Vec<(String, bool)> = PRI_CHOICES
-        .iter()
-        .map(|&p| (format!("p{p}"), d.priorities.contains(&p)))
-        .collect();
-    let deps: Vec<(String, bool)> = vec![
-        ("ready".into(), d.ready),
-        ("tangled".into(), d.tangled),
-        ("inbox".into(), d.needs),
-    ];
-    render_chip_row(
-        d.row == 0,
-        d.chip_idx,
-        DRAWER_LABEL_W,
-        "status",
-        &statuses,
-        frame,
-        rows[1],
-    );
-    render_chip_row(
-        d.row == 1,
-        d.chip_idx,
-        DRAWER_LABEL_W,
-        "type",
-        &types,
-        frame,
-        rows[2],
-    );
-    render_chip_row(
-        d.row == 2,
-        d.chip_idx,
-        DRAWER_LABEL_W,
-        "priority",
-        &pris,
-        frame,
-        rows[3],
-    );
-    render_text_row(
-        d.row == 3,
-        DRAWER_LABEL_W,
-        "labels",
-        &d.labels,
-        "(any)",
-        frame,
-        rows[4],
-    );
-    render_text_row(
-        d.row == 4,
-        DRAWER_LABEL_W,
-        "search",
-        &d.search,
-        "(any)",
-        frame,
-        rows[5],
-    );
-    render_text_row(
-        d.row == 5,
-        DRAWER_LABEL_W,
-        "parent",
-        &d.parent,
-        "(any)",
-        frame,
-        rows[6],
-    );
-    render_chip_row(
-        d.row == 6,
-        d.chip_idx,
-        DRAWER_LABEL_W,
-        "deps",
-        &deps,
-        frame,
-        rows[7],
-    );
-}
-
 /// The create/edit task form: header + title / type / priority / labels meta
 /// rows, a `─ description ─` separator, then a multi-line description content
 /// zone filling the rest. Laid out like `render_drawer`, inset by `right_divider`.
-fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
-    let [header_r, title_r, type_r, pri_r, labels_r, content_r] = Layout::vertical([
-        Constraint::Length(1), // header
-        Constraint::Length(1), // title
-        Constraint::Length(1), // type chips
-        Constraint::Length(1), // priority chips
-        Constraint::Length(1), // labels
-        Constraint::Min(0),    // content-block stack
-    ])
-    .areas(area);
-    let header = match (&f.edit_id, &f.parent) {
-        (Some(id), _) => format!("Edit {id}"),
-        (None, Some(p)) => format!("New task (child of {p})"),
-        (None, None) => "New yak".to_string(),
-    };
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            header,
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        )),
-        header_r,
-    );
-    let types: Vec<(String, bool)> = TYPE_CHOICES
-        .iter()
-        .enumerate()
-        .map(|(i, &k)| (k.to_string(), i == f.kind_idx))
-        .collect();
-    let pris: Vec<(String, bool)> = PRI_CHOICES
-        .iter()
-        .enumerate()
-        .map(|(i, &p)| (format!("p{p}"), i == f.pri_idx))
-        .collect();
-    render_text_row(
-        f.row == 0,
-        CREATE_LABEL_W,
-        "title",
-        &f.title,
-        "",
-        frame,
-        title_r,
-    );
-    render_chip_row(
-        f.row == 1,
-        f.kind_idx,
-        CREATE_LABEL_W,
-        "type",
-        &types,
-        frame,
-        type_r,
-    );
-    render_chip_row(
-        f.row == 2,
-        f.pri_idx,
-        CREATE_LABEL_W,
-        "priority",
-        &pris,
-        frame,
-        pri_r,
-    );
-    render_text_row(
-        f.row == 3,
-        CREATE_LABEL_W,
-        "labels",
-        &f.labels,
-        "",
-        frame,
-        labels_r,
-    );
-    render_content_stack(f, frame, content_r);
-}
-
-/// Render the description + comment blocks as an accordion: one labeled
-/// separator per block, with the "expanded" block's body beneath its separator.
-/// The focused block (cursor on a content row) shows a live editor; otherwise
-/// the description shows as a dimmed, wrapped preview so it's visible at a
-/// glance while the cursor sits on a header field.
-fn render_content_stack(f: &CreateForm, frame: &mut Frame, area: Rect) {
-    let focused = f.content_index();
-    let expand = focused.unwrap_or(0); // description is shown by default
-    let mut constraints = Vec::new();
-    for i in 0..f.blocks.len() {
-        constraints.push(Constraint::Length(1)); // separator
-        if i == expand {
-            constraints.push(Constraint::Min(0)); // block body
-        }
-    }
-    let rects = Layout::vertical(constraints).split(area);
-    let mut ri = 0;
-    for (i, block) in f.blocks.iter().enumerate() {
-        let is_focused = focused == Some(i);
-        render_block_separator(block, is_focused, frame, rects[ri]);
-        ri += 1;
-        if i != expand {
-            continue;
-        }
-        let body = rects[ri];
-        ri += 1;
-        if is_focused {
-            let mut st = block.editor.borrow_mut();
-            let mode = st.mode;
-            set_md_highlights(&mut st);
-            frame.render_widget(EditorView::new(&mut st).theme(editor_theme(mode)), body);
-        } else {
-            let placeholder = match &block.kind {
-                content::BlockKind::Description => "(no description)",
-                content::BlockKind::Comment { .. } => "(empty)",
-            };
-            let text = block.editor.borrow().lines.to_string();
-            let shown = if text.trim().is_empty() {
-                placeholder.to_string()
-            } else {
-                text
-            };
-            frame.render_widget(
-                Paragraph::new(shown)
-                    .style(Style::new().fg(Color::DarkGray))
-                    .wrap(Wrap { trim: false }),
-                body,
-            );
-        }
-    }
-}
-
-/// One accordion separator: `▸ label ───` (cyan marker when focused, dim
-/// otherwise). Comment blocks label with their date.
-fn render_block_separator(block: &ContentBlock, focused: bool, frame: &mut Frame, area: Rect) {
-    let label = match &block.kind {
-        content::BlockKind::Description => "description".to_string(),
-        content::BlockKind::Comment { timestamp, actor } => {
-            let date = timestamp.get(..10).unwrap_or(timestamp);
-            match actor {
-                Some(a) => format!("comment · {date} · {a}"),
-                None => format!("comment · {date}"),
-            }
-        }
-    };
-    let marker = if focused { "▸ " } else { "  " };
-    let head = format!("{marker}{label} ");
-    let dashes = (area.width as usize).saturating_sub(disp_width(&head));
-    let color = if focused {
-        Color::Cyan
-    } else {
-        Color::DarkGray
-    };
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(head, Style::new().fg(color)),
-            Span::styled("─".repeat(dashes), Style::new().fg(Color::DarkGray)),
-        ])),
-        area,
-    );
-}
 
 /// Label-column widths (gutter marker excluded): the drawer's longest label is
 /// `priority` (8); the create form's is `description` (11). Each leaves one
