@@ -13,6 +13,7 @@ mod detail;
 mod docshots;
 mod drawer;
 mod editor;
+mod fuzzy;
 mod headless;
 mod markdown;
 #[cfg(test)]
@@ -33,7 +34,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use edtui::{EditorEventHandler, EditorMode, EditorState, EditorView, Lines};
+use edtui::{EditorMode, EditorState, EditorView, Lines};
 use notify::event::{EventKind, ModifyKind};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::backend::CrosstermBackend;
@@ -62,6 +63,7 @@ use crate::model::{Status, Task};
 use create::*;
 use drawer::*;
 use editor::*;
+use fuzzy::*;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Focus {
@@ -117,51 +119,6 @@ enum ConfirmAction {
     Slaughter(String),
     /// Discard a dirty edit/create form or comment (stashed in `App.dirty_cancel`).
     DiscardEdit,
-}
-
-/// A filter-as-you-type picker over the task set. The query is an edtui
-/// single-line editor; candidates are ranked substring matches (Python's
-/// `fuzzy_pick_task` semantics). `RefCell` for the same render-purity reason.
-struct FuzzyPick {
-    label: String,
-    query: RefCell<EditorState>,
-    handler: EditorEventHandler,
-    /// Ids never offered (self, existing deps/parents, cycle- or loop-forming).
-    exclude: HashSet<String>,
-    /// When true, a synthetic top row clears the parent (reparent to root).
-    allow_none: bool,
-    sel: usize,
-    action: FuzzyAction,
-    /// The overlay to restore when this picker closes (commit or cancel). Set
-    /// when the picker is opened *over* another overlay — e.g. the editor that
-    /// ref-autocomplete inserts back into — so closing returns there instead of
-    /// to the bare board.
-    return_to: Option<Box<Overlay>>,
-    /// Chars of the already-typed partial token (e.g. `yaks-`) to delete from the
-    /// editor before inserting the chosen id, so autocomplete doesn't duplicate
-    /// the prefix. Only meaningful for [`FuzzyAction::InsertRef`].
-    replace_len: usize,
-}
-
-enum FuzzyAction {
-    AddDep(String),
-    Reparent(String),
-    /// Insert the picked task's id at the cursor of the editor stashed in
-    /// `FuzzyPick::return_to` (ref autocomplete while editing).
-    InsertRef,
-}
-
-/// Inline incremental search box. Editing it updates `App.filter.search` on
-/// every keystroke (live preview); Esc restores the pre-search query.
-struct SearchBox {
-    query: RefCell<EditorState>,
-    handler: EditorEventHandler,
-    /// The `filter.search` value before opening, restored on cancel.
-    saved: Option<String>,
-    /// Detail-find only: `(detail_scroll, detail_line)` captured when the find
-    /// opened, restored on cancel so Esc returns to the pre-find position
-    /// (vi-like). `None` for the list search box.
-    detail_origin: Option<(u16, usize)>,
 }
 
 // Filter-drawer layout: 7 rows, three of them free-text.
@@ -249,94 +206,6 @@ fn spec_eq(a: &FilterSpec, b: &FilterSpec) -> bool {
 /// Snapshot a spec (thin alias for `.clone()`; kept for call-site clarity).
 fn clone_spec(f: &FilterSpec) -> FilterSpec {
     f.clone()
-}
-
-impl SearchBox {
-    fn new(vim: bool, initial: Option<String>) -> Self {
-        let seed = initial.clone().unwrap_or_default();
-        let mut st = EditorState::new(Lines::from(seed.as_str()));
-        st.set_single_line(true);
-        st.mode = EditorMode::Insert;
-        SearchBox {
-            query: RefCell::new(st),
-            handler: make_handler(vim),
-            saved: initial,
-            detail_origin: None,
-        }
-    }
-
-    fn query_text(&self) -> String {
-        self.query.borrow().lines.to_string()
-    }
-}
-
-impl FuzzyPick {
-    fn new(
-        vim: bool,
-        label: String,
-        exclude: HashSet<String>,
-        allow_none: bool,
-        action: FuzzyAction,
-    ) -> Self {
-        let mut st = EditorState::new(Lines::from(""));
-        st.set_single_line(true);
-        st.mode = EditorMode::Insert;
-        FuzzyPick {
-            label,
-            query: RefCell::new(st),
-            handler: make_handler(vim),
-            exclude,
-            allow_none,
-            sel: 0,
-            action,
-            return_to: None,
-            replace_len: 0,
-        }
-    }
-
-    fn query_text(&self) -> String {
-        self.query.borrow().lines.to_string()
-    }
-}
-
-/// Ranked substring matches over `all`, honoring the picker's exclude set and
-/// query. Empty query lists everything (capped). Score: id-prefix < id-substr
-/// < title-substr, then priority, then id.
-fn fuzzy_candidates<'a>(all: &'a [Task], fp: &FuzzyPick) -> Vec<&'a Task> {
-    let q = fp.query_text().to_lowercase();
-    let mut scored: Vec<(u8, u8, &Task)> = Vec::new();
-    for t in all {
-        if fp.exclude.contains(&t.id) {
-            continue;
-        }
-        let score = if q.is_empty() {
-            0
-        } else {
-            let tid = t.id.to_lowercase();
-            let title = t.title.to_lowercase();
-            if tid.starts_with(&q) {
-                0
-            } else if tid.contains(&q) {
-                1
-            } else if title.contains(&q) {
-                2
-            } else {
-                continue;
-            }
-        };
-        scored.push((score, t.priority, t));
-    }
-    scored.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then(a.1.cmp(&b.1))
-            .then_with(|| a.2.id.cmp(&b.2.id))
-    });
-    scored.into_iter().take(20).map(|(_, _, t)| t).collect()
-}
-
-/// Number of selectable rows (candidates plus the optional clear-parent row).
-fn fuzzy_total(all: &[Task], fp: &FuzzyPick) -> usize {
-    fuzzy_candidates(all, fp).len() + fp.allow_none as usize
 }
 
 /// TUI state. Holds the loaded task set plus (in live use) a `Herd` handle so
@@ -3309,44 +3178,6 @@ fn render_text_row(
             fld,
         );
     }
-}
-
-fn render_fuzzy_results(app: &App, fp: &FuzzyPick, frame: &mut Frame, area: Rect) {
-    let [head, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(area);
-    let cands = fuzzy_candidates(&app.all, fp);
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            format!("{}  ({} matches)", fp.label, cands.len()),
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        )),
-        head,
-    );
-    let mut items: Vec<ListItem> = Vec::new();
-    if fp.allow_none {
-        items.push(ListItem::new(Line::from(Span::styled(
-            "(clear parent — make top-level)",
-            Style::new().fg(Color::DarkGray),
-        ))));
-    }
-    for t in &cands {
-        // Status emoji (matching the list, tab bar and detail pane) rather than
-        // a bracketed letter glyph.
-        items.push(ListItem::new(Line::from(vec![
-            Span::raw(format!("{}  ", t.status.emoji())),
-            Span::styled(format!("{} ", t.id), Style::new().fg(Color::DarkGray)),
-            Span::raw(t.title.clone()),
-        ])));
-    }
-    let total = cands.len() + fp.allow_none as usize;
-    let mut state = ListState::default();
-    if total > 0 {
-        state.select(Some(fp.sel.min(total - 1)));
-    }
-    frame.render_stateful_widget(
-        List::new(items).highlight_style(Style::new().bg(Color::Indexed(237))),
-        body,
-        &mut state,
-    );
 }
 
 fn overlay_name(o: &Overlay) -> &'static str {
