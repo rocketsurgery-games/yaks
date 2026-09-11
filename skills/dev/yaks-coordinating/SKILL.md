@@ -171,6 +171,39 @@ The coordinator runs a batch in four beats:
    abandoned/stalled lane — `regrow` it (shaving→hairy) or re-run. `yaks doctor`
    surfaces stragglers.
 
+## Serial-arc run shape (persistent worktree, sequential phases)
+
+Not every multi-yak arc fans out. A large **serial** refactor — one whose phases
+all edit the same file, so they *cannot* run in parallel (e.g. splitting a
+monolith into modules) — runs as a single **long-lived worktree + branch**, worked
+by a sequence of runs (coordinator and/or spawned sub-agents), one phase at a
+time:
+
+- **Cut once, keep across all phases, remove at the end.** `git worktree add
+  wt/<arc> -b <branch>` from `main` HEAD (which already holds the committed plan
+  herd — an umbrella yak plus its sequenced children). It survives the whole arc;
+  `git worktree remove` only at the end.
+- **HITL is *simpler* than in a fan-out.** The coordinator operates *at* the
+  worktree, so the cross-worktree review-ask trap doesn't apply: asks/answers land
+  on the branch and merge with the work, and the human talks to the coordinator
+  directly — no handback routing.
+- **Checkpoint aggressively — especially in team mode.** The arc's yak state
+  (shaves/shears/asks) lives on the branch, so `main`'s herd looks stale for
+  in-flight phases. Squash-merge **each completed phase to `main`** at its
+  checkpoint (yak id in the message), then `git merge main` back into the branch
+  to re-sync. This keeps `main`'s herd honest, keeps the per-branch herds in step,
+  and de-risks integration one phase at a time — the opposite of hoarding the arc
+  on a branch until the end.
+- **Executor choice.** The coordinator can drive each phase directly in the
+  worktree (no file-tool SOP tax) or spawn a sub-agent per phase (which then obeys
+  the explicit-`wt/…`-path SOP). Prefer coordinator-driven for delicate,
+  behavior-preserving work (e.g. snapshot migration); spawn for bulk mechanical
+  moves.
+
+This is the sequential dual of the parallel run shape: same worktree + herd
+mechanics, but one persistent lane advanced in checkpoints instead of many
+ephemeral lanes merged at once.
+
 ## Merge / integration
 
 The coordinator owns integration. One hard rule: **the yak id must appear in
@@ -323,7 +356,9 @@ Humans coordinate through the same notes. Raise a decision with `yaks ask <id>
 answer <id> --note "..."` (human-reserved — an agent never clears its own block).
 The human's queue is `yaks inbox`. Because yaks-working re-reads notes before
 starting, feedback left on `main` is seen before work begins. Do not press past
-a note that redirects the work.
+a note that redirects the work. Raise genuine design forks through `ask`/`answer`
+even when you hold a lean — recording the decision as an attributed thread is
+provenance for later archaeology (see yaks-working).
 
 **Human drift is the human's.** Expect the human to edit or create yaks in
 `main`'s `.yaks/` mid-run. Leave their working-tree edits untouched — never

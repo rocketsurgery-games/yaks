@@ -31,6 +31,14 @@ rather than spinning. Pending questions surface in the human's `yaks inbox`.
 Clearing the block is human-reserved (`yaks answer <id>`) — never answer your own
 ask.
 
+**Ask to *record* a judgment call, not only when you're stuck.** Beyond "ask when
+you can't judge," raise a genuine design fork through `ask`/`answer` even when you
+hold a clear lean — state the lean in the question and let the human's answer
+stand as the decision. That turns a choice you'd otherwise make silently into an
+attributed, durable thread on the yak: the fork, the reasoning, and who called it
+— provenance for later yak archaeology. Reserve it for real forks (architecture,
+semantics, scope), not trivia.
+
 ## While you work
 
 - **Append progress as you go.** `yaks update <id> --note "what you found /
