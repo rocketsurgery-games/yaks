@@ -45,7 +45,8 @@ full-page; `g`/`G` top/bottom.
 **Detail pane** — `h`/`←`/`Esc` back; `j`/`k` scroll; `Tab`/`[`/`]` cycle links,
 `Enter` follow; `i`/`o` nav forward/back; `J`/`K` next/prev task; `Ctrl-N`/`Ctrl-P`
 next/prev content block; `v` + `Shift-↑↓` visual-select lines, `y` copy;
-`/`, `n`/`N` find.
+`/`, `n`/`N` find (`Enter` keeps the cursor on the current match, `Esc` restores
+the pre-find scroll and cursor).
 
 **Edit**
 

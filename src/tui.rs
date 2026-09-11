@@ -303,6 +303,10 @@ struct SearchBox {
     handler: EditorEventHandler,
     /// The `filter.search` value before opening, restored on cancel.
     saved: Option<String>,
+    /// Detail-find only: `(detail_scroll, detail_line)` captured when the find
+    /// opened, restored on cancel so Esc returns to the pre-find position
+    /// (vi-like). `None` for the list search box.
+    detail_origin: Option<(u16, usize)>,
 }
 
 // Filter-drawer layout: 7 rows, three of them free-text.
@@ -695,6 +699,7 @@ impl SearchBox {
             query: RefCell::new(st),
             handler: make_handler(vim),
             saved: initial,
+            detail_origin: None,
         }
     }
 
@@ -2346,7 +2351,10 @@ impl App {
 
     fn open_detail_find(&mut self) {
         let cur = self.detail_find.clone();
-        self.overlay = Overlay::DetailFind(SearchBox::new(self.editor_vim, cur));
+        let mut sb = SearchBox::new(self.editor_vim, cur);
+        // Stash where the cursor/scroll sit now so Esc can restore them (vi-like).
+        sb.detail_origin = Some((self.detail_scroll, self.detail_line));
+        self.overlay = Overlay::DetailFind(sb);
     }
 
     /// (line, col, len) of every detail-find match for the current selection.
@@ -2744,13 +2752,24 @@ impl App {
         // Detail-pane find: live-highlight matches; Enter keeps, Esc restores.
         if matches!(self.overlay, Overlay::DetailFind(_)) {
             if self.field_cancel(k, double_esc) {
-                let saved = match &self.overlay {
-                    Overlay::DetailFind(sb) => sb.saved.clone(),
-                    _ => None,
+                // Esc/Ctrl-C: drop the find and snap back to the pre-find
+                // scroll+cursor (vi restores the origin on cancel).
+                let (saved, origin) = match &self.overlay {
+                    Overlay::DetailFind(sb) => (sb.saved.clone(), sb.detail_origin),
+                    _ => (None, None),
                 };
                 self.detail_find = saved;
+                if let Some((scroll, line)) = origin {
+                    self.detail_scroll = scroll;
+                    self.detail_line = line;
+                }
                 self.overlay = Overlay::None;
             } else if k.code == KeyCode::Enter {
+                // Commit: leave the detail cursor ON the current match, keeping
+                // the scroll where the incremental find placed it (vi-like).
+                if let Some(&(line, ..)) = self.detail_find_matches().get(self.detail_match) {
+                    self.detail_line = line;
+                }
                 self.overlay = Overlay::None;
             } else {
                 if let Overlay::DetailFind(sb) = &mut self.overlay {
@@ -6130,6 +6149,75 @@ mod tests {
         handle_key(&mut app, key('/'));
         typ(&mut app, "child");
         insta::assert_snapshot!(draw(&app, 72, 16));
+    }
+
+    #[test]
+    fn detail_find_enter_lands_cursor_on_match() {
+        // Enter commits the find on the current match (vi-like): the detail
+        // cursor moves ONTO the match line and the scroll stays put, rather
+        // than snapping back to where the cursor was before the search.
+        let mut app = linked();
+        enter_key(&mut app); // focus detail; cursor + scroll at the top
+        assert_eq!(app.detail_line, 0);
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "child"); // matches "Child A1" (line 2), "Child A2" (line 3)
+        let m = app.detail_find_matches();
+        assert!(m.len() >= 2);
+        let match_line = m[app.detail_match].0;
+        assert!(match_line > 0, "match should be below the pre-find cursor");
+        assert_eq!(app.detail_scroll as usize, match_line); // find scrolled here
+        enter_key(&mut app); // commit
+        assert!(matches!(app.overlay, Overlay::None));
+        assert_eq!(app.focus, Focus::Detail);
+        // Cursor sits ON the current match; the find's scroll is preserved.
+        assert_eq!(app.detail_line, match_line);
+        assert_eq!(app.detail_scroll as usize, match_line);
+    }
+
+    #[test]
+    fn detail_find_enter_commits_the_cycled_match() {
+        // Cycling with n before committing lands the cursor on that later
+        // match, not always the first one.
+        let mut app = linked();
+        enter_key(&mut app);
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "child");
+        enter_key(&mut app); // commit on match 0
+        handle_key(&mut app, key('n')); // advance to match 1
+        assert_eq!(app.detail_match, 1);
+        let second = app.detail_find_matches()[1].0;
+        handle_key(&mut app, key('/')); // reopen (query + match index persist)
+        enter_key(&mut app); // commit on the current match (1)
+        assert!(matches!(app.overlay, Overlay::None));
+        assert_eq!(app.detail_match, 1);
+        assert_eq!(app.detail_line, second);
+    }
+
+    #[test]
+    fn detail_find_esc_restores_pre_find_position() {
+        // Esc abandons the find and returns the cursor + scroll to where they
+        // were before it opened (vi restores the origin on cancel).
+        let mut app = linked();
+        enter_key(&mut app); // focus detail
+        handle_key(&mut app, key('j')); // move the cursor off the top
+        let origin_line = app.detail_line;
+        let origin_scroll = app.detail_scroll;
+        assert!(origin_line > 0);
+        handle_key(&mut app, key('/'));
+        typ(&mut app, "child"); // scrolls the pane to the first match
+        assert!(app.detail_find_matches().len() >= 2);
+        assert_ne!(
+            app.detail_scroll, origin_scroll,
+            "find should move the view"
+        );
+        // Vim single-line field: first Esc drops to Normal, the rapid second
+        // Esc is the cancel gesture.
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(app.overlay, Overlay::None));
+        assert!(app.detail_find.is_none());
+        assert_eq!(app.detail_line, origin_line);
+        assert_eq!(app.detail_scroll, origin_scroll);
     }
 
     #[test]
