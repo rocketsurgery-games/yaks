@@ -24,8 +24,20 @@ root; reusable pieces live under `crates/`.
 - `src/store.rs` — `.yaks/` discovery + frontmatter parsing (hand-rolled fast path).
 - `src/main.rs` — clap CLI + command dispatch.
 - `src/herd.rs` — the core facade the CLI and TUI both call.
-- `src/tui.rs` (+ `src/tui/`) — the interactive TUI; `src/tui/headless.rs` is a
-  thin adapter implementing `toque::HeadlessApp` for `App`.
+- `src/tui.rs` (+ `src/tui/`) — the interactive TUI. `tui.rs` is a thin root (the
+  `App` struct, the `Focus`/`Overlay`/`PickAction`/`ConfirmAction` enums, the
+  constructors, and shared form helpers/consts); behavior lives in focused
+  submodules (split out under yaks-b1cc): `render` (all `render_*` + shared render
+  helpers), `editor` (edtui glue), `drawer`/`create`/`fuzzy` (overlay forms +
+  pickers), `viewmodel`/`detail_nav`/`actions`/`handlers` (the `impl App` split by
+  concern, each an `impl App` block using `use super::*`), and `runtime`
+  (`run`/event loop/terminal setup) — alongside the existing
+  `detail`/`tree`/`content`/`markdown`/`view`/`views_store`/`cache` models +
+  persistence. `src/tui/headless.rs` is a thin adapter implementing
+  `toque::HeadlessApp` for `App`; `src/tui/docshots.rs` renders doc SVGs. The
+  whole-frame integration tests + their insta snapshots are central in
+  `src/tui/tests.rs` + `src/tui/snapshots/`; shared test helpers live in
+  `src/tui/test_support.rs`.
 - `crates/toque/` — publishable library: drive any ratatui app headlessly
   (inject keys, capture LLM-/test-legible plain-text snapshots, and render frames
   to SVG for visual inspection). yaks is its first consumer. See

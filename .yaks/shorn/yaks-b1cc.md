@@ -4,7 +4,7 @@ title: Split src/tui.rs monolith into a render/ module tree
 type: task
 priority: 3
 created: '2026-09-10T23:45:35Z'
-updated: '2026-09-11T01:45:19Z'
+updated: '2026-09-13T21:13:26Z'
 labels:
 - meta
 - ui
@@ -23,3 +23,7 @@ Arc execution decision (provenance): merge cadence for the persistent worktree. 
 ---
 ▸ 2026-09-11T01:45:19Z [Joel Webber]
 Strong agreement on aggressive checkpointing, especially in team mode (so the yaks stay in sync)
+
+---
+▸ 2026-09-13T21:13:26Z [coordinator]
+ARC COMPLETE. src/tui.rs split from 7043 -> 348 lines across focused modules: render, editor, drawer, create, fuzzy (overlay forms/pickers); viewmodel, detail_nav, actions, handlers (impl App by concern, as impl App blocks via use super::*); runtime; test_support + tests + snapshots (central integration tests). 8 phases, each behavior-preserving (cargo test green + 22 snapshots intact throughout), checkpointed to main per-phase (cadence A). Findings filed along the way: yaks-0a87 (checkpoint footgun), and the serial-arc/persistent-worktree + provenance-ask patterns (yaks-1a30/yaks-27f0). Deviations noted: render kept as one render.rs (not a subdir); actions/handlers split by contiguous range not strict category.
