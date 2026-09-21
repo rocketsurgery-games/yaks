@@ -211,8 +211,8 @@ enum Command {
         #[arg(long)]
         parent: Option<String>,
         /// Which herd (id prefix) the new yak joins; defaults to the farm's
-        /// configured prefix. Lets one farm hold several herds.
-        #[arg(long)]
+        /// configured herd. Lets one farm hold several herds.
+        #[arg(long = "herd")]
         prefix: Option<String>,
         #[arg(long, num_args = 1..)]
         labels: Vec<String>,
@@ -371,8 +371,10 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Migrate every yak from one id prefix to another (e.g. yaksrs -> yaks),
-    /// rewriting all references and updating the farm's configured prefix.
+    /// Rename a whole herd: migrate every yak from one id prefix to another
+    /// (e.g. yaksrs -> yaks), rewriting all references and updating the farm's
+    /// configured herd. (`rename-prefix` still works as an alias.)
+    #[command(name = "rename-herd", alias = "rename-prefix")]
     RenamePrefix {
         old: String,
         new: String,
@@ -393,8 +395,8 @@ enum Command {
     /// Create a new .yaks/ farm in the current directory (hairy/ shaving/
     /// shorn/ dead/ + config.yaml + schema). Works without an existing farm.
     Init {
-        /// Id prefix for new yaks (default: yak).
-        #[arg(long)]
+        /// Default herd (id prefix) for new yaks (default: yak).
+        #[arg(long = "herd")]
         prefix: Option<String>,
         /// Default task type for new yaks (default: task).
         #[arg(long = "type")]
@@ -548,7 +550,7 @@ fn main() -> Result<()> {
                 }
                 MergeOutcome::Collision(ids) => {
                     eprintln!(
-                        "error: {} id(s) exist in both farms; reconcile the source's prefix with `yaks rename-prefix` first:",
+                        "error: {} id(s) exist in both farms; reconcile the source's herd with `yaks rename-herd` first:",
                         ids.len()
                     );
                     for id in ids {
@@ -1395,7 +1397,7 @@ fn run_init(
         store::InitOutcome::Created => {
             println!("Initialized empty yaks farm in {}", root.display());
             println!(
-                "  prefix {}  ·  default type {}  ·  default priority {}",
+                "  herd {}  ·  default type {}  ·  default priority {}",
                 cfg.prefix, cfg.default_type, cfg.default_priority
             );
             println!("Create your first yak with: yaks create --title \"…\"");

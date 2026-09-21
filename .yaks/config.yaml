@@ -1,4 +1,5 @@
-prefix: yaks
+herd: yaks
+
 # Default verification commands, resolved by a yak's labels when it has no
 # explicit `verify:` field (see `yaks verify`). First matching label wins;
 # `default` is the fallback. The project's levers, named once.
@@ -10,6 +11,7 @@ verify:
   cli: cargo test -p yaks
   skills: cargo test -p yaks skills
   default: cargo test --workspace
+
 # Declared herds (id prefixes) in this farm. The real work is the `yaks` herd;
 # `test` is a demo herd showing per-herd config (its own default_type + verify
 # lever) and the multi-herd TUI (id colouring + the create-form herd picker).

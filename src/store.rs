@@ -69,7 +69,8 @@ fn parse_pointer(file: &Path) -> Result<(String, Option<String>)> {
         if let Some((k, v)) = trimmed.split_once(':') {
             match k.trim() {
                 "path" => path = non_empty(unquote(v)),
-                "prefix" => prefix = non_empty(unquote(v)),
+                // `herd:` is the current name; `prefix:` is the legacy alias.
+                "herd" | "prefix" => prefix = non_empty(unquote(v)),
                 _ => {}
             }
         }
@@ -560,7 +561,13 @@ pub fn read_config(root: &Path) -> Config {
         let mut cur_herd: Option<String> = None;
         let mut herd_verify = false;
         for line in text.lines() {
-            if line.trim().is_empty() {
+            let bare = line.trim();
+            // Skip blanks and comments anywhere. Comments have no `:` (or a
+            // stray one inside prose), so without this they'd fall through to
+            // the no-colon `else` below and reset an open block — silently
+            // dropping every `verify:`/`herds:` entry after an inline comment
+            // (yaks-451d). `parse_pointer` skips `#` lines the same way.
+            if bare.is_empty() || bare.starts_with('#') {
                 continue;
             }
             let indent = line.chars().take_while(|c| *c == ' ' || *c == '\t').count();
@@ -616,7 +623,9 @@ pub fn read_config(root: &Path) -> Config {
             herd_verify = false;
             cur_herd = None;
             match key.as_str() {
-                "prefix" if !val.is_empty() => c.prefix = val,
+                // `herd:` is the current name for the default id prefix;
+                // `prefix:` is the legacy alias kept for on-disk farms.
+                "herd" | "prefix" if !val.is_empty() => c.prefix = val,
                 "default_type" if !val.is_empty() => c.default_type = val,
                 "default_priority" => {
                     if let Ok(n) = val.parse() {
@@ -633,29 +642,31 @@ pub fn read_config(root: &Path) -> Config {
     c
 }
 
-/// Rewrite only the `prefix:` line of `config.yaml` to `new`, leaving every
-/// other line untouched (appending a `prefix:` line if none exists, and
-/// creating the file if missing). Used by the prefix-rename migration so the
-/// config and the on-disk ids agree afterwards.
+/// Rewrite the farm's default-herd line of `config.yaml` to `new`, leaving
+/// every other line untouched (appending a `herd:` line if none exists, and
+/// creating the file if missing). Used by the herd-rename migration so the
+/// config and the on-disk ids agree afterwards. Matches both the current
+/// `herd:` key and the legacy `prefix:` alias, and always writes `herd:` — so
+/// a migration also upgrades a legacy `prefix:` line in place.
 pub fn set_config_prefix(root: &Path, new: &str) -> Result<()> {
     let path = root.join("config.yaml");
     let existing = fs::read_to_string(&path).unwrap_or_default();
     let mut lines: Vec<String> = Vec::new();
     let mut replaced = false;
     for line in existing.lines() {
-        let is_prefix = line
+        let is_herd = line
             .split_once(':')
-            .map(|(k, _)| k.trim() == "prefix")
+            .map(|(k, _)| matches!(k.trim(), "herd" | "prefix"))
             .unwrap_or(false);
-        if is_prefix {
-            lines.push(format!("prefix: {new}"));
+        if is_herd {
+            lines.push(format!("herd: {new}"));
             replaced = true;
         } else {
             lines.push(line.to_string());
         }
     }
     if !replaced {
-        lines.push(format!("prefix: {new}"));
+        lines.push(format!("herd: {new}"));
     }
     let mut out = lines.join("\n");
     out.push('\n');
@@ -705,7 +716,7 @@ pub fn init(root: &Path, cfg: &InitConfig) -> Result<InitOutcome> {
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     }
     let config = format!(
-        "prefix: {}\ndefault_type: {}\ndefault_priority: {}\nvim_mode: {}\n",
+        "herd: {}\ndefault_type: {}\ndefault_priority: {}\nvim_mode: {}\n",
         cfg.prefix, cfg.default_type, cfg.default_priority, cfg.vim_mode,
     );
     let config_path = root.join("config.yaml");
@@ -1317,6 +1328,46 @@ mod move_tests {
         assert_eq!(
             c.verify.get("default").map(String::as_str),
             Some("cargo test --workspace")
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn config_ignores_comments_inside_blocks() {
+        // Regression (yaks-451d): an inline `#` comment inside the verify: (or
+        // herds:) block must NOT terminate the block. Before the fix, the
+        // comment line — having no `key: value` — reset the parser to Top, so
+        // every entry after it (here cli/default) was silently dropped and
+        // `yaks verify` failed to resolve a lever.
+        let root = temp_root();
+        fs::write(
+            root.join("config.yaml"),
+            "herd: yaks\n# a top-level comment\nverify:\n  # ui is the gate\n  ui: cargo test -p yaks\n  cli: cargo test -p yaks\n  default: cargo test --workspace\nherds:\n  # the real herd\n  yaks:\n  test:\n    # per-herd lever\n    verify:\n      default: echo test-lever\n",
+        )
+        .unwrap();
+        let c = read_config(&root);
+        assert_eq!(c.prefix, "yaks");
+        // Every verify entry survives the interleaved comments.
+        assert_eq!(
+            c.verify.get("ui").map(String::as_str),
+            Some("cargo test -p yaks")
+        );
+        assert_eq!(
+            c.verify.get("cli").map(String::as_str),
+            Some("cargo test -p yaks")
+        );
+        assert_eq!(
+            c.verify.get("default").map(String::as_str),
+            Some("cargo test --workspace")
+        );
+        // The herds: block and its per-herd verify also survive.
+        assert_eq!(
+            c.known_herds(),
+            vec!["test".to_string(), "yaks".to_string()]
+        );
+        assert_eq!(
+            c.resolve_verify(&[], Some("test")),
+            Some("echo test-lever".to_string())
         );
         let _ = fs::remove_dir_all(&root);
     }

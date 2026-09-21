@@ -30,13 +30,13 @@ Run `yaks <command> --help` for full flags. Most read commands accept the shared
 
 | Command | What it does |
 |---|---|
-| `create '<title>'` | New hairy yak. Title is positional or `--title`; `--type`/`--priority`/`--parent`/`--prefix`/`--labels`/`--depends-on`/`--source`/`--description`/`--verify`; `--json` prints id + file path. `--prefix` sets the new yak's id prefix (default: the config prefix), so one `.yaks/` can hold several prefixes. |
+| `create '<title>'` | New hairy yak. Title is positional or `--title`; `--type`/`--priority`/`--parent`/`--herd`/`--labels`/`--depends-on`/`--source`/`--description`/`--verify`; `--json` prints id + file path. `--herd` sets the new yak's herd (id prefix; default: the config herd), so one `.yaks/` can hold several herds. |
 | `update <ids…>` | Update fields/labels or append a `--note`; the same edit applies to every id. `--as <actor>` attributes the note. `--verify '<cmd>'` sets (or, empty, clears) the yak's verification command. |
 | `dep add\|remove <id> <dep>` | Add / remove a dependency. |
 | `reparent <ids…> --parent <id>` | Move yaks under a new parent (or `--unparent` to top-level). |
 | `rename <old> <new>` | Rename a yak's id, updating every reference across the farm. |
-| `rename-prefix <old> <new>` | Migrate every id from one prefix to another (e.g. `yaksrs` → `yaks`). |
-| `merge <path> [--dry-run]` | Merge another farm's yaks (all statuses + artifacts) into this one, preserving ids and status. Non-destructive (source left intact); refuses on id collisions — reconcile the source's prefix with `rename-prefix` first. |
+| `rename-herd <old> <new>` | Rename a whole herd: migrate every id from one prefix to another (e.g. `yaksrs` → `yaks`). (`rename-prefix` still works as an alias.) |
+| `merge <path> [--dry-run]` | Merge another farm's yaks (all statuses + artifacts) into this one, preserving ids and status. Non-destructive (source left intact); refuses on id collisions — reconcile the source's herd with `rename-herd` first. |
 | `bulk <filter> <mutation>` | Filter-driven field edit. **Dry-run by default** — prints the matched set + the mutation and changes nothing without `--commit`. Requires ≥1 filter flag (never the whole farm) and ≥1 mutation flag (`--add-label`/`--remove-label`/`--set-priority`/`--set-type`/`--reparent`/`--unparent`). Field edits + reparent only — no state transitions. |
 
 ## Verification
@@ -58,7 +58,7 @@ verify:
 Per-herd overrides live under a `herds:` map (one entry per id prefix), each optionally setting `default_type`, `default_priority`, or its own `verify:` map. Any setting cascades a single level — the herd's value if present, else the farm-global — and the `herds:` keys are the known-herd set the create/TUI picker offers:
 
 ```yaml
-prefix: core
+herd: core
 verify:
   default: cargo test
 herds:

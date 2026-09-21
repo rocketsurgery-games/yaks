@@ -19,7 +19,7 @@ Yaks is a single self-contained binary — a plain command-line tool. Run it dir
 
 The npm package is `@rocketsurgery/yaks` (the unscoped `yaks` was taken, so it's published under the `rocketsurgery` org); the command it installs is `yaks`. Every example below is written as `yaks <cmd>` — substitute whichever invocation works for you. The CLI is stateless: each call is independent, there's nothing to keep running.
 
-**Starting a fresh farm.** If there's no `.yaks/` directory yet, create one with `yaks init` (run in the repo root). It scaffolds `.yaks/{hairy,shaving,shorn,dead}/` plus a `config.yaml`; tune the defaults with `--prefix`, `--type`, and `--priority`. It refuses to clobber an existing farm, so it's safe to run.
+**Starting a fresh farm.** If there's no `.yaks/` directory yet, create one with `yaks init` (run in the repo root). It scaffolds `.yaks/{hairy,shaving,shorn,dead}/` plus a `config.yaml`; tune the defaults with `--herd`, `--type`, and `--priority`. It refuses to clobber an existing farm, so it's safe to run.
 
 Add `--json` to any query command (`list`, `show`, `next`, `tangled`, `search`, `stats`, `rollup`, `inbox`, `log`, `doctor`) for machine-readable output. `yaks create --json` also prints the new yak's id and file path, which is handy when you create a yak and immediately act on it.
 
@@ -36,7 +36,7 @@ The **verbs** are the transitions, and they don't all match their state's spelli
 
 Three **containers** name where yaks live and how they group:
 - a **farm** is one `.yaks/` directory — the store the CLI and TUI operate on.
-- a **herd** is a group of yaks sharing an id prefix within a farm. A farm usually has one, but can hold several — create into a specific herd with `yaks create --prefix <herd>`. This lets one (typically private) farm track several projects at once, each with its own prefix.
+- a **herd** is a group of yaks sharing an id prefix within a farm. A farm usually has one, but can hold several — create into a specific herd with `yaks create --herd <herd>`. This lets one (typically private) farm track several projects at once, each with its own prefix.
 - a **family** is a yak-tree: a parent yak together with its descendants.
 
 ## Hard rules
@@ -72,8 +72,8 @@ Pick the hiding method that fits — they differ in blast radius:
 - Habit: **pull before, push after** a work session so machines stay in sync. yaks needs no configuration for this — discovery finds `.yaks/` exactly as always.
 
 **Several repos, one farm (out-of-tree).** To track several projects in one private farm that lives *outside* their repos, point each repo at it rather than giving each its own `.yaks/`:
-- **Pointer file (recommended):** put a `.yaks` *file* (not a directory) at the repo root with `path: <path to the shared .yaks>` and, optionally, `prefix: <this repo's herd>`. `path` may be absolute, `~/`-relative, or relative to the repo. Discovery follows it, so every `yaks` command in that repo operates on the shared farm — and `yaks create` (with no `--prefix`) routes new yaks into that repo's herd automatically.
-- **Symlink (zero-config):** alternatively symlink `.yaks` → the shared farm. Discovery follows it too, but every repo then shares one config prefix, so pass `yaks create --prefix <herd>` per repo.
+- **Pointer file (recommended):** put a `.yaks` *file* (not a directory) at the repo root with `path: <path to the shared .yaks>` and, optionally, `herd: <this repo's herd>`. `path` may be absolute, `~/`-relative, or relative to the repo. Discovery follows it, so every `yaks` command in that repo operates on the shared farm — and `yaks create` (with no `--herd`) routes new yaks into that repo's herd automatically.
+- **Symlink (zero-config):** alternatively symlink `.yaks` → the shared farm. Discovery follows it too, but every repo then shares one config herd, so pass `yaks create --herd <herd>` per repo.
 - Keep the pointer/symlink out of the shared repo (`.git/info/exclude`), exactly like a private farm. Consolidate existing separate farms into the shared one with `yaks merge`.
 
 **Team.** The yak files are part of the repo — treat them like code.
@@ -133,8 +133,8 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 
 | Command | What it does |
 |---------|-------------|
-| `yaks init` | Scaffold a new `.yaks/` farm in the current directory. `--prefix`, `--type`, `--priority`, `--emacs`. Works without an existing farm |
-| `yaks create` | Create a new task (in hairy). Title is positional (`yaks create "Fix the login crash"`; `--title` still works for back-compat); `--type`, `--priority`, `--parent`, `--prefix` (id prefix for this yak; defaults to the config prefix — lets one `.yaks/` hold several prefixes), `--labels`, `--depends-on`, `--source`, `--description`, `--verify`, `--json` (print the new id + path) |
+| `yaks init` | Scaffold a new `.yaks/` farm in the current directory. `--herd`, `--type`, `--priority`, `--emacs`. Works without an existing farm |
+| `yaks create` | Create a new task (in hairy). Title is positional (`yaks create "Fix the login crash"`; `--title` still works for back-compat); `--type`, `--priority`, `--parent`, `--herd` (herd / id prefix for this yak; defaults to the config herd — lets one `.yaks/` hold several herds), `--labels`, `--depends-on`, `--source`, `--description`, `--verify`, `--json` (print the new id + path) |
 | `yaks list` | List tasks with optional filters (`--all` also includes dead) |
 | `yaks show` | Show full details of a task |
 | `yaks refs` | List what a task points at (parent, deps, id mentions), flagging danglers |
@@ -158,8 +158,8 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks reparent` | Move a task under a new `--parent` (or `--unparent` to top-level) |
 | `yaks bulk` | Apply one field edit (and/or reparent) to every yak matching a filter. **Dry-run by default**; pass `--commit` to apply. Refuses to run without at least one filter flag *and* at least one mutation flag |
 | `yaks rename` | Rename a yak + rewrite every reference to it across the farm |
-| `yaks rename-prefix` | Migrate all yaks from one id prefix to another; `--dry-run` to preview |
-| `yaks merge` | Merge another farm into this one — copies every yak (all statuses) + artifacts, preserving ids and status; **refuses on id collisions** (reconcile the source's prefix with `rename-prefix` first). Non-destructive: the source is left intact. `--dry-run` previews |
+| `yaks rename-herd` | Rename a whole herd: migrate all yaks from one id prefix to another; `--dry-run` to preview (`rename-prefix` still works as an alias) |
+| `yaks merge` | Merge another farm into this one — copies every yak (all statuses) + artifacts, preserving ids and status; **refuses on id collisions** (reconcile the source's herd with `rename-herd` first). Non-destructive: the source is left intact. `--dry-run` previews |
 | `yaks stats` | Show task statistics |
 | `yaks rollup` | Group yaks by the external issue they roll up to (`--keys` for just the keys) |
 | `yaks doctor` | Read-only farm-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on issues, so it's CI-usable. `--json` emits issues as JSON |
@@ -196,12 +196,12 @@ Child tasks use `--parent <id>` on create. Every ID is flat (`{prefix}-{4hex}`) 
 
 > Older farms may still contain dotted IDs (e.g. `yak-a1b2.1`) created before this change. Those dots are now just opaque characters — the `parent:` field is authoritative — so don't parse IDs to infer hierarchy.
 
-The prefix, default type, and default priority come from `.yaks/config.yaml` (falling back to `yak` / `task` / `3`). A nested `verify:` map there (label → command, plus an optional `default`) supplies the default verification command for a yak that has no explicit `verify:` field, resolved by the yak's labels — so the project's levers are named once (e.g. `ui: cargo test -p yaks`).
+The default herd (id prefix), default type, and default priority come from `.yaks/config.yaml` (falling back to `yak` / `task` / `3`). A nested `verify:` map there (label → command, plus an optional `default`) supplies the default verification command for a yak that has no explicit `verify:` field, resolved by the yak's labels — so the project's levers are named once (e.g. `ui: cargo test -p yaks`).
 
-A farm can also declare a `herds:` map — one entry per id prefix — giving that herd its own `default_type`, `default_priority`, or `verify` overrides. Each setting **cascades a single level**: the herd's value if set, else the farm-global. The `herds:` keys are the *known-herd set* the create/TUI picker offers, so you don't retype a prefix; route a new yak into a herd with `yaks create --prefix <herd>` (or a repo's `.yaks` pointer `prefix:`). Example:
+A farm can also declare a `herds:` map — one entry per id prefix — giving that herd its own `default_type`, `default_priority`, or `verify` overrides. Each setting **cascades a single level**: the herd's value if set, else the farm-global. The `herds:` keys are the *known-herd set* the create/TUI picker offers, so you don't retype a prefix; route a new yak into a herd with `yaks create --herd <herd>` (or a repo's `.yaks` pointer `herd:`). Example:
 
 ```yaml
-prefix: core            # the default herd
+herd: core              # the default herd
 default_priority: 3
 verify:
   default: cargo test
@@ -233,7 +233,7 @@ Use **`yaks refs <id>`** to see everything a yak points at — parent, dependenc
 
 ### Renaming safely
 
-`yaks rename <old> <new>` renames a yak and rewrites **every** reference to it (parent, `depends_on`, and id mentions in bodies/titles) across the farm, matching whole ids only so lookalike prose is left untouched. `yaks rename-prefix <old> <new>` does the same for a whole prefix at once (e.g. migrating `yaksrs` → `yaks`) and updates `.yaks/config.yaml`. Both take **`--dry-run`** — always preview a bulk rename first.
+`yaks rename <old> <new>` renames a yak and rewrites **every** reference to it (parent, `depends_on`, and id mentions in bodies/titles) across the farm, matching whole ids only so lookalike prose is left untouched. `yaks rename-herd <old> <new>` does the same for a whole herd at once (e.g. migrating `yaksrs` → `yaks`) and updates `.yaks/config.yaml`. Both take **`--dry-run`** — always preview a bulk rename first.
 
 ## Filtering
 

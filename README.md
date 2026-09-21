@@ -42,7 +42,7 @@ A farm is just a `.yaks/` directory. Create one at your project root and start
 tracking:
 
 Within a farm, yaks group into **herds** by id prefix — a farm can hold several
-(`yaks create --prefix <herd>`), so one (typically private) farm can track
+(`yaks create --herd <herd>`), so one (typically private) farm can track
 several projects at once — and a parent yak with its descendants forms a
 **family**.
 
@@ -207,13 +207,13 @@ shared farm:
 
 ```
 path: ~/work/shared-farm/.yaks
-prefix: web
+herd: web
 ```
 
 Discovery follows the pointer, so every command in that repo operates on the
-shared farm and `yaks create` routes new yaks into that repo's herd (`prefix`)
+shared farm and `yaks create` routes new yaks into that repo's herd (`herd:`)
 with no flag. A `.yaks` symlink to the farm works too (but every repo then
-shares one prefix). Keep the pointer/symlink out of the shared repo with
+shares one herd). Keep the pointer/symlink out of the shared repo with
 `.git/info/exclude`, and use `yaks merge` to fold existing farms into the shared
 one.
 
@@ -227,7 +227,7 @@ one.
 Optional per-project config lives in `.yaks/config.yaml`:
 
 ```yaml
-prefix: yak            # id prefix (default "yak")
+herd: yak              # default herd / id prefix (default "yak")
 default_type: task     # default --type
 default_priority: 3    # default --priority
 vim_mode: true         # TUI editor keybindings: vim (true) or emacs (false)
