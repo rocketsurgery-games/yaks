@@ -4,7 +4,7 @@ title: 'One farm, many herds: consolidate multiple prefixes in a single .yaks'
 type: idea
 priority: 3
 created: '2026-08-27T22:51:04Z'
-updated: '2026-09-21T17:32:21Z'
+updated: '2026-09-21T19:31:02Z'
 depends_on:
 - yaks-0187
 ---
@@ -43,3 +43,7 @@ SUGGESTED SLICES: (a) read-only multi-herd VIEW (load union, herd badges, cross-
 ---
 ▸ 2026-09-21T17:32:21Z [agent]
 PLAN SET (session with Joel): pivot from federation (multiple .yaks roots / friends) to CONSOLIDATION: one farm (.yaks) holding several herds (prefixes). Rationale: dissolves the hard federation problems instead of solving them. No roots to pipe to CLI/TUI, so the env-var-in-embedded-agents worry goes away and ordinary discovery finds one farm. Cross-herd refs already resolve (validation-based, prefix-agnostic; proven on mixed data during the yaksrs to yaks migration). Rename integrity is free since all refs live in one root. One TUI, one private backup repo. Accepted caveats: a farm is one privacy unit (no per-project team/private mix), and a unified view of yaks committed in their own repos is NOT served (judged uncommon; federation stays the fallback for that case). Vocabulary proposed: farm=whole .yaks, herd=prefix-group, family=yak-tree (gated by the docs/naming child). Fleshed out the family below; starting the shears on create-routing.
+
+---
+▸ 2026-09-21T19:30:58Z [agent]
+SHORN (umbrella). Multi-herd farms shipped end to end: one .yaks farm holds several herds (id prefixes), each a project, in one TUI, backed up as one private repo. Children: create --prefix routing (4154), terminology farm/herd/family sweep (92bf), yaks merge (7371), out-of-tree pointer/symlink discovery (1d98), per-herd config with a global-to-herd cascade (98d5), --herd filter plus TUI create herd-routing plus per-herd id colour (3290, a7eb), and docs/skills (eee7). Verified on scratch multi-herd farms throughout. Deferred and tracked (non-blocking): federation across separately-committed farms stays the fallback for repo-committed yaks in a unified view; an explicit in-form herd picker is a standalone follow-up. Ready to test and cut a release.

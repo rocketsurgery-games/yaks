@@ -24,6 +24,12 @@ interchangeable.
   the detail `Needs:` line renders in a warning accent.
 - The dependency-blocked marker (`*`) and the multi-select marker (`●`) are
   distinct axes and can co-occur.
+- The tab row's right edge shows the active **family scope** for tree views
+  (`family: remaining`; a leading `~` means it inherits the global default).
+  Cycle it with `h`.
+- In a **multi-herd farm** (one `.yaks/` holding several id prefixes / herds),
+  each row's id prefix is tinted by herd so herds are easy to scan, and the
+  create form's header shows which herd a new yak will join.
 
 ## Keys
 
@@ -36,6 +42,7 @@ full-page; `g`/`G` top/bottom.
 |---|---|
 | `Tab` / `S-Tab`, `[` / `]` | Next / previous view |
 | `l` / `→` / `Enter` | Show detail pane |
+| `h` | Cycle **family scope** — how much of each tree shows: auto → lone → remaining → all |
 | `Space` | Collapse / expand subtree |
 | `m` | Mark / unmark row (multi-select) |
 | `S` (with marks) | Bulk state transition over the marked set |

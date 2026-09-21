@@ -32,6 +32,13 @@ the projection stays one-way and private. In that private mode, yak→commit
 provenance is not recoverable from the shared repo by design; the shared link is
 PR↔issue via `rollup --keys`, and the yak's own notes carry the rest.
 
+**Consolidated farms (multiple herds).** A single private farm can hold several
+herds (id prefixes), one per project (see the `yaks` skill). Herds commonly map
+to *different* upstream trackers — e.g. a `web` herd → GitHub Issues, an `api`
+herd → Jira. Nothing here changes: `source:` is per-yak and `rollup` groups by
+it regardless of herd, so a rollup naturally splits along trackers. Scope a
+rollup to one project's herd with `--herd`, e.g. `yaks rollup --keys --herd web`.
+
 This skill covers the three things that need judgment; the rollup itself is just
 a CLI command.
 

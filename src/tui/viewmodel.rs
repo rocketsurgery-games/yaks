@@ -56,6 +56,21 @@ impl App {
         });
     }
 
+    /// True when the loaded farm spans more than one herd (id prefix) — what
+    /// makes the per-herd id colouring worth showing.
+    pub(crate) fn is_multi_herd(&self) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        for t in &self.all {
+            if let Some(p) = t.id.split('-').next() {
+                seen.insert(p);
+                if seen.len() > 1 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Re-query the farm view after a mutation and keep the cursor in range.
     pub(crate) fn reload(&mut self) {
         if let Some(h) = &self.farm {

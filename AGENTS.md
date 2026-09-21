@@ -15,6 +15,24 @@ task's status is implicit in which subdirectory it lives in.
 - **Don't change the on-disk format lightly.** The `.yaks/` layout is the
   contract; task files are meant to be readable, greppable, and diffable.
 
+## Farms, herds, families
+
+- A **farm** is one `.yaks/` directory (what `Farm` opens). A **herd** is a group
+  of yaks sharing an id prefix within a farm; a farm may hold several (config
+  `herds:` map; `create --prefix`), so one private farm can track several
+  projects. A **family** is a parent yak + its descendants (the TUI tree /
+  `view::FamilyScope`).
+- **Per-herd config cascades one level:** `default_type` / `default_priority` /
+  `verify` resolve herd-value-else-global (`store::Config::{default_type_for,
+  default_priority_for, resolve_verify}`, `known_herds`). Add new per-herd
+  settings through that same cascade.
+- **A repo can point at an out-of-tree farm** via a `.yaks` pointer file
+  (`path:` + optional `prefix:`) or a symlink, resolved in `store::discover`, so
+  several repos share one farm with no env var. `create` routes a new yak's
+  prefix as: explicit `--prefix` > pointer `prefix:` > config default.
+- **Consolidate** separate farms with `Farm::merge` (`yaks merge`), which is
+  collision-checked and non-destructive.
+
 ## Layout
 
 A Cargo workspace: the root is the `yaks` binary package *and* the workspace

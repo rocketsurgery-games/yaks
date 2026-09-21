@@ -105,6 +105,24 @@ fn create_targets_the_reference_herd_in_a_multi_herd_farm() {
 }
 
 #[test]
+fn is_multi_herd_reflects_distinct_id_prefixes() {
+    let single = App::new(vec![
+        task("yak-0001", "a", Status::Hairy, 3, None),
+        task("yak-0002", "b", Status::Hairy, 3, None),
+    ]);
+    assert!(!single.is_multi_herd());
+    let multi = App::new(vec![
+        task("web-0001", "a", Status::Hairy, 3, None),
+        task("api-0001", "b", Status::Hairy, 3, None),
+    ]);
+    assert!(multi.is_multi_herd());
+    // Exercise the per-herd id-colour render path (colours don't show in the
+    // text snapshot, so just assert it renders the ids without panicking).
+    let frame = draw(&multi, 80, 12);
+    assert!(frame.contains("web-0001") && frame.contains("api-0001"));
+}
+
+#[test]
 fn create_has_no_herd_target_in_a_single_herd_farm() {
     // One herd -> no explicit target; create falls through to the config default.
     let mut app = App::new(vec![

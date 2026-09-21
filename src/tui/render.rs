@@ -499,6 +499,7 @@ pub(crate) fn render_list(app: &App, frame: &mut Frame, area: Rect) {
                 r.task.needs.is_some(),
                 app.is_starred(&r.task.id),
                 area.width,
+                app.is_multi_herd(),
             )
         })
         .collect();
@@ -539,6 +540,25 @@ pub(crate) fn truncate_disp(s: &str, max: usize) -> String {
     out
 }
 
+/// A stable per-herd colour keyed on the id prefix (FNV-1a into a small
+/// palette), used to tint the id so herds are scannable in a multi-herd farm.
+pub(crate) fn herd_color(prefix: &str) -> Color {
+    const PALETTE: [Color; 6] = [
+        Color::Cyan,
+        Color::Green,
+        Color::Magenta,
+        Color::Yellow,
+        Color::Blue,
+        Color::Red,
+    ];
+    let mut h: u32 = 0x811c_9dc5;
+    for b in prefix.bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    PALETTE[(h as usize) % PALETTE.len()]
+}
+
 pub(crate) fn list_item<'a>(
     r: &tree::Row<'a>,
     id_field_w: usize,
@@ -547,6 +567,7 @@ pub(crate) fn list_item<'a>(
     needs_blocked: bool,
     starred: bool,
     width: u16,
+    multi_herd: bool,
 ) -> ListItem<'a> {
     let dim = |st: Style| {
         if r.ghost {
@@ -635,22 +656,35 @@ pub(crate) fn list_item<'a>(
     let used = left_fixed + disp_width(&title);
     let pad = width.saturating_sub(used + rw);
 
-    let mut spans = vec![
-        Span::styled(
-            lead.to_string(),
-            if selected {
-                Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)
-            } else if blocked {
-                Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD)
-            } else {
-                Style::new()
-            },
-        ),
-        Span::styled(body_padded, dim(Style::new().fg(Color::Blue))),
-        Span::styled(pri_s, dim(priority_style(r.task.priority))),
-        Span::styled(type_s, dim(Style::new().fg(Color::Cyan))),
-        Span::styled(title, dim(Style::new())),
-    ];
+    let lead_style = if selected {
+        Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)
+    } else if blocked {
+        Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+    };
+    // In a multi-herd farm, tint the id's herd prefix so herds are scannable at
+    // a glance (the tail stays blue); a single-herd farm renders the id plain.
+    let id_spans = if multi_herd {
+        let (prefix, rest) = match r.task.id.split_once('-') {
+            Some((p, tail)) => (p.to_string(), format!("-{tail}")),
+            None => (r.task.id.clone(), String::new()),
+        };
+        let plain_w = disp_width(&indent) + r.task.id.chars().count();
+        let pad = " ".repeat(body_w.saturating_sub(plain_w));
+        vec![
+            Span::styled(indent.clone(), dim(Style::new().fg(Color::Blue))),
+            Span::styled(prefix.clone(), dim(Style::new().fg(herd_color(&prefix)))),
+            Span::styled(format!("{rest}{pad}"), dim(Style::new().fg(Color::Blue))),
+        ]
+    } else {
+        vec![Span::styled(body_padded, dim(Style::new().fg(Color::Blue)))]
+    };
+    let mut spans = vec![Span::styled(lead.to_string(), lead_style)];
+    spans.extend(id_spans);
+    spans.push(Span::styled(pri_s, dim(priority_style(r.task.priority))));
+    spans.push(Span::styled(type_s, dim(Style::new().fg(Color::Cyan))));
+    spans.push(Span::styled(title, dim(Style::new())));
     if pad > 0 {
         spans.push(Span::raw(" ".repeat(pad)));
     }

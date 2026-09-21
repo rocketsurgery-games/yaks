@@ -4,10 +4,14 @@ title: 'docs follow-ups: family-scope h key + herd/tracker mapping'
 type: task
 priority: 3
 created: '2026-09-21T18:37:07Z'
-updated: '2026-09-21T18:37:07Z'
+updated: '2026-09-21T19:31:02Z'
 parent: yaks-15f7
 labels:
 - docs
 ---
 
 Doc gaps surfaced while shaving the multi-herd family. (1) docs/tui.md does not document the list-view family-scope h key (the auto/lone/remaining/all cycle) at all - a pre-existing gap made more visible by the herd->family rename; document it, and add the herd badge/column when yaks-3290 lands. (2) skills/yaks-tracker: note that in a consolidated farm, herds commonly map to different upstream trackers (the original four-repos mixed Jira/GitHub motivation); source/rollup stay per-yak but a short pointer helps. (3) AGENTS.md: a brief contributor note on the farm/herd/family model + the multi-herd config once yaks-98d5 lands. NOTE: no changeset workflow in this repo (tag-based releases), so nothing owed there.
+
+---
+▸ 2026-09-21T19:30:58Z [agent]
+SHORN. Doc follow-ups for the multi-herd family. docs/tui.md: documented the list-view family-scope h key (auto/lone/remaining/all) and the tab-row family-scope indicator, plus the multi-herd per-herd id colour and create-header herd. skills/yaks-tracker: a Consolidated farms note (herds commonly map to different upstream trackers; source and rollup stay per-yak; rollup --herd scopes to one). AGENTS.md: a Farms/herds/families contributor section (defs, the one-level per-herd config cascade, out-of-tree pointer discovery and create prefix precedence, Farm::merge). No changeset workflow in this repo (tag releases), so nothing owed.
