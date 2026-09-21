@@ -239,7 +239,7 @@ Use **`yaks refs <id>`** to see everything a yak points at — parent, dependenc
 
 Every query command (`list`, `search`, `next`, `tangled`) shares the same filter flags. AND across dimensions; within a repeatable flag, OR:
 
-- `--status S` / `--type T` / `--priority P` / `--label L` (all repeatable)
+- `--status S` / `--type T` / `--priority P` / `--label L` / `--herd H` (all repeatable; `--herd` scopes to an id prefix)
 - `--search Q` — substring match on title/description/id
 - `--ready` / `--tangled` — dep-state filters
 - `--parent-of ID` — only descendants of ID

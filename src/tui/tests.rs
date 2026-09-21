@@ -91,6 +91,34 @@ fn type_picker_overlay() {
 }
 
 #[test]
+fn create_targets_the_reference_herd_in_a_multi_herd_farm() {
+    // Two herds present -> a new yak inherits the selected row's herd (prefix).
+    let mut app = App::new(vec![
+        task("api-0001", "api", Status::Hairy, 3, None),
+        task("web-0001", "web", Status::Hairy, 3, None),
+    ]);
+    app.open_create(false);
+    match &app.overlay {
+        Overlay::Create(f) => assert_eq!(f.herd.as_deref(), Some("api")),
+        _ => panic!("expected create overlay"),
+    }
+}
+
+#[test]
+fn create_has_no_herd_target_in_a_single_herd_farm() {
+    // One herd -> no explicit target; create falls through to the config default.
+    let mut app = App::new(vec![
+        task("yak-0001", "a", Status::Hairy, 3, None),
+        task("yak-0002", "b", Status::Hairy, 3, None),
+    ]);
+    app.open_create(false);
+    match &app.overlay {
+        Overlay::Create(f) => assert!(f.herd.is_none()),
+        _ => panic!("expected create overlay"),
+    }
+}
+
+#[test]
 fn slaughter_confirm_overlay() {
     // Move to a childless leaf (Child A1) so the confirm actually opens.
     let mut app = sample();

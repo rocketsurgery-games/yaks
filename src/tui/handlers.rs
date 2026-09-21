@@ -170,7 +170,7 @@ impl App {
         let new = match std::mem::replace(&mut self.overlay, Overlay::None) {
             Overlay::Create(f) => NewTask {
                 title: f.title_text(),
-                prefix: None,
+                prefix: f.herd.clone(),
                 kind: Some(TYPE_CHOICES[f.kind_idx].to_string()),
                 priority: Some(PRI_CHOICES[f.pri_idx]),
                 parent: f.parent.clone(),

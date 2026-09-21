@@ -151,6 +151,9 @@ impl Drawer {
             tangled_only: self.tangled,
             needs_only: self.needs,
             parent: non_empty(&self.parent),
+            // The drawer has no herd input; preserve any herd scope the view
+            // already carried rather than silently dropping it.
+            herds: self.saved.herds.clone(),
         }
     }
 }

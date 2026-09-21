@@ -5,8 +5,8 @@ Run `yaks <command> --help` for full flags. Most read commands accept the shared
 
 ## Filter flags (shared)
 
-`--status <s>` · `--type <t>` · `--priority <n>` · `--label <l>` ·
-`--search <text>` · `--parent-of <id>` (descendants at any depth) · `--ready` ·
+`--status <s>` · `--type <t>` · `--priority <n>` · `--label <l>` · `--herd <h>`
+(id prefix) · `--search <text>` · `--parent-of <id>` (descendants at any depth) · `--ready` ·
 `--tangled` · `--needs`. They compose, and back `list`, `search`, `log`, and the
 `bulk` selector.
 

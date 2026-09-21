@@ -26,6 +26,9 @@ pub struct FilterSpec {
     pub needs_only: bool,
     /// Descendant-of scope (a task id); matches its descendants at any depth.
     pub parent: Option<String>,
+    /// Herd scope: keep only yaks whose id prefix is in this set. Empty =
+    /// unconstrained; OR within, like the other multi-value fields.
+    pub herds: Vec<String>,
 }
 
 impl FilterSpec {
@@ -39,6 +42,7 @@ impl FilterSpec {
             || self.search.as_deref().is_some_and(|s| !s.is_empty())
             || self.ready_only
             || self.tangled_only
+            || !self.herds.is_empty()
     }
 
     /// Per-task content predicate (ignores status + parent scope), shared by
@@ -53,6 +57,12 @@ impl FilterSpec {
         }
         if !self.labels.is_empty() && !t.labels.iter().any(|l| self.labels.contains(l)) {
             return false;
+        }
+        if !self.herds.is_empty() {
+            let h = t.id.split('-').next().unwrap_or("");
+            if !self.herds.iter().any(|x| x == h) {
+                return false;
+            }
         }
         if let Some(q) = &self.search {
             let q = q.to_lowercase();
@@ -227,6 +237,29 @@ mod tests {
         ];
         assert!(depends_on_transitively(&chain, "x", "a"));
         assert!(!depends_on_transitively(&chain, "a", "x"));
+    }
+
+    #[test]
+    fn herds_filter_matches_on_id_prefix() {
+        let resolved: HashSet<&str> = HashSet::new();
+        let web = t("web-0001", Status::Hairy, &[], None);
+        let api = t("api-0001", Status::Hairy, &[], None);
+        let only_web = FilterSpec {
+            herds: vec!["web".into()],
+            ..Default::default()
+        };
+        assert!(only_web.matches(&web, &resolved));
+        assert!(!only_web.matches(&api, &resolved));
+        assert!(
+            only_web.content_active(),
+            "a herd scope is an active filter"
+        );
+        // OR within the field.
+        let web_or_api = FilterSpec {
+            herds: vec!["web".into(), "api".into()],
+            ..Default::default()
+        };
+        assert!(web_or_api.matches(&web, &resolved) && web_or_api.matches(&api, &resolved));
     }
 
     #[test]

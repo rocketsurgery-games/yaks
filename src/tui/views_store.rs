@@ -75,6 +75,7 @@ fn spec_to_json(s: &FilterSpec) -> Value {
         "types": types,
         "priorities": priorities,
         "labels": s.labels,
+        "herds": s.herds,
         "search": s.search,
         "ready_only": s.ready_only,
         "tangled_only": s.tangled_only,
@@ -121,6 +122,7 @@ fn spec_from_json(d: Option<&Value>) -> FilterSpec {
         types: str_vec(d.get("types")),
         priorities,
         labels: str_vec(d.get("labels")),
+        herds: str_vec(d.get("herds")),
         search: opt_str("search"),
         ready_only: d
             .get("ready_only")

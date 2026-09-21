@@ -46,13 +46,17 @@ pub(crate) struct CreateForm {
     /// Create: the (optional) parent for the new task. Edit: unused (reparent
     /// is a separate action); shown in the header for context.
     pub(crate) parent: Option<String>,
+    /// Create: the target herd (id prefix) for the new yak, in a multi-herd
+    /// farm; `None` uses the config default (and is the norm in a single-herd
+    /// farm). Shown in the header; passed as the new yak's prefix. Unused on edit.
+    pub(crate) herd: Option<String>,
     /// `Some(id)` when editing an existing task; `None` when creating.
     pub(crate) edit_id: Option<String>,
     pub(crate) handler: EditorEventHandler,
 }
 
 impl CreateForm {
-    pub(crate) fn new(vim: bool, parent: Option<String>) -> Self {
+    pub(crate) fn new(vim: bool, parent: Option<String>, herd: Option<String>) -> Self {
         CreateForm {
             title: text_field("", vim),
             labels: text_field("", vim),
@@ -64,6 +68,7 @@ impl CreateForm {
             pri_idx: pri_index(3), // p3
             row: 0,
             parent,
+            herd,
             edit_id: None,
             handler: make_handler(vim),
         }
@@ -87,6 +92,7 @@ impl CreateForm {
             pri_idx: pri_index(task.priority),
             row: 0,
             parent: task.parent.clone(),
+            herd: None,
             edit_id: Some(task.id.clone()),
             handler: make_handler(vim),
         }
@@ -193,6 +199,11 @@ pub(crate) fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
         (Some(id), _) => format!("Edit {id}"),
         (None, Some(p)) => format!("New task (child of {p})"),
         (None, None) => "New yak".to_string(),
+    };
+    // In a multi-herd farm, surface which herd the new yak lands in.
+    let header = match (&f.edit_id, &f.herd) {
+        (None, Some(h)) => format!("{header} \u{b7} herd: {h}"),
+        _ => header,
     };
     frame.render_widget(
         Paragraph::new(Span::styled(

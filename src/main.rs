@@ -51,6 +51,9 @@ struct FilterFlags {
     priority: Vec<u8>,
     #[arg(long)]
     label: Vec<String>,
+    /// Keep only yaks in these herds (id prefixes). Repeatable; ORs.
+    #[arg(long)]
+    herd: Vec<String>,
     #[arg(long)]
     search: Option<String>,
     #[arg(long)]
@@ -73,6 +76,7 @@ impl FilterFlags {
             || !self.kind.is_empty()
             || !self.priority.is_empty()
             || !self.label.is_empty()
+            || !self.herd.is_empty()
             || self.search.is_some()
             || self.ready
             || self.tangled
@@ -1086,6 +1090,7 @@ fn build_spec(f: FilterFlags) -> FilterSpec {
         types: f.kind,
         priorities: f.priority,
         labels: f.label,
+        herds: f.herd,
         search: f.search,
         ready_only: f.ready,
         tangled_only: f.tangled,
