@@ -276,6 +276,53 @@ impl App {
         }
     }
 
+    /// Open a single-key picker of the *other* herds to move the selected yak
+    /// into (yaks-71d1). A herd is an id prefix, so the move is a rename from
+    /// `<oldherd>-<tail>` to `<newherd>-<tail>` (see [`App::resolve_pick`]).
+    /// Herds only exist in a multi-herd farm, so single-herd farms no-op with a
+    /// hint. The candidate herds are digit-indexed (1..=9), reusing the same
+    /// `Overlay::Pick` machinery as the type/state pickers.
+    pub(crate) fn open_herd_picker(&mut self) {
+        let Some(id) = self.selected_id() else { return };
+        if !self.is_multi_herd() {
+            self.notification = Some("herds need a multi-herd farm".into());
+            return;
+        }
+        // A herd is the id prefix (`prefix-tail`); an id with no `-` names no
+        // herd, so it can't be moved between herds.
+        let Some((current, _tail)) = id.split_once('-') else {
+            self.notification = Some(format!("{id} has no herd"));
+            return;
+        };
+        let current = current.to_string();
+        // Offer every known herd except the yak's current one, capped at 9 so
+        // each maps to a single digit key.
+        let candidates: Vec<String> = self
+            .herd_choices()
+            .into_iter()
+            .filter(|h| *h != current)
+            .take(9)
+            .collect();
+        if candidates.is_empty() {
+            self.notification = Some("no other herd".into());
+            return;
+        }
+        let menu = candidates
+            .iter()
+            .enumerate()
+            .map(|(i, h)| format!("{}={h}", i + 1))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let keys: String = (1..=candidates.len())
+            .map(|i| char::from(b'0' + i as u8))
+            .collect();
+        self.overlay = Overlay::Pick {
+            prompt: format!("Herd for {id}: {menu}  (Esc=cancel)"),
+            keys,
+            action: PickAction::Herd(id, candidates),
+        };
+    }
+
     /// Count a yak's live (non-dead) children. Slaughter refuses to orphan
     /// children, so both the single path (`open_slaughter_confirm`) and the
     /// bulk path (`PickAction::BulkState` with `x`) gate on this (yaks-5c51).

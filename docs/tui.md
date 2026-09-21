@@ -64,6 +64,7 @@ the pre-find scroll and cursor).
 | `E` | Edit the field/description/comment at the cursor |
 | `P` / `T` / `L` / `S` | Priority / type / labels / state |
 | `D` / `R` | Add dependency / reparent |
+| `H` | Move to another herd (multi-herd farms) |
 | `M` | Add a comment (note) |
 | `a` | Ask / answer (raise or clear a `needs` block) |
 | `A` / `O` | Attach artifact / open it |

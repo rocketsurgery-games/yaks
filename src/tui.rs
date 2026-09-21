@@ -58,8 +58,8 @@ use ratatui::crossterm::terminal::{
 };
 
 use crate::farm::{
-    AttachOutcome, CreateOutcome, DepOutcome, Farm, MoveOutcome, NewTask, Reparent, TaskEdit,
-    UpdateOutcome,
+    AttachOutcome, CreateOutcome, DepOutcome, Farm, MoveOutcome, NewTask, RenameOutcome, Reparent,
+    TaskEdit, UpdateOutcome,
 };
 use crate::filter::{self, FilterSpec};
 use crate::model::{Status, Task};
@@ -119,6 +119,10 @@ pub(crate) enum PickAction {
     Type(String),
     /// Apply a state transition to every id in the multi-select set (yaks-de85).
     BulkState(Vec<String>),
+    /// Move a yak to another herd (id prefix): `(id, candidate herds)`. The
+    /// picked digit indexes into the candidates; the rename keeps the id tail
+    /// (yaks-71d1).
+    Herd(String, Vec<String>),
 }
 
 /// What a confirmed y/N prompt should do.

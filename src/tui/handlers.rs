@@ -1310,6 +1310,42 @@ impl App {
                     format!("{id} → {kind}"),
                 );
             }
+            PickAction::Herd(id, herds) => {
+                // The digit key is 1-based into the candidate herds.
+                let Some(idx) = c.to_digit(10).map(|d| d as usize) else {
+                    return;
+                };
+                let Some(dest) = idx.checked_sub(1).and_then(|i| herds.get(i)) else {
+                    return;
+                };
+                // Moving herd = renaming the id's prefix, keeping the tail.
+                let Some((_, tail)) = id.split_once('-') else {
+                    self.notification = Some(format!("{id} has no herd"));
+                    return;
+                };
+                let new_id = format!("{dest}-{tail}");
+                let Some(h) = &self.farm else { return };
+                match h.rename(&id, &new_id, false) {
+                    Ok(RenameOutcome::Done(_)) => {
+                        self.reload();
+                        self.select_id(&new_id);
+                        self.notification = Some(format!("moved to {dest}"));
+                    }
+                    Ok(RenameOutcome::Collision(t)) => {
+                        self.notification = Some(format!("{t} already exists in {dest}"));
+                    }
+                    Ok(RenameOutcome::NotFound(t)) => {
+                        self.notification = Some(format!("{t} not found"));
+                    }
+                    Ok(RenameOutcome::Invalid(t)) => {
+                        self.notification = Some(format!("invalid id {t}"));
+                    }
+                    Ok(RenameOutcome::NothingToRename) => {
+                        self.notification = Some(format!("{id} unchanged"));
+                    }
+                    Err(e) => self.notification = Some(format!("error: {e}")),
+                }
+            }
         }
     }
 
@@ -1409,6 +1445,7 @@ pub(crate) fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('E') => app.open_edit(),
             KeyCode::Char('D') => app.open_dep_picker(),
             KeyCode::Char('R') => app.open_reparent_picker(),
+            KeyCode::Char('H') => app.open_herd_picker(),
             KeyCode::Char('/') => app.open_search(),
             KeyCode::Char('f') => app.open_drawer(),
             KeyCode::Char('*') => app.toggle_star(),

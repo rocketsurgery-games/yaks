@@ -1515,6 +1515,43 @@ mod live {
     }
 
     #[test]
+    fn herd_pick_moves_yak_to_another_herd() {
+        // A multi-herd farm: two distinct id prefixes (`web`, `api`). Moving
+        // `web-0001` to the `api` herd renames it `api-0001`, keeping the tail
+        // (yaks-71d1). Distinct tails avoid a collision with the seeded api yak.
+        let (_dir, farm) = temp_farm(&[
+            task("web-0001", "web one", Status::Hairy, 3, None),
+            task("api-0002", "api two", Status::Hairy, 3, None),
+        ]);
+        let mut app = App::with_farm(farm).unwrap();
+        assert!(app.is_multi_herd());
+        app.select_id("web-0001");
+        // `H` opens the herd picker; candidates are herd_choices() minus the
+        // current herd -> just ["api"], so `1` picks it.
+        press(&mut app, "H1");
+        assert!(matches!(app.overlay, Overlay::None));
+        // The yak now lives in the `api` herd, tail preserved, and still exists.
+        assert!(app.task("web-0001").is_none(), "old id is gone");
+        assert!(app.task("api-0001").is_some(), "renamed into the api herd");
+        assert_eq!(app.notification.as_deref(), Some("moved to api"));
+    }
+
+    #[test]
+    fn herd_pick_single_herd_is_a_hint_noop() {
+        // Herds only exist in a multi-herd farm; a single-herd farm no-ops with
+        // a hint rather than opening an empty picker.
+        let (_dir, farm) = temp_farm(&[task("t0", "solo", Status::Hairy, 3, None)]);
+        let mut app = App::with_farm(farm).unwrap();
+        assert!(!app.is_multi_herd());
+        press(&mut app, "H");
+        assert!(matches!(app.overlay, Overlay::None));
+        assert_eq!(
+            app.notification.as_deref(),
+            Some("herds need a multi-herd farm")
+        );
+    }
+
+    #[test]
     fn slaughter_confirm_moves_to_dead() {
         let (_dir, farm) = temp_farm(&[task("t0", "solo", Status::Hairy, 3, None)]);
         let mut app = App::with_farm(farm).unwrap();
