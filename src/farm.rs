@@ -847,8 +847,10 @@ impl Farm {
         let task = Task {
             id,
             title: new.title,
-            kind: new.kind.unwrap_or(cfg.default_type),
-            priority: new.priority.unwrap_or(cfg.default_priority),
+            kind: new.kind.unwrap_or_else(|| cfg.default_type_for(&prefix)),
+            priority: new
+                .priority
+                .unwrap_or_else(|| cfg.default_priority_for(&prefix)),
             status: Status::Hairy,
             created: Some(now.clone()),
             updated: Some(now),
@@ -1401,6 +1403,29 @@ mod tests {
         assert!(b.starts_with("core-"), "expected core- id, got {b}");
         let ids = store::all_ids(&farm_root);
         assert!(ids.contains(&a) && ids.contains(&b));
+    }
+
+    #[test]
+    fn create_applies_herd_default_type_from_config() {
+        let (root, farm) = temp_farm();
+        std::fs::write(
+            root.join("config.yaml"),
+            "prefix: core\ndefault_type: task\nherds:\n  web:\n    default_type: feature\n",
+        )
+        .unwrap();
+        // Into the web herd: inherits web's default_type (feature).
+        match farm.create(new_task("web thing", Some("web"))).unwrap() {
+            CreateOutcome::Created(t) => {
+                assert!(t.id.starts_with("web-"));
+                assert_eq!(t.kind, "feature");
+            }
+            _ => panic!("expected Created"),
+        }
+        // Into core (no per-herd override): the farm-global default_type (task).
+        match farm.create(new_task("core thing", Some("core"))).unwrap() {
+            CreateOutcome::Created(t) => assert_eq!(t.kind, "task"),
+            _ => panic!("expected Created"),
+        }
     }
 
     fn done(out: RenameOutcome) -> RenamePlan {

@@ -198,6 +198,21 @@ Child tasks use `--parent <id>` on create. Every ID is flat (`{prefix}-{4hex}`) 
 
 The prefix, default type, and default priority come from `.yaks/config.yaml` (falling back to `yak` / `task` / `3`). A nested `verify:` map there (label → command, plus an optional `default`) supplies the default verification command for a yak that has no explicit `verify:` field, resolved by the yak's labels — so the project's levers are named once (e.g. `ui: cargo test -p yaks`).
 
+A farm can also declare a `herds:` map — one entry per id prefix — giving that herd its own `default_type`, `default_priority`, or `verify` overrides. Each setting **cascades a single level**: the herd's value if set, else the farm-global. The `herds:` keys are the *known-herd set* the create/TUI picker offers, so you don't retype a prefix; route a new yak into a herd with `yaks create --prefix <herd>` (or a repo's `.yaks` pointer `prefix:`). Example:
+
+```yaml
+prefix: core            # the default herd
+default_priority: 3
+verify:
+  default: cargo test
+herds:
+  core:
+    verify: { default: cargo test --workspace }
+  web:
+    default_type: feature
+    verify: { default: npm test }
+```
+
 ### External source linking
 
 Use `--source <url>` on create or update to link a yak to an external issue (Jira, GitHub Issues, Linear, etc.). The URL is stored in the `source` frontmatter field. The relationship is a **one-way projection**: the yak points at the external issue, never the reverse, and the external tracker stays unaware of yaks.

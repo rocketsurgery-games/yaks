@@ -55,6 +55,20 @@ verify:
   default: cargo test --workspace
 ```
 
+Per-herd overrides live under a `herds:` map (one entry per id prefix), each optionally setting `default_type`, `default_priority`, or its own `verify:` map. Any setting cascades a single level — the herd's value if present, else the farm-global — and the `herds:` keys are the known-herd set the create/TUI picker offers:
+
+```yaml
+prefix: core
+verify:
+  default: cargo test
+herds:
+  core:
+    verify: { default: cargo test --workspace }
+  web:
+    default_type: feature
+    verify: { default: npm test }
+```
+
 A lever is the pass/fail **gate** for its label — what `doctor --strict` enforces at shear. For UI yaks that's the tui snapshot tests (`cargo test -p yaks`); the SVG docshots are a separate *visual* channel, generated on demand (`cargo test -p yaks docshots -- --ignored`) and attached for human review, not a gate.
 
 ## State transitions (all accept multiple ids)

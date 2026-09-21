@@ -455,6 +455,17 @@ pub mod write {
     }
 }
 
+/// Per-herd config overrides within a farm. A field left `None`/empty inherits
+/// the farm-global value (a single-level global -> herd cascade).
+#[derive(Clone, Default)]
+pub struct HerdConfig {
+    pub default_type: Option<String>,
+    pub default_priority: Option<u8>,
+    /// Verify commands for this herd, keyed by label (plus `default`); cascades
+    /// over the global `verify` map per lookup key.
+    pub verify: std::collections::HashMap<String, String>,
+}
+
 /// Config read from `.yaks/config.yaml` (only the keys we use).
 #[derive(Clone)]
 pub struct Config {
@@ -467,18 +478,59 @@ pub struct Config {
     /// key). A yak with no explicit `verify:` field resolves its command here by
     /// label. The project's levers, named once (see `resolve_verify`).
     pub verify: std::collections::HashMap<String, String>,
+    /// Declared herds (id prefixes) within this farm and their overrides. Keys
+    /// are the *known-herd set* used by the UI pickers; each value overrides the
+    /// farm globals for yaks in that herd. Empty means a single implicit herd
+    /// equal to `prefix` (back-compat).
+    pub herds: std::collections::HashMap<String, HerdConfig>,
 }
 
 impl Config {
-    /// Resolve a default verify command for a yak's labels: the first of
-    /// `labels` that has a config entry (label order), else the `default` entry,
-    /// else none. The yak's own explicit `verify:` field always wins over this.
-    pub fn resolve_verify(&self, labels: &[String]) -> Option<String> {
+    /// The known-herd set: the declared `herds` keys (sorted), or just `prefix`
+    /// when none are declared. Powers the create/TUI herd picker (consumed by
+    /// yaks-3290).
+    #[allow(dead_code)]
+    pub fn known_herds(&self) -> Vec<String> {
+        if self.herds.is_empty() {
+            return vec![self.prefix.clone()];
+        }
+        let mut v: Vec<String> = self.herds.keys().cloned().collect();
+        v.sort();
+        v
+    }
+
+    /// Default type for a new yak in `herd`: the herd override, else the global.
+    pub fn default_type_for(&self, herd: &str) -> String {
+        self.herds
+            .get(herd)
+            .and_then(|h| h.default_type.clone())
+            .unwrap_or_else(|| self.default_type.clone())
+    }
+
+    /// Default priority for a new yak in `herd`: the herd override, else global.
+    pub fn default_priority_for(&self, herd: &str) -> u8 {
+        self.herds
+            .get(herd)
+            .and_then(|h| h.default_priority)
+            .unwrap_or(self.default_priority)
+    }
+
+    /// Resolve a default verify command for a yak's labels, cascading each
+    /// lookup key herd -> global: the first of `labels` with an entry (label
+    /// order), else the `default` entry, else none. `herd` is the yak's herd
+    /// (its id prefix); pass `None` to consult only the globals. The yak's own
+    /// explicit `verify:` field always wins over this.
+    pub fn resolve_verify(&self, labels: &[String], herd: Option<&str>) -> Option<String> {
+        let hc = herd.and_then(|h| self.herds.get(h));
+        let get = |k: &str| {
+            hc.and_then(|h| h.verify.get(k))
+                .or_else(|| self.verify.get(k))
+                .cloned()
+        };
         labels
             .iter()
-            .find_map(|l| self.verify.get(l))
-            .or_else(|| self.verify.get("default"))
-            .cloned()
+            .find_map(|l| get(l))
+            .or_else(|| get("default"))
     }
 }
 
@@ -491,38 +543,89 @@ pub fn read_config(root: &Path) -> Config {
         default_priority: 3,
         vim_mode: true,
         verify: std::collections::HashMap::new(),
+        herds: std::collections::HashMap::new(),
     };
     if let Ok(text) = fs::read_to_string(root.join("config.yaml")) {
-        // Track the nested `verify:` block: after a `verify:` line (empty value),
-        // indented `  label: cmd` lines are its entries until a non-indented line
-        // (mirrors the block-list handling in `parse_task`).
-        let mut in_verify = false;
+        // A tiny indent-aware pass over the small YAML subset we emit: top-level
+        // scalars, a nested `verify:` map, and a `herds:` map of per-herd blocks
+        // (each with its own scalars + `verify:`). Canonical nesting is 2 spaces
+        // per level: herd name at 2, herd fields at 4, herd verify labels at 6.
+        #[derive(PartialEq)]
+        enum Sec {
+            Top,
+            GlobalVerify,
+            Herds,
+        }
+        let mut sec = Sec::Top;
+        let mut cur_herd: Option<String> = None;
+        let mut herd_verify = false;
         for line in text.lines() {
-            let indented = line.starts_with(' ') || line.starts_with('\t');
+            if line.trim().is_empty() {
+                continue;
+            }
+            let indent = line.chars().take_while(|c| *c == ' ' || *c == '\t').count();
             let Some((k, v)) = line.split_once(':') else {
-                in_verify = false;
+                sec = Sec::Top;
+                herd_verify = false;
+                cur_herd = None;
                 continue;
             };
-            if in_verify && indented {
-                let cmd = unquote(v.trim());
-                if !cmd.is_empty() {
-                    c.verify.insert(k.trim().to_string(), cmd);
+            let key = k.trim().to_string();
+            let val = unquote(v.trim());
+
+            if sec == Sec::GlobalVerify && indent > 0 {
+                if !val.is_empty() {
+                    c.verify.insert(key, val);
                 }
                 continue;
             }
-            in_verify = false;
-            let v = unquote(v.trim());
-            match k.trim() {
-                "prefix" if !v.is_empty() => c.prefix = v,
-                "default_type" if !v.is_empty() => c.default_type = v,
+            if sec == Sec::Herds && indent > 0 {
+                if indent <= 2 {
+                    // A new herd entry; its scalars/verify follow, indented more.
+                    herd_verify = false;
+                    cur_herd = Some(key.clone());
+                    c.herds.entry(key).or_default();
+                } else if let Some(h) = cur_herd.clone() {
+                    let hc = c.herds.entry(h).or_default();
+                    if herd_verify && indent >= 6 {
+                        if !val.is_empty() {
+                            hc.verify.insert(key, val);
+                        }
+                    } else {
+                        match key.as_str() {
+                            "default_type" if !val.is_empty() => {
+                                hc.default_type = Some(val);
+                                herd_verify = false;
+                            }
+                            "default_priority" => {
+                                if let Ok(n) = val.parse() {
+                                    hc.default_priority = Some(n);
+                                }
+                                herd_verify = false;
+                            }
+                            "verify" if val.is_empty() => herd_verify = true,
+                            _ => herd_verify = false,
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // A top-level key ends any open block.
+            sec = Sec::Top;
+            herd_verify = false;
+            cur_herd = None;
+            match key.as_str() {
+                "prefix" if !val.is_empty() => c.prefix = val,
+                "default_type" if !val.is_empty() => c.default_type = val,
                 "default_priority" => {
-                    if let Ok(n) = v.parse() {
+                    if let Ok(n) = val.parse() {
                         c.default_priority = n;
                     }
                 }
-                "vim_mode" => c.vim_mode = matches!(v.as_str(), "true" | "True" | "yes" | "1"),
-                // A `verify:` line with no inline value opens the nested block.
-                "verify" if v.is_empty() => in_verify = true,
+                "vim_mode" => c.vim_mode = matches!(val.as_str(), "true" | "True" | "yes" | "1"),
+                "verify" if val.is_empty() => sec = Sec::GlobalVerify,
+                "herds" if val.is_empty() => sec = Sec::Herds,
                 _ => {}
             }
         }
@@ -1229,21 +1332,56 @@ mod move_tests {
         let c = read_config(&root);
         // First of the yak's labels with an entry wins (label order, not config order).
         assert_eq!(
-            c.resolve_verify(&["cli".into(), "ui".into()]).as_deref(),
+            c.resolve_verify(&["cli".into(), "ui".into()], None)
+                .as_deref(),
             Some("CLI")
         );
         // No matching label -> the `default` entry.
-        assert_eq!(c.resolve_verify(&["docs".into()]).as_deref(), Some("DEF"));
-        assert_eq!(c.resolve_verify(&[]).as_deref(), Some("DEF"));
+        assert_eq!(
+            c.resolve_verify(&["docs".into()], None).as_deref(),
+            Some("DEF")
+        );
+        assert_eq!(c.resolve_verify(&[], None).as_deref(), Some("DEF"));
         let _ = fs::remove_dir_all(&root);
 
         // With no `default`, an unmatched label resolves to nothing.
         let root2 = temp_root();
         fs::write(root2.join("config.yaml"), "verify:\n  ui: UI\n").unwrap();
         let c2 = read_config(&root2);
-        assert_eq!(c2.resolve_verify(&["docs".into()]), None);
-        assert_eq!(c2.resolve_verify(&["ui".into()]).as_deref(), Some("UI"));
+        assert_eq!(c2.resolve_verify(&["docs".into()], None), None);
+        assert_eq!(
+            c2.resolve_verify(&["ui".into()], None).as_deref(),
+            Some("UI")
+        );
         let _ = fs::remove_dir_all(&root2);
+    }
+
+    #[test]
+    fn config_parses_herds_and_cascades_global_to_herd() {
+        let root = temp_root();
+        fs::write(
+            root.join("config.yaml"),
+            "prefix: core\ndefault_type: task\ndefault_priority: 3\nverify:\n  default: cargo test\nherds:\n  core:\n    default_priority: 1\n    verify:\n      default: cargo test --workspace\n  web:\n    default_type: feature\n",
+        )
+        .unwrap();
+        let c = read_config(&root);
+        assert_eq!(c.known_herds(), vec!["core".to_string(), "web".to_string()]);
+        // Scalars cascade global -> herd.
+        assert_eq!(c.default_priority_for("core"), 1); // herd override
+        assert_eq!(c.default_priority_for("web"), 3); // inherits global
+        assert_eq!(c.default_type_for("web"), "feature"); // herd override
+        assert_eq!(c.default_type_for("core"), "task"); // inherits global
+        // verify cascades per lookup key: herd default, else global default.
+        assert_eq!(
+            c.resolve_verify(&[], Some("core")).as_deref(),
+            Some("cargo test --workspace")
+        );
+        assert_eq!(
+            c.resolve_verify(&[], Some("web")).as_deref(),
+            Some("cargo test")
+        );
+        assert_eq!(c.resolve_verify(&[], None).as_deref(), Some("cargo test"));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

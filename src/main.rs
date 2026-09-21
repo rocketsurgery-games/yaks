@@ -607,7 +607,9 @@ fn main() -> Result<()> {
                 // config `verify:` default resolved by the yak's labels.
                 let (cmd, source) = match show.task.verify.clone() {
                     Some(c) => (c, "yak".to_string()),
-                    None => match cfg.resolve_verify(&show.task.labels) {
+                    None => match cfg
+                        .resolve_verify(&show.task.labels, show.task.id.split('-').next())
+                    {
                         Some(c) => (c, "config".to_string()),
                         None => {
                             eprintln!(
