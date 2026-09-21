@@ -15,11 +15,16 @@ use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 
 use super::{
-    DEPS_CHOICES, DRAWER_LABEL_W, PRI_CHOICES, STATUS_CHOICES, TYPE_CHOICES, clone_spec,
-    make_handler, render_chip_row, render_text_row, status_word, text_field, toggle,
+    DEPS_CHOICES, DRAWER_LABEL_W, DRAWER_ROWS, PRI_CHOICES, STATUS_CHOICES, TYPE_CHOICES,
+    clone_spec, make_handler, render_chip_row, render_text_row, status_word, text_field, toggle,
 };
 use crate::filter::FilterSpec;
 use crate::model::Status;
+
+/// The optional herd chip row is appended after the fixed [`DRAWER_ROWS`] rows
+/// (0..=6), so its row index is `DRAWER_ROWS`. It only exists on multi-herd
+/// farms; single-herd farms keep the original 7-row layout untouched.
+const HERD_ROW: usize = DRAWER_ROWS;
 
 /// The filter drawer: a small form of chip facets (status/type/priority/deps)
 /// and text facets (labels/search/parent). Editing it previews live on the
@@ -29,6 +34,11 @@ pub(crate) struct Drawer {
     pub(crate) statuses: Vec<Status>,
     pub(crate) types: Vec<String>,
     pub(crate) priorities: Vec<u8>,
+    /// Selected herd scope (id prefixes), toggled via the herd chip row.
+    pub(crate) herds: Vec<String>,
+    /// The known herd set backing the herd chip row (from `App::herd_choices`).
+    /// The row is shown only when this holds more than one herd.
+    pub(crate) herd_choices: Vec<String>,
     pub(crate) ready: bool,
     pub(crate) tangled: bool,
     /// The inbox facet: keep only yaks carrying a `needs` block. Composes with
@@ -43,12 +53,14 @@ pub(crate) struct Drawer {
 }
 
 impl Drawer {
-    pub(crate) fn from_filter(vim: bool, f: &FilterSpec) -> Self {
+    pub(crate) fn from_filter(vim: bool, f: &FilterSpec, herd_choices: Vec<String>) -> Self {
         Drawer {
             saved: clone_spec(f),
             statuses: f.statuses.clone(),
             types: f.types.clone(),
             priorities: f.priorities.clone(),
+            herds: f.herds.clone(),
+            herd_choices,
             ready: f.ready_only,
             tangled: f.tangled_only,
             needs: f.needs_only,
@@ -63,6 +75,18 @@ impl Drawer {
 
     pub(crate) fn is_text_row(&self) -> bool {
         matches!(self.row, 3 | 4 | 5)
+    }
+
+    /// Whether the farm spans more than one herd — the gate for the herd chip
+    /// row. Single-herd farms have no herd row (and no layout/snapshot change).
+    pub(crate) fn multi_herd(&self) -> bool {
+        self.herd_choices.len() > 1
+    }
+
+    /// Number of navigable rows: the fixed [`DRAWER_ROWS`], plus the herd row
+    /// on multi-herd farms.
+    pub(crate) fn row_count(&self) -> usize {
+        DRAWER_ROWS + if self.multi_herd() { 1 } else { 0 }
     }
 
     /// The editor backing the current text row (labels/search/parent), if on one.
@@ -81,6 +105,7 @@ impl Drawer {
             1 => TYPE_CHOICES.len(),
             2 => PRI_CHOICES.len(),
             6 => DEPS_CHOICES.len(),
+            HERD_ROW => self.herd_choices.len(),
             _ => 0,
         }
     }
@@ -95,6 +120,7 @@ impl Drawer {
                 1 => self.tangled = !self.tangled,
                 _ => self.needs = !self.needs,
             },
+            HERD_ROW => toggle(&mut self.herds, self.herd_choices[self.chip_idx].clone()),
             _ => {}
         }
     }
@@ -103,6 +129,7 @@ impl Drawer {
         self.statuses.clear();
         self.types.clear();
         self.priorities.clear();
+        self.herds.clear();
         self.ready = false;
         self.tangled = false;
         self.needs = false;
@@ -151,15 +178,18 @@ impl Drawer {
             tangled_only: self.tangled,
             needs_only: self.needs,
             parent: non_empty(&self.parent),
-            // The drawer has no herd input; preserve any herd scope the view
-            // already carried rather than silently dropping it.
-            herds: self.saved.herds.clone(),
+            // On multi-herd farms the herd chip row owns this scope; on
+            // single-herd farms `herds` stays whatever the view carried in
+            // (`from_filter` seeds it from the spec), so nothing is dropped.
+            herds: self.herds.clone(),
         }
     }
 }
 
 pub(crate) fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
-    let rows = Layout::vertical([
+    // header + the 7 fixed rows, plus the herd row on multi-herd farms, then a
+    // flex filler. Row `n` renders into `rows[n + 1]`.
+    let mut constraints = vec![
         Constraint::Length(1), // header
         Constraint::Length(1), // status chips
         Constraint::Length(1), // type chips
@@ -168,9 +198,12 @@ pub(crate) fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
         Constraint::Length(1), // search
         Constraint::Length(1), // parent
         Constraint::Length(1), // deps chips
-        Constraint::Min(0),
-    ])
-    .split(area);
+    ];
+    if d.multi_herd() {
+        constraints.push(Constraint::Length(1)); // herd chips
+    }
+    constraints.push(Constraint::Min(0));
+    let rows = Layout::vertical(constraints).split(area);
     frame.render_widget(
         Paragraph::new(Span::styled(
             "Filter",
@@ -258,4 +291,20 @@ pub(crate) fn render_drawer(d: &Drawer, frame: &mut Frame, area: Rect) {
         frame,
         rows[7],
     );
+    if d.multi_herd() {
+        let herds: Vec<(String, bool)> = d
+            .herd_choices
+            .iter()
+            .map(|h| (h.clone(), d.herds.contains(h)))
+            .collect();
+        render_chip_row(
+            d.row == HERD_ROW,
+            d.chip_idx,
+            DRAWER_LABEL_W,
+            "herd",
+            &herds,
+            frame,
+            rows[HERD_ROW + 1],
+        );
+    }
 }

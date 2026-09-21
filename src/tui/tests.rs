@@ -1321,7 +1321,7 @@ fn drawer_inbox_chip_composes_with_status_scope() {
         statuses: vec![Status::Hairy],
         ..Default::default()
     };
-    let mut d = Drawer::from_filter(false, &base);
+    let mut d = Drawer::from_filter(false, &base, Vec::new());
     d.row = 6; // deps row
     d.chip_idx = 2; // inbox chip
     d.toggle_chip();
@@ -1329,11 +1329,50 @@ fn drawer_inbox_chip_composes_with_status_scope() {
     assert!(spec.needs_only);
     assert_eq!(spec.statuses, vec![Status::Hairy], "status scope preserved");
     // Toggling it back off round-trips cleanly.
-    let mut d2 = Drawer::from_filter(false, &spec);
+    let mut d2 = Drawer::from_filter(false, &spec, Vec::new());
     d2.row = 6;
     d2.chip_idx = 2;
     d2.toggle_chip();
     assert!(!d2.build_spec().needs_only);
+}
+
+#[test]
+fn drawer_herd_chip_scopes_the_filter_in_a_multi_herd_farm() {
+    // On a multi-herd farm the drawer grows a `herd` chip row (mirroring the
+    // status row): toggling a chip sets FilterSpec.herds without disturbing the
+    // rest of the filter. A single-herd farm keeps the fixed 7-row layout.
+    let mut app = App::new(vec![
+        task("api-0001", "a", Status::Hairy, 3, None),
+        task("web-0001", "w", Status::Hairy, 3, None),
+    ]);
+    app.open_drawer();
+    let Overlay::Drawer(d) = &mut app.overlay else {
+        panic!("expected drawer overlay")
+    };
+    // The gated herd row is the last navigable row on a multi-herd farm, and it
+    // is populated from `App::herd_choices()` (prefixes present, sorted).
+    assert_eq!(d.row_count(), 8, "multi-herd farm adds the herd row");
+    assert_eq!(d.herd_choices, vec!["api".to_string(), "web".to_string()]);
+    d.row = d.row_count() - 1; // herd row
+    d.chip_idx = 1; // "web"
+    d.toggle_chip();
+    let spec = d.build_spec();
+    assert_eq!(spec.herds, vec!["web".to_string()]);
+    // Toggling the same chip back off round-trips to an unconstrained scope.
+    d.toggle_chip();
+    assert!(d.build_spec().herds.is_empty());
+
+    // A single-herd farm has no herd row (no layout / snapshot change).
+    let mut single = App::new(vec![
+        task("yak-0001", "a", Status::Hairy, 3, None),
+        task("yak-0002", "b", Status::Hairy, 3, None),
+    ]);
+    single.open_drawer();
+    let Overlay::Drawer(d) = &single.overlay else {
+        panic!("expected drawer overlay")
+    };
+    assert!(!d.multi_herd());
+    assert_eq!(d.row_count(), 7, "single-herd farm keeps the fixed rows");
 }
 
 // -- live mutation through a temp farm --------------------------------

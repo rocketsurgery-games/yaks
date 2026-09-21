@@ -62,8 +62,10 @@ impl App {
         let mut set: std::collections::BTreeSet<String> =
             self.config_herds.iter().cloned().collect();
         for t in &self.all {
-            if let Some(p) = t.id.split('-').next() {
-                set.insert(p.to_string());
+            // A herd is a real id prefix (`prefix-tail`); ids without a `-`
+            // (only test fixtures) don't name a herd.
+            if let Some((prefix, _)) = t.id.split_once('-') {
+                set.insert(prefix.to_string());
             }
         }
         set.into_iter().collect()

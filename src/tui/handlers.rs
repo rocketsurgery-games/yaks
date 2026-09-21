@@ -321,7 +321,8 @@ impl App {
     }
 
     pub(crate) fn open_drawer(&mut self) {
-        self.overlay = Overlay::Drawer(Drawer::from_filter(self.editor_vim, &self.filter));
+        let choices = self.herd_choices();
+        self.overlay = Overlay::Drawer(Drawer::from_filter(self.editor_vim, &self.filter, choices));
     }
 
     pub(crate) fn open_help(&mut self) {
@@ -583,10 +584,11 @@ impl App {
         if nav_down || nav_up {
             let carry = text_normal && matches!(k.code, KeyCode::Char('j') | KeyCode::Char('k'));
             if let Overlay::Drawer(d) = &mut self.overlay {
+                let n = d.row_count();
                 d.row = if nav_down {
-                    (d.row + 1) % DRAWER_ROWS
+                    (d.row + 1) % n
                 } else {
-                    (d.row + DRAWER_ROWS - 1) % DRAWER_ROWS
+                    (d.row + n - 1) % n
                 };
                 d.chip_idx = 0;
                 if carry {

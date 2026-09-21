@@ -14,8 +14,9 @@ interchangeable.
   `Needs:` line when blocked, and the body + timestamped notes. Task-id
   references and URLs in the body are followable links.
 - **Filter drawer** (`f`) — toggle status / type / priority chips, a label and
-  search box, a parent scope, and `ready` / `tangled` / `inbox` predicates. The
-  drawer composes into any view.
+  search box, a parent scope, and `ready` / `tangled` / `inbox` predicates. On a
+  multi-herd farm it also grows a `herd` chip row to scope the list to one or
+  more herds. The drawer composes into any view.
 - **Status bar** — the active farm, view, and cursor context.
 
 ## Signals
@@ -100,7 +101,8 @@ It is unpinned (no tab); reach it from the view picker (`v`) or the drawer
 ![yaks TUI inbox view](assets/tui-inbox.svg)
 
 **Filter drawer** (`f`) — status / type / priority chips plus label, search,
-parent, and `ready`/`tangled`/`inbox` predicates. It composes into any view.
+parent, and `ready`/`tangled`/`inbox` predicates, and — on a multi-herd farm —
+a `herd` chip row to scope to one or more herds. It composes into any view.
 
 ![yaks TUI filter drawer](assets/tui-drawer.svg)
 
