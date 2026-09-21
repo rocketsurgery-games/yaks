@@ -49,9 +49,9 @@ pub enum SortDir {
 /// How much of an anchor yak's family a tree view pulls in *below* the anchor.
 /// (Ancestors are always shown to root the chain; this governs descendants.)
 /// A per-view override of this is persisted in the UI-state cache; the absence
-/// of an override means "auto" — inherit [`HerdScope::DEFAULT`].
+/// of an override means "auto" — inherit [`FamilyScope::DEFAULT`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum HerdScope {
+pub enum FamilyScope {
     /// No non-anchor descendants: just the anchors and the ancestors rooting them.
     Lone,
     /// Descendants with open work (hairy/shaving), plus the completed nodes that
@@ -61,35 +61,35 @@ pub enum HerdScope {
     All,
 }
 
-impl HerdScope {
+impl FamilyScope {
     /// The global default applied to any view without an explicit override.
-    pub const DEFAULT: HerdScope = HerdScope::Remaining;
+    pub const DEFAULT: FamilyScope = FamilyScope::Remaining;
 
     pub fn as_str(self) -> &'static str {
         match self {
-            HerdScope::Lone => "lone",
-            HerdScope::Remaining => "remaining",
-            HerdScope::All => "all",
+            FamilyScope::Lone => "lone",
+            FamilyScope::Remaining => "remaining",
+            FamilyScope::All => "all",
         }
     }
 
-    pub fn parse(s: &str) -> Option<HerdScope> {
+    pub fn parse(s: &str) -> Option<FamilyScope> {
         Some(match s {
-            "lone" => HerdScope::Lone,
-            "remaining" => HerdScope::Remaining,
-            "all" => HerdScope::All,
+            "lone" => FamilyScope::Lone,
+            "remaining" => FamilyScope::Remaining,
+            "all" => FamilyScope::All,
             _ => return None,
         })
     }
 
     /// The `h`-key cycle: `auto` (None) -> lone -> remaining -> all -> `auto`.
     /// `None` means "clear the override and inherit the global default".
-    pub fn cycle(cur: Option<HerdScope>) -> Option<HerdScope> {
+    pub fn cycle(cur: Option<FamilyScope>) -> Option<FamilyScope> {
         match cur {
-            None => Some(HerdScope::Lone),
-            Some(HerdScope::Lone) => Some(HerdScope::Remaining),
-            Some(HerdScope::Remaining) => Some(HerdScope::All),
-            Some(HerdScope::All) => None,
+            None => Some(FamilyScope::Lone),
+            Some(FamilyScope::Lone) => Some(FamilyScope::Remaining),
+            Some(FamilyScope::Remaining) => Some(FamilyScope::All),
+            Some(FamilyScope::All) => None,
         }
     }
 }

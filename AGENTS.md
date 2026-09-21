@@ -23,7 +23,7 @@ root; reusable pieces live under `crates/`.
 - `src/model.rs` — `Status`, `Task`.
 - `src/store.rs` — `.yaks/` discovery + frontmatter parsing (hand-rolled fast path).
 - `src/main.rs` — clap CLI + command dispatch.
-- `src/herd.rs` — the core facade the CLI and TUI both call.
+- `src/farm.rs` — the core facade the CLI and TUI both call.
 - `src/tui.rs` (+ `src/tui/`) — the interactive TUI. `tui.rs` is a thin root (the
   `App` struct, the `Focus`/`Overlay`/`PickAction`/`ConfirmAction` enums, the
   constructors, and shared form helpers/consts); behavior lives in focused

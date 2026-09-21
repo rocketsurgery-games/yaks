@@ -1,27 +1,27 @@
-//! Per-user, per-herd UI-state cache. This is *rebuildable* state (the set of
-//! collapsed tree ids, plus per-view herd-scope overrides), so it lives under
+//! Per-user, per-farm UI-state cache. This is *rebuildable* state (the set of
+//! collapsed tree ids, plus per-view family-scope overrides), so it lives under
 //! `$XDG_CACHE_HOME` (default `~/.cache`) at `yaks/<slug>.json`, never in the
-//! herd and never committed.
+//! farm and never committed.
 //!
-//! The slug is a stable hash of the absolute herd root. A slug change merely
-//! resets the cache (collapsed rows re-expand, herd overrides revert to auto),
+//! The slug is a stable hash of the absolute farm root. A slug change merely
+//! resets the cache (collapsed rows re-expand, family overrides revert to auto),
 //! which is harmless for rebuildable state.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::tui::view::HerdScope;
+use crate::tui::view::FamilyScope;
 
-/// The full rebuildable UI state persisted per herd. Fields are independent;
+/// The full rebuildable UI state persisted per farm. Fields are independent;
 /// both are written together so neither clobbers the other.
 #[derive(Default, Clone, PartialEq, Debug)]
 pub struct UiState {
     /// Ids of collapsed tree parents.
     pub collapsed: HashSet<String>,
-    /// Per-view herd-scope overrides, keyed by `View::key`. A missing entry
-    /// means the view inherits [`HerdScope::DEFAULT`] ("auto").
-    pub herd: HashMap<String, HerdScope>,
+    /// Per-view family-scope overrides, keyed by `View::key`. A missing entry
+    /// means the view inherits [`FamilyScope::DEFAULT`] ("auto").
+    pub family: HashMap<String, FamilyScope>,
 }
 
 /// FNV-1a 64-bit over the absolute root path → 12 hex chars.
@@ -47,7 +47,7 @@ fn cache_home() -> PathBuf {
     std::env::temp_dir()
 }
 
-/// Absolute path to this herd's UI-state cache file.
+/// Absolute path to this farm's UI-state cache file.
 pub fn ui_state_path(root: &Path) -> PathBuf {
     cache_home()
         .join("yaks")
@@ -78,20 +78,20 @@ fn load_from(path: &Path) -> UiState {
                 .collect()
         })
         .unwrap_or_default();
-    let herd = v
-        .get("herd")
+    let family = v
+        .get("family")
         .and_then(|h| h.as_object())
         .map(|obj| {
             obj.iter()
                 .filter_map(|(k, val)| {
                     val.as_str()
-                        .and_then(HerdScope::parse)
+                        .and_then(FamilyScope::parse)
                         .map(|s| (k.clone(), s))
                 })
                 .collect()
         })
         .unwrap_or_default();
-    UiState { collapsed, herd }
+    UiState { collapsed, family }
 }
 
 fn save_to(path: &Path, state: &UiState) {
@@ -100,13 +100,13 @@ fn save_to(path: &Path, state: &UiState) {
     }
     let mut ids: Vec<&String> = state.collapsed.iter().collect();
     ids.sort();
-    let mut keys: Vec<&String> = state.herd.keys().collect();
+    let mut keys: Vec<&String> = state.family.keys().collect();
     keys.sort();
-    let mut herd = serde_json::Map::new();
+    let mut family = serde_json::Map::new();
     for k in keys {
-        herd.insert(k.clone(), serde_json::Value::from(state.herd[k].as_str()));
+        family.insert(k.clone(), serde_json::Value::from(state.family[k].as_str()));
     }
-    let payload = serde_json::json!({ "collapsed": ids, "herd": herd });
+    let payload = serde_json::json!({ "collapsed": ids, "family": family });
     let _ = fs::write(path, payload.to_string());
 }
 
@@ -136,27 +136,28 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_herd_overrides() {
+    fn round_trip_family_overrides() {
         let path = temp_file();
         let mut st = UiState::default();
-        st.herd.insert("status:hairy".to_string(), HerdScope::All);
-        st.herd
-            .insert("status:shaving".to_string(), HerdScope::Lone);
+        st.family
+            .insert("status:hairy".to_string(), FamilyScope::All);
+        st.family
+            .insert("status:shaving".to_string(), FamilyScope::Lone);
         save_to(&path, &st);
-        assert_eq!(load_from(&path).herd, st.herd);
+        assert_eq!(load_from(&path).family, st.family);
         let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn missing_file_is_empty() {
         let st = load_from(Path::new("/nonexistent/yaksrs/cache.json"));
-        assert!(st.collapsed.is_empty() && st.herd.is_empty());
+        assert!(st.collapsed.is_empty() && st.family.is_empty());
     }
 
     #[test]
     fn slug_is_stable_and_short() {
-        let a = slug(Path::new("/tmp/some/herd"));
-        let b = slug(Path::new("/tmp/some/herd"));
+        let a = slug(Path::new("/tmp/some/farm"));
+        let b = slug(Path::new("/tmp/some/farm"));
         assert_eq!(a, b);
         assert_eq!(a.len(), 12);
     }

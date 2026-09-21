@@ -11,7 +11,7 @@ impl App {
         let Some(id) = self.selected_id() else { return };
         let was = self.working_set.iter().any(|i| *i == id);
         self.working_set = views_store::toggle_working_set(&self.working_set, &id);
-        if let Some(h) = &self.herd {
+        if let Some(h) = &self.farm {
             views_store::save_working_set(h.root(), &self.working_set);
         }
         if self.active_view().key == "working-set" {
@@ -45,7 +45,7 @@ impl App {
             &seed,
         );
         self.views.push(v);
-        if let Some(h) = &self.herd {
+        if let Some(h) = &self.farm {
             views_store::save_views(h.root(), &self.views);
         }
         self.set_view(self.views.len() - 1);
@@ -53,7 +53,7 @@ impl App {
     }
 
     pub(crate) fn persist_views(&self) {
-        if let Some(h) = &self.herd {
+        if let Some(h) = &self.farm {
             views_store::save_views(h.root(), &self.views);
         }
     }
@@ -225,7 +225,7 @@ impl App {
     }
 
     /// Open the h/s/n/x picker as a bulk action over the multi-select set. The
-    /// resolved pick loops every marked id through `herd.transition` and then
+    /// resolved pick loops every marked id through `farm.transition` and then
     /// clears the set (see [`App::resolve_pick`]).
     pub(crate) fn open_bulk_state_picker(&mut self) {
         let ids: Vec<String> = self.selected.iter().cloned().collect();

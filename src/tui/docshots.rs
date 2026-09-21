@@ -22,7 +22,7 @@ use toque::HeadlessApp;
 use crate::model::{Status, Task};
 use crate::tui::{App, handle_key};
 
-// -- sample herd ----------------------------------------------------------
+// -- sample farm ----------------------------------------------------------
 
 fn t(id: &str, title: &str, kind: &str, pri: u8, status: Status, parent: Option<&str>) -> Task {
     Task {
@@ -44,9 +44,9 @@ fn t(id: &str, title: &str, kind: &str, pri: u8, status: Status, parent: Option<
     }
 }
 
-/// A small, realistic herd: an umbrella with children across statuses, labels,
+/// A small, realistic farm: an umbrella with children across statuses, labels,
 /// a dependency, and one child awaiting a human (the ⏳ needs badge).
-fn herd() -> Vec<Task> {
+fn farm() -> Vec<Task> {
     let mut coord = t(
         "yaks-3901",
         "Coordination substrate for parallel yak-shaving",
@@ -76,7 +76,7 @@ fn herd() -> Vec<Task> {
 
     let mut diff = t(
         "yaks-70e5",
-        "yaks diff <refA> <refB>: ref-generic herd diff",
+        "yaks diff <refA> <refB>: ref-generic farm diff",
         "feature",
         3,
         Status::Hairy,
@@ -121,7 +121,7 @@ fn herd() -> Vec<Task> {
 }
 
 fn app_at(w: u16, h: u16) -> App {
-    let mut app = App::new(herd());
+    let mut app = App::new(farm());
     HeadlessApp::on_resize(&mut app, w, h);
     app
 }

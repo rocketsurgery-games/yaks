@@ -170,6 +170,7 @@ impl App {
         let new = match std::mem::replace(&mut self.overlay, Overlay::None) {
             Overlay::Create(f) => NewTask {
                 title: f.title_text(),
+                prefix: None,
                 kind: Some(TYPE_CHOICES[f.kind_idx].to_string()),
                 priority: Some(PRI_CHOICES[f.pri_idx]),
                 parent: f.parent.clone(),
@@ -184,7 +185,7 @@ impl App {
                 return;
             }
         };
-        let Some(h) = &self.herd else { return };
+        let Some(h) = &self.farm else { return };
         match h.create(new) {
             Ok(CreateOutcome::Created(t)) => {
                 let id = t.id.clone();
@@ -194,6 +195,11 @@ impl App {
             }
             Ok(CreateOutcome::ParentNotFound(p)) => {
                 self.notification = Some(format!("parent {p} not found"))
+            }
+            // The create form has no prefix field yet, so this is unreachable in
+            // practice; surface it as a notification rather than panicking.
+            Ok(CreateOutcome::InvalidPrefix(p)) => {
+                self.notification = Some(format!("invalid prefix {p:?}"))
             }
             Err(e) => self.notification = Some(format!("error: {e}")),
         }
@@ -361,7 +367,7 @@ impl App {
                 .to_string();
             (name, bytes)
         };
-        let Some(h) = &self.herd else { return };
+        let Some(h) = &self.farm else { return };
         match h.attach(&id, &name, &data) {
             Ok(AttachOutcome::Attached(n)) => {
                 self.reload();
@@ -377,7 +383,7 @@ impl App {
         let arg = if target.starts_with("http") {
             target.to_string()
         } else {
-            match &self.herd {
+            match &self.farm {
                 Some(h) => h.root().join(target).display().to_string(),
                 None => target.to_string(),
             }
@@ -455,11 +461,17 @@ impl App {
         }
     }
 
-    /// Set or clear a `needs` block via the herd, appending the typed text as an
+    /// Set or clear a `needs` block via the farm, appending the typed text as an
     /// attributed note when non-empty. Backs the `Ask`/`Answer` edit actions.
-    pub(crate) fn set_needs_edit(&mut self, id: &str, needs: Option<String>, note: Option<&str>, ok: String) {
+    pub(crate) fn set_needs_edit(
+        &mut self,
+        id: &str,
+        needs: Option<String>,
+        note: Option<&str>,
+        ok: String,
+    ) {
         let actor = crate::actor::resolve(None);
-        let Some(h) = &self.herd else { return };
+        let Some(h) = &self.farm else { return };
         match h.set_needs(id, needs, actor.as_deref(), note) {
             Ok(Some(_)) => {
                 self.reload();
@@ -1150,7 +1162,7 @@ impl App {
         match fp.action {
             FuzzyAction::AddDep(id) => {
                 let Some(dep) = target else { return };
-                let Some(h) = &self.herd else { return };
+                let Some(h) = &self.farm else { return };
                 match h.dep_add(&id, &dep) {
                     Ok(DepOutcome::Added) => {
                         self.reload();
@@ -1164,7 +1176,7 @@ impl App {
                 }
             }
             FuzzyAction::Reparent(id) => {
-                let Some(h) = &self.herd else { return };
+                let Some(h) = &self.farm else { return };
                 match h.reparent(&id, target.clone()) {
                     Ok(Reparent::Done { new_parent }) => {
                         self.reload();
@@ -1209,7 +1221,7 @@ impl App {
                 } else {
                     ids.iter().collect()
                 };
-                let Some(h) = &self.herd else { return };
+                let Some(h) = &self.farm else { return };
                 let (mut moved, mut failed) = (0usize, 0usize);
                 for id in &targets {
                     match h.transition(id, dest) {
@@ -1243,7 +1255,7 @@ impl App {
                     self.notification = Some(format!("{id} already {}", status_word(dest)));
                     return;
                 }
-                let Some(h) = &self.herd else { return };
+                let Some(h) = &self.farm else { return };
                 match h.transition(&id, dest) {
                     Ok(MoveOutcome::Moved) => {
                         self.reload();
@@ -1300,7 +1312,7 @@ impl App {
     }
 
     pub(crate) fn apply_edit(&mut self, id: &str, edit: TaskEdit, ok_msg: String) {
-        let Some(h) = &self.herd else { return };
+        let Some(h) = &self.farm else { return };
         match h.update(id, edit) {
             Ok(UpdateOutcome::Updated) => {
                 // Follow the edited yak to its new sorted slot. The cursor is
@@ -1333,7 +1345,7 @@ impl App {
                 self.notification = Some("changes discarded".into());
             }
             ConfirmAction::Slaughter(id) => {
-                let Some(h) = &self.herd else { return };
+                let Some(h) = &self.farm else { return };
                 match h.transition(&id, Status::Dead) {
                     Ok(MoveOutcome::Moved) => {
                         self.reload();
@@ -1411,7 +1423,7 @@ pub(crate) fn handle_key(app: &mut App, k: KeyEvent) {
                     app.notification = Some("reverted to view".into());
                 }
             }
-            KeyCode::Char('h') => app.cycle_herd_scope(),
+            KeyCode::Char('h') => app.cycle_family_scope(),
             KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter => {
                 if app.selected().is_some() {
                     app.focus = Focus::Detail;

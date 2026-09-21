@@ -1,14 +1,14 @@
 ---
 name: yaks-coordinating
-description: How agents and humans coordinate over a shared herd across different agent harnesses, without a heavyweight process. Experimental and repo-internal (yaks dogfooding); not shipped.
+description: How agents and humans coordinate over a shared farm across different agent harnesses, without a heavyweight process. Experimental and repo-internal (yaks dogfooding); not shipped.
 ---
 
 # Coordinating yaks (experimental)
 
-Repo-internal conventions for coordinating work over a shared herd — across
+Repo-internal conventions for coordinating work over a shared farm — across
 harnesses, parallel agents, and humans. Deliberately minimal. The habits below
 scale down to one agent and up to many; reach for the smallest one that keeps
-the herd honest, and let yaks-working carry the per-yak trail.
+the farm honest, and let yaks-working carry the per-yak trail.
 
 ## The design test (what belongs where)
 
@@ -23,22 +23,22 @@ Design so the CLI is the whole coordination surface for the minimal case and the
 durable spine for the rich one.
 
 - **Minimal harness** (one agent loop, e.g. Pi): yaks is durable memory and a
-  log. Notes are how the agent remembers across turns; the herd is its state.
+  log. Notes are how the agent remembers across turns; the farm is its state.
 - **Rich harness** (subagents + worktrees, e.g. Claude Code): yaks is a shared
   blackboard. Subagents claim disjoint yaks and read each other's notes.
 
 The rich case adds nothing the minimal case needs; it just has more writers.
 
-## Worktrees are per-branch herds
+## Worktrees are per-branch farms
 
 This is **team-mode** behavior. Each git worktree checks out its own committed
-`.yaks/`, so herds are **per-branch** and reconcile at **merge**, not live. Two
+`.yaks/`, so farms are **per-branch** and reconcile at **merge**, not live. Two
 parallel agents in two worktrees do not see each other's shave/update until those
 commits merge. So coordinate by disjoint scopes plus merge, not by watching each
 other in real time.
 
 (In **private mode** the opposite holds: a gitignored `.yaks/` is never checked
-out per worktree, so all lanes share the *one* herd live — see PR-driven
+out per worktree, so all lanes share the *one* farm live — see PR-driven
 integration.)
 
 **File-tool SOP (validated across runs).** Some agent harnesses (e.g. Zed)
@@ -123,9 +123,9 @@ section above.
 - **Assign disjoint file scopes** — one writer per yak (Disjoint scoping).
 - **If one file is unavoidable, scope by function and anchor briefs by symbol,
   not line number** — line numbers drift as sibling lanes land (Disjoint scoping).
-- **Expect human `.yaks/` drift and leave it untouched** — a worker's herd is
+- **Expect human `.yaks/` drift and leave it untouched** — a worker's farm is
   its own branch; it reconciles at merge, not live (Worktrees are per-branch
-  herds).
+  farms).
 - **Verify each lane's branch is disjoint before merging.**
 - **Squash-merge each lane with the yak id in the message** (Merge / integration).
 
@@ -181,17 +181,17 @@ time:
 
 - **Cut once, keep across all phases, remove at the end.** `git worktree add
   wt/<arc> -b <branch>` from `main` HEAD (which already holds the committed plan
-  herd — an umbrella yak plus its sequenced children). It survives the whole arc;
+  farm — an umbrella yak plus its sequenced children). It survives the whole arc;
   `git worktree remove` only at the end.
 - **HITL is *simpler* than in a fan-out.** The coordinator operates *at* the
   worktree, so the cross-worktree review-ask trap doesn't apply: asks/answers land
   on the branch and merge with the work, and the human talks to the coordinator
   directly — no handback routing.
 - **Checkpoint aggressively — especially in team mode.** The arc's yak state
-  (shaves/shears/asks) lives on the branch, so `main`'s herd looks stale for
+  (shaves/shears/asks) lives on the branch, so `main`'s farm looks stale for
   in-flight phases. Squash-merge **each completed phase to `main`** at its
   checkpoint (yak id in the message), then `git merge main` back into the branch
-  to re-sync. This keeps `main`'s herd honest, keeps the per-branch herds in step,
+  to re-sync. This keeps `main`'s farm honest, keeps the per-branch farms in step,
   and de-risks integration one phase at a time — the opposite of hoarding the arc
   on a branch until the end.
 - **Executor choice.** The coordinator can drive each phase directly in the
@@ -200,7 +200,7 @@ time:
   behavior-preserving work (e.g. snapshot migration); spawn for bulk mechanical
   moves.
 
-This is the sequential dual of the parallel run shape: same worktree + herd
+This is the sequential dual of the parallel run shape: same worktree + farm
 mechanics, but one persistent lane advanced in checkpoints instead of many
 ephemeral lanes merged at once.
 
@@ -227,7 +227,7 @@ mechanics as a worker lane, landed through the coordinator — or, if no
 coordinator is running, **the human is the coordinator** and just merges it.
 Three things make it feel different, none of them structural: the human drives
 it, it is long-lived, and it often **starts yak-less** (pure conversation) and
-emits either code or a fresh herd.
+emits either code or a fresh farm.
 
 **The file-tool pitfall inverts in your favor.** A *spawned* worker's file tools
 root at the main checkout (the recurring stray-edit bug above). Here the human
@@ -243,17 +243,17 @@ commits to producing something, open a thin `shaving` "design lane: X" yak —
 which in private mode *is* the claim (below). The invariant holds without
 friction.
 
-**Herd behavior splits by mode** (same split as PR-driven integration):
+**Farm behavior splits by mode** (same split as PR-driven integration):
 
-- **Private mode:** the gitignored `.yaks/` is the *one shared live herd* the
+- **Private mode:** the gitignored `.yaks/` is the *one shared live farm* the
   worktree resolves by walk-up, so yaks the lane drops on the board are visible
-  to a running coordinator **instantly** — an emitted herd is a no-op to share,
+  to a running coordinator **instantly** — an emitted farm is a no-op to share,
   and only the *code* has to land. The only coordination cost is **claiming**:
   move held yaks to `shaving` (or tag them) so the coordinator's `yaks next`
   skips work you are actively holding.
 - **Team mode:** new yaks live on the lane's branch, invisible until merge. So
-  **land the herd early** — a `.yaks/`-only commit can go up as soon as the
-  design converges, letting the coordinator fan the emitted herd out while your
+  **land the farm early** — a `.yaks/`-only commit can go up as soon as the
+  design converges, letting the coordinator fan the emitted farm out while your
   interactive code work continues on the same branch. Land the code when it is
   ready.
 
@@ -270,7 +270,7 @@ friction.
   integration.
 
 **Non-goals (stay off the ledge).** No worktree-awareness in the CLI — the lane
-is legible through `git worktree list` plus the herd. No live cross-worktree
+is legible through `git worktree list` plus the farm. No live cross-worktree
 HITL: the human in the loop is *physically at this worktree*, so there is no
 cross-worktree feedback to route (unlike a spawned worker, which must hand back).
 A first-class "ready-to-land" marker (`needs: land`, or a label) is left to prose
@@ -292,16 +292,16 @@ tracker). The consequences cascade:
 - The yak files are **not in the PR**, and yak ids must stay out of commit
   messages too (not just the PR body) — the whole `.yaks/` layer is invisible to
   the shared repo.
-- **There is one herd, not per-branch herds** — and workers need no setup to
+- **There is one farm, not per-branch farms** — and workers need no setup to
   reach it. A gitignored `.yaks/` isn't carried into a worktree, so there's no
   copy to reconcile; and because `yaks` discovery walks *up* the filesystem, an
   **in-tree** worktree (`<repo>/wt/<name>`) resolves the main checkout's shared
-  herd automatically — **no symlink required** (validated live: a bare
+  farm automatically — **no symlink required** (validated live: a bare
   `yaks show` from `wt/a` resolved the parent `.yaks/`). Only an *out-of-tree*
   worktree needs a bridge: `ln -s <repo>/.yaks <worktree>/.yaks`. Either way, yak
-  surgery is **live and shared**, not merged: the split-brain-herd problem
-  disappears, and concurrent CLI writes to one herd take its place.
-- Because the herd is shared, the **claim commit doesn't apply to yaks** (they
+  surgery is **live and shared**, not merged: the split-brain-farm problem
+  disappears, and concurrent CLI writes to one farm take its place.
+- Because the farm is shared, the **claim commit doesn't apply to yaks** (they
   aren't committed) — claiming is just moving the shared yak to `shaving`.
 
 **The flow (coordinator owns `gh`; workers never touch it):**
@@ -367,7 +367,7 @@ introduce: track it only when they green-light it, otherwise leave it and flag
 it. It reconciles like any other drift, at merge, not live.
 
 **Across worktrees, HITL routes through the coordinator — not live.** A worker's
-herd is its own branch; a human note on `main` does not reach an in-flight
+farm is its own branch; a human note on `main` does not reach an in-flight
 worker, and chasing that is a trap. Instead: spawn workers **fresh from `main`**
 (so they start with the latest human feedback), and when a worker hits a decision
 it **hands back** — `yaks ask` on its leaf plus a clear final message — rather

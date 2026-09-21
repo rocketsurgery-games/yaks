@@ -1,5 +1,5 @@
 ---
-source: src/tui.rs
+source: src/tui/tests.rs
 expression: narrow
 ---
  🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starred (0)
@@ -9,4 +9,4 @@ saved view: quarterly-planning
 
 
 
-Tab:view  j/k:move  l:detail  h:herd  v:views  c/C:new  E:edit  X:del  S:state  D:dep  f:f
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:edit  X:del  S:state  D:dep  f

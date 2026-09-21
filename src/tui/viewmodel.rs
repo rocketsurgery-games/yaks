@@ -1,5 +1,5 @@
-//! `App`'s view-model / read-model layer: the herd-derived row lists (tree +
-//! flat + working-set), selection and cursor, per-view herd-scope, view/tab
+//! `App`'s view-model / read-model layer: the farm-derived row lists (tree +
+//! flat + working-set), selection and cursor, per-view family-scope, view/tab
 //! management, and the reload paths. Split out of `tui.rs` (yaks-b1cc / b1cc/6)
 //! as an `impl App` block. `use super::*` inherits everything `tui.rs` has in
 //! scope; the methods are `pub(crate)` so the rest of the crate can call them.
@@ -7,58 +7,58 @@
 use super::*;
 
 impl App {
-    /// Persist the (rebuildable) UI state — collapsed rows and herd-scope
+    /// Persist the (rebuildable) UI state — collapsed rows and family-scope
     /// overrides — to the per-user cache.
     pub(crate) fn save_ui_state(&self) {
-        if let Some(h) = &self.herd {
+        if let Some(h) = &self.farm {
             cache::save(
                 h.root(),
                 &cache::UiState {
                     collapsed: self.collapsed.clone(),
-                    herd: self.herd_scope.clone(),
+                    family: self.family_scope.clone(),
                 },
             );
         }
     }
 
-    /// The herd scope in effect for `v`: its persisted override, else the global
+    /// The family scope in effect for `v`: its persisted override, else the global
     /// default. Only meaningful for tree views.
-    pub(crate) fn resolved_herd_scope(&self, v: &view::View) -> view::HerdScope {
-        self.herd_scope
+    pub(crate) fn resolved_family_scope(&self, v: &view::View) -> view::FamilyScope {
+        self.family_scope
             .get(&v.key)
             .copied()
-            .unwrap_or(view::HerdScope::DEFAULT)
+            .unwrap_or(view::FamilyScope::DEFAULT)
     }
 
-    /// Cycle the active view's herd scope (the `h` key): auto -> lone ->
+    /// Cycle the active view's family scope (the `h` key): auto -> lone ->
     /// remaining -> all -> auto. Flat/working-set views have no tree, so it's a
     /// no-op there with a hint.
-    pub(crate) fn cycle_herd_scope(&mut self) {
+    pub(crate) fn cycle_family_scope(&mut self) {
         let v = self.active_view();
         if v.is_flat() || v.key == "working-set" {
-            self.notification = Some("herd scope applies to tree views".into());
+            self.notification = Some("family scope applies to tree views".into());
             return;
         }
         let key = v.key.clone();
-        let next = view::HerdScope::cycle(self.herd_scope.get(&key).copied());
+        let next = view::FamilyScope::cycle(self.family_scope.get(&key).copied());
         match next {
             Some(s) => {
-                self.herd_scope.insert(key, s);
+                self.family_scope.insert(key, s);
             }
             None => {
-                self.herd_scope.remove(&key);
+                self.family_scope.remove(&key);
             }
         }
         self.save_ui_state();
         self.notification = Some(match next {
-            Some(s) => format!("herd: {}", s.as_str()),
-            None => format!("herd: ~{}", view::HerdScope::DEFAULT.as_str()),
+            Some(s) => format!("family: {}", s.as_str()),
+            None => format!("family: ~{}", view::FamilyScope::DEFAULT.as_str()),
         });
     }
 
-    /// Re-query the herd view after a mutation and keep the cursor in range.
+    /// Re-query the farm view after a mutation and keep the cursor in range.
     pub(crate) fn reload(&mut self) {
-        if let Some(h) = &self.herd {
+        if let Some(h) = &self.farm {
             if let Ok(all) = h.list(FilterSpec::default(), true) {
                 self.all = all;
             }
@@ -71,12 +71,12 @@ impl App {
         };
     }
 
-    /// Re-read the herd from disk (external change) while keeping the cursor on
+    /// Re-read the farm from disk (external change) while keeping the cursor on
     /// the same task by id. Silent: it must not clobber a mutation's own
     /// notification, and the event loop only calls it while idle (no overlay).
     pub(crate) fn reload_preserving_selection(&mut self) {
         let sel = self.selected_id();
-        if let Some(h) = &self.herd {
+        if let Some(h) = &self.farm {
             if let Ok(all) = h.list(FilterSpec::default(), true) {
                 self.all = all;
             }
@@ -103,7 +103,7 @@ impl App {
         }
         // Flat views (Recent/Inbox/custom sorted) count via the flat predicate
         // so facets the tree ignores for pruning — notably `needs_only` — are
-        // honored (an Inbox tab shows the awaiting-a-human count, not the herd
+        // honored (an Inbox tab shows the awaiting-a-human count, not the farm
         // size). Mirrors `flat_rows`: exclude dead unless the spec asks, respect
         // the row cap.
         if v.is_flat() {
@@ -116,7 +116,7 @@ impl App {
                 .count();
             return v.limit.map_or(n, |l| n.min(l));
         }
-        tree::build(&self.all, &v.spec, self.resolved_herd_scope(v))
+        tree::build(&self.all, &v.spec, self.resolved_family_scope(v))
             .iter()
             .filter(|r| !r.ghost)
             .count()
@@ -187,7 +187,7 @@ impl App {
         if v.is_flat() {
             return self.flat_rows();
         }
-        let scope = self.resolved_herd_scope(v);
+        let scope = self.resolved_family_scope(v);
         let flat = tree::build(&self.all, &self.filter, scope);
         tree::apply_collapse(flat, &self.collapsed)
     }

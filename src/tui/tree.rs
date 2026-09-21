@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::filter::{self, FilterSpec};
 use crate::model::{Status, Task};
-use crate::tui::view::HerdScope;
+use crate::tui::view::FamilyScope;
 
 pub struct Row<'a> {
     pub task: &'a Task,
@@ -65,7 +65,7 @@ fn cmp_child(a: &Task, b: &Task) -> Ordering {
 /// their family is dimmed context. With a content filter, matches anywhere in
 /// that family become the focus and non-matching ancestors are dimmed to root
 /// them; everything else is pruned. Mirrors Python `tree.build_tree`.
-pub fn build<'a>(all: &'a [Task], spec: &FilterSpec, herd: HerdScope) -> Vec<Row<'a>> {
+pub fn build<'a>(all: &'a [Task], spec: &FilterSpec, farm: FamilyScope) -> Vec<Row<'a>> {
     let by_id: HashMap<&str, &Task> = all.iter().map(|t| (t.id.as_str(), t)).collect();
 
     let mut children_of: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -81,7 +81,7 @@ pub fn build<'a>(all: &'a [Task], spec: &FilterSpec, herd: HerdScope) -> Vec<Row
     }
 
     // Effective status scope: the spec's statuses, else all non-dead statuses
-    // (a bare/custom view with no status axis spans the whole herd).
+    // (a bare/custom view with no status axis spans the whole farm).
     let eff: Vec<Status> = if spec.statuses.is_empty() {
         vec![Status::Hairy, Status::Shaving, Status::Shorn]
     } else {
@@ -110,7 +110,7 @@ pub fn build<'a>(all: &'a [Task], spec: &FilterSpec, herd: HerdScope) -> Vec<Row
     };
 
     // universe = anchors + ancestors (up) + all descendants (down), any status.
-    // It's the search space for content matches; herd scope then decides how
+    // It's the search space for content matches; family scope then decides how
     // much of it actually renders.
     let mut universe: HashSet<&str> = anchors.clone();
     for &a in &anchors {
@@ -140,14 +140,14 @@ pub fn build<'a>(all: &'a [Task], spec: &FilterSpec, herd: HerdScope) -> Vec<Row
         anchors.clone()
     };
 
-    // members = seeds + ancestors (always, to root the chain) + herd-scoped
+    // members = seeds + ancestors (always, to root the chain) + family-scoped
     // descendants. One rule for both the filtered and unfiltered paths, so
     // turning on a filter no longer silently drops descendant context.
     let mut members: HashSet<&str> = focus.clone();
     for &s in &focus {
         members.extend(ancestors_of(s));
     }
-    members.extend(herd_descendants(&focus, herd, &children_of, &by_id));
+    members.extend(family_descendants(&focus, farm, &children_of, &by_id));
 
     // roots = members whose parent is not itself a member.
     let mut roots: Vec<&str> = members
@@ -179,17 +179,17 @@ pub fn build<'a>(all: &'a [Task], spec: &FilterSpec, herd: HerdScope) -> Vec<Row
     out
 }
 
-/// The descendant rows a tree view pulls in under its `seeds`, per herd scope.
+/// The descendant rows a tree view pulls in under its `seeds`, per family scope.
 /// `Lone` yields nothing; `All` yields the full descendant closure; `Remaining`
 /// keeps descendants with open work (hairy/shaving) plus the completed nodes
 /// that connect them back to a seed, dropping fully-shorn subtrees.
-fn herd_descendants<'a>(
+fn family_descendants<'a>(
     seeds: &HashSet<&'a str>,
-    herd: HerdScope,
+    farm: FamilyScope,
     children_of: &HashMap<&'a str, Vec<&'a str>>,
     by_id: &HashMap<&'a str, &'a Task>,
 ) -> HashSet<&'a str> {
-    if herd == HerdScope::Lone {
+    if farm == FamilyScope::Lone {
         return HashSet::new();
     }
     // Full descendant closure of the seeds (any status).
@@ -204,7 +204,7 @@ fn herd_descendants<'a>(
             }
         }
     }
-    if herd == HerdScope::All {
+    if farm == FamilyScope::All {
         return full;
     }
     // Remaining: start from the open descendants, then walk each one up toward
@@ -322,7 +322,7 @@ mod tests {
             statuses: vec![Status::Hairy],
             ..Default::default()
         };
-        let flat = build(&all, &spec, HerdScope::All);
+        let flat = build(&all, &spec, FamilyScope::All);
         assert_eq!(flat.len(), 3);
         let collapsed: HashSet<String> = ["a".to_string()].into_iter().collect();
         let vis = apply_collapse(flat, &collapsed);
@@ -349,7 +349,7 @@ mod tests {
             search: Some("needle".into()),
             ..Default::default()
         };
-        let flat = build(&all, &spec, HerdScope::All);
+        let flat = build(&all, &spec, FamilyScope::All);
         let ids: Vec<&str> = flat.iter().map(|r| r.task.id.as_str()).collect();
         assert_eq!(ids, vec!["a", "a1", "a2"]); // b pruned
         let ghost = |id: &str| flat.iter().find(|r| r.task.id == id).unwrap().ghost;
@@ -358,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn herd_scope_governs_descendants() {
+    fn family_scope_governs_descendants() {
         // a(hairy anchor) with a shorn leaf b and a shaving child c. On the
         // Hairy view b and c are non-anchor descendants, governed by the scope.
         let all = vec![
@@ -378,9 +378,9 @@ mod tests {
             v.sort();
             v
         };
-        assert_eq!(ids(HerdScope::Lone), vec!["a"]);
-        assert_eq!(ids(HerdScope::Remaining), vec!["a", "c"]); // shorn leaf b dropped
-        assert_eq!(ids(HerdScope::All), vec!["a", "b", "c"]);
+        assert_eq!(ids(FamilyScope::Lone), vec!["a"]);
+        assert_eq!(ids(FamilyScope::Remaining), vec!["a", "c"]); // shorn leaf b dropped
+        assert_eq!(ids(FamilyScope::All), vec!["a", "b", "c"]);
     }
 
     #[test]
@@ -396,7 +396,7 @@ mod tests {
             statuses: vec![Status::Hairy],
             ..Default::default()
         };
-        let flat = build(&all, &spec, HerdScope::Remaining);
+        let flat = build(&all, &spec, FamilyScope::Remaining);
         let mut ids: Vec<String> = flat.iter().map(|r| r.task.id.clone()).collect();
         ids.sort();
         assert_eq!(ids, vec!["a", "b", "c"]);
@@ -421,7 +421,7 @@ mod tests {
             search: Some("needle".into()),
             ..Default::default()
         };
-        let flat = build(&all, &spec, HerdScope::Remaining);
+        let flat = build(&all, &spec, FamilyScope::Remaining);
         let ids: Vec<&str> = flat.iter().map(|r| r.task.id.as_str()).collect();
         assert_eq!(ids, vec!["a", "a1"]);
         let ghost = |id: &str| flat.iter().find(|r| r.task.id == id).unwrap().ghost;

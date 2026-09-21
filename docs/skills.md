@@ -10,10 +10,10 @@ Two skills ship in the binary and install via `yaks skills install` (into
 
 | Skill | Ships? | Use it when… |
 |---|---|---|
-| **`yaks`** | ✓ | Managing tasks in a `.yaks/` herd — the commands, the workflow, solo vs team/private modes. |
+| **`yaks`** | ✓ | Managing tasks in a `.yaks/` farm — the commands, the workflow, solo vs team/private modes. |
 | **`yaks-tracker`** | ✓ | Relating yaks to external issue trackers (Jira/Linear/GitHub) as a one-way roll-up projection. |
 | **`yaks-working`** | dev | Taking one yak from hairy to shorn with a legible trail. |
-| **`yaks-coordinating`** | dev | Coordinating a shared herd across parallel agents and humans. |
+| **`yaks-coordinating`** | dev | Coordinating a shared farm across parallel agents and humans. |
 
 ## The design test (what is a tool vs a skill)
 
@@ -38,7 +38,7 @@ The per-yak discipline the other skills lean on:
 
 ## `yaks-coordinating` — careful parallelism
 
-Conventions for running a small number (2–4) of agents over one herd reliably.
+Conventions for running a small number (2–4) of agents over one farm reliably.
 The load-bearing ideas, all validated by dogfooding:
 
 - **Run shape: claim → fan out → merge → reconcile.** The coordinator makes one
@@ -56,17 +56,17 @@ The load-bearing ideas, all validated by dogfooding:
 - **Human-driven interactive lane.** A thorny, iterative design problem can run
   as its own worktree lane *in parallel* without a fan-out: a peer lane the human
   drives, landed through the coordinator (or the human is the coordinator). It
-  starts yak-less, emits code or a fresh herd, and — because the human opens the
+  starts yak-less, emits code or a fresh farm, and — because the human opens the
   worktree as the harness root — dodges the spawned-worker file-tool pitfall by
   construction.
 - **Recovery.** A worker's work lives in its worktree, so a lost session isn't
   lost work — recover from the worktree rather than restarting.
 - **Integrity.** `yaks doctor` after a batch catches merge damage; across many
-  runs the disjoint-leaf model has kept herds corruption-free.
+  runs the disjoint-leaf model has kept farms corruption-free.
 
 ## Workflows at a glance
 
-- **Solo:** `create` → `next` → `shave` → `update --note` → `shorn`. The herd is
+- **Solo:** `create` → `next` → `shave` → `update --note` → `shorn`. The farm is
   durable memory; notes are how you (or an agent) remember across sessions. Keep
   it private with one of the hiding options in [README](README.md#solo-vs-team-mode).
 - **Team:** commit `.yaks/` with the code. Yak surgery lands alongside the change

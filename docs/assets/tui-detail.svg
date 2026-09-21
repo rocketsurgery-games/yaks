@@ -28,7 +28,7 @@ text{white-space:pre}
 <text y="221.5"><tspan x="287.2" class="s1">│</tspan><tspan x="304.0" class="s3">Labels:</tspan><tspan x="413.2">cli, ui</tspan></text>
 <text y="239.5"><tspan x="287.2" class="s1">│</tspan></text>
 <text y="257.5"><tspan x="287.2" class="s1">│</tspan><tspan x="304.0" class="s2">Blocks:</tspan></text>
-<text y="275.5"><tspan x="287.2" class="s1">│</tspan><tspan x="320.8">🦬</tspan><tspan x="346.0" class="s5">yaks-70e5</tspan><tspan x="438.4">yaks diff &lt;refA&gt; &lt;refB&gt;: ref-generic herd</tspan></text>
+<text y="275.5"><tspan x="287.2" class="s1">│</tspan><tspan x="320.8">🦬</tspan><tspan x="346.0" class="s5">yaks-70e5</tspan><tspan x="438.4">yaks diff &lt;refA&gt; &lt;refB&gt;: ref-generic farm</tspan></text>
 <text y="293.5"><tspan x="287.2" class="s1">│</tspan><tspan x="304.0">diff</tspan></text>
 <text y="311.5"><tspan x="287.2" class="s1">│</tspan></text>
 <text y="329.5"><tspan x="287.2" class="s1">│</tspan><tspan x="304.0" class="s2">Parent:</tspan></text>

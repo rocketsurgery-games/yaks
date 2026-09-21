@@ -24,26 +24,26 @@ Run `yaks <command> --help` for full flags. Most read commands accept the shared
 | `refs <id>` | The yaks a task points at (parent, deps, id mentions), flagging danglers. |
 | `commits <id>` | Git commits linked to a yak — those naming its id, and those that touched its file across status moves. |
 | `rollup` | Group yaks by the external issue they roll up to (`--keys` lists the external keys). |
-| `scan-ids [file]` | Scan text/stdin for real yak-ids; prints `line:col  id`, exits non-zero if any found — a leak check for private herds (pre-commit / PR hook). |
+| `scan-ids [file]` | Scan text/stdin for real yak-ids; prints `line:col  id`, exits non-zero if any found — a leak check for private farms (pre-commit / PR hook). |
 
 ## Create / edit
 
 | Command | What it does |
 |---|---|
-| `create '<title>'` | New hairy yak. Title is positional or `--title`; `--type`/`--priority`/`--parent`/`--labels`/`--depends-on`/`--source`/`--description`/`--verify`; `--json` prints id + file path. |
+| `create '<title>'` | New hairy yak. Title is positional or `--title`; `--type`/`--priority`/`--parent`/`--prefix`/`--labels`/`--depends-on`/`--source`/`--description`/`--verify`; `--json` prints id + file path. `--prefix` sets the new yak's id prefix (default: the config prefix), so one `.yaks/` can hold several prefixes. |
 | `update <ids…>` | Update fields/labels or append a `--note`; the same edit applies to every id. `--as <actor>` attributes the note. `--verify '<cmd>'` sets (or, empty, clears) the yak's verification command. |
 | `dep add\|remove <id> <dep>` | Add / remove a dependency. |
 | `reparent <ids…> --parent <id>` | Move yaks under a new parent (or `--unparent` to top-level). |
-| `rename <old> <new>` | Rename a yak's id, updating every reference across the herd. |
+| `rename <old> <new>` | Rename a yak's id, updating every reference across the farm. |
 | `rename-prefix <old> <new>` | Migrate every id from one prefix to another (e.g. `yaksrs` → `yaks`). |
-| `bulk <filter> <mutation>` | Filter-driven field edit. **Dry-run by default** — prints the matched set + the mutation and changes nothing without `--commit`. Requires ≥1 filter flag (never the whole herd) and ≥1 mutation flag (`--add-label`/`--remove-label`/`--set-priority`/`--set-type`/`--reparent`/`--unparent`). Field edits + reparent only — no state transitions. |
+| `bulk <filter> <mutation>` | Filter-driven field edit. **Dry-run by default** — prints the matched set + the mutation and changes nothing without `--commit`. Requires ≥1 filter flag (never the whole farm) and ≥1 mutation flag (`--add-label`/`--remove-label`/`--set-priority`/`--set-type`/`--reparent`/`--unparent`). Field edits + reparent only — no state transitions. |
 
 ## Verification
 
 | Command | What it does |
 |---|---|
 | `verify <ids…>` | Run each yak's verification command with live output, and record `verify: <cmd> -> PASS/FAIL (exit N)` as an attributed note. Exits non-zero if any fails. Explicit only — never auto-run. The command is the yak's own `verify:` field if set, else the config default resolved by the yak's labels (see below). The scriptable form of a yak's evidence contract: a check anyone (or CI) can re-run. |
-| `attach <id> <path>` | Copy a local file under `.yaks/artifacts/<id>/` and link it in the yak's body — artifact evidence (screenshots, TUI frames) a human or coordinator can view. `--note`/`--as` record an attributed note. The non-scriptable, look-at-it form of evidence: an **external file** (committed in team mode — the herd un-ignores `.yaks/artifacts/`), never inlined. |
+| `attach <id> <path>` | Copy a local file under `.yaks/artifacts/<id>/` and link it in the yak's body — artifact evidence (screenshots, TUI frames) a human or coordinator can view. `--note`/`--as` record an attributed note. The non-scriptable, look-at-it form of evidence: an **external file** (committed in team mode — the farm un-ignores `.yaks/artifacts/`), never inlined. |
 
 Default verify commands live in `.yaks/config.yaml` under a nested `verify:` map (label → command, plus an optional `default`); a yak with no explicit `verify:` field resolves its command from the first of its labels with an entry, else `default`. Name the project's levers once:
 
@@ -74,11 +74,11 @@ A lever is the pass/fail **gate** for its label — what `doctor --strict` enfor
 | `answer <id> --note '<reply>'` | Clear the `needs` block (human-reserved). |
 | `inbox` | Yaks awaiting a human — equivalent to `list --needs` across all statuses. |
 
-## Herd admin & integrity
+## Farm admin & integrity
 
 | Command | What it does |
 |---|---|
-| `init` | Create a `.yaks/` herd in the current directory. |
+| `init` | Create a `.yaks/` farm in the current directory. |
 | `skills install` | Install the bundled agent skills (`yaks`, `yaks-tracker`) into a skills dir (default `~/.agents/skills`). |
 | `doctor` | Read-only integrity check: duplicate-status ids, dangling parent/deps. Exits non-zero on any issue (CI-usable). `--strict` also flags shorn yaks with no recorded note, and shorn yaks whose `verify:` command did not last PASS (evidence-before-shear). |
 | `tui` | Open the interactive terminal UI (see [tui.md](tui.md)). |

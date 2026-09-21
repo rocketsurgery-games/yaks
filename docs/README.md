@@ -31,7 +31,7 @@ describe.
 ## Quick start
 
 ```sh
-yaks init                      # scaffold a .yaks/ herd here
+yaks init                      # scaffold a .yaks/ farm here
 yaks create 'Wire up auth'     # new hairy yak (prints its id)
 yaks next                      # what's ready to work (deps met)
 yaks shave [id]                # start it (→ shaving)
@@ -50,13 +50,13 @@ yaks tui                       # or drive it all interactively
 
 ## Solo vs team mode
 
-- **Team mode:** `.yaks/` is committed with the code. The herd is shared, visible
+- **Team mode:** `.yaks/` is committed with the code. The farm is shared, visible
   in git/PRs, and yak surgery merges alongside the changes it describes.
   Provenance is recoverable from git (`yaks commits <id>`).
 - **Solo / private mode:** `.yaks/` is not committed to the code repo. Hide it
   via the root `.gitignore`, a self-contained `.yaks/.gitignore` of `*` (only
-  when the herd is *not* its own git repo), `.git/info/exclude` (per-repo,
-  untracked), or a global `core.excludesFile`. For a private herd synced across
+  when the farm is *not* its own git repo), `.git/info/exclude` (per-repo,
+  untracked), or a global `core.excludesFile`. For a private farm synced across
   machines, give `.yaks/` its own `.git` on a private remote and hide it from the
   outer repo via `.git/info/exclude`. See the **yaks** skill for the full
   breakdown and footguns.

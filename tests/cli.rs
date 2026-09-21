@@ -1,5 +1,5 @@
-//! Golden snapshot tests for read commands over a fixed fixture herd
-//! (tests/fixtures/herd). Snapshots are yaks's own goldens (semantic).
+//! Golden snapshot tests for read commands over a fixed fixture farm
+//! (tests/fixtures/farm). Snapshots are yaks's own goldens (semantic).
 //! Regenerate with: INSTA_UPDATE=always cargo test.
 //! These double as assert_cmd smoke tests (yaksrs-c725).
 
@@ -7,10 +7,10 @@ use assert_cmd::Command;
 use std::path::PathBuf;
 
 fn run(args: &[&str]) -> String {
-    let herd = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/herd");
+    let farm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/farm");
     let out = Command::cargo_bin("yaks")
         .unwrap()
-        .current_dir(herd)
+        .current_dir(farm)
         .args(args)
         .output()
         .unwrap();
@@ -28,14 +28,14 @@ macro_rules! snap {
     };
 }
 
-/// Drive the headless TUI over the fixture herd with isolated XDG dirs (so
+/// Drive the headless TUI over the fixture farm with isolated XDG dirs (so
 /// persisted views/cache can't make the output machine-dependent).
 fn run_headless(args: &[&str], stdin: &str) -> String {
-    let herd = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/herd");
+    let farm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/farm");
     let xdg = std::env::temp_dir().join(format!("yaksrs-headless-{}", std::process::id()));
     let out = Command::cargo_bin("yaks")
         .unwrap()
-        .current_dir(herd)
+        .current_dir(farm)
         .env("XDG_CONFIG_HOME", &xdg)
         .env("XDG_CACHE_HOME", &xdg)
         .args(args)
@@ -151,7 +151,7 @@ fn rollup_keys() {
     snap!("rollup_keys", &["rollup", "--keys"]);
 }
 
-/// `list --needs` selects only yaks blocked on a human. Uses a throwaway herd
+/// `list --needs` selects only yaks blocked on a human. Uses a throwaway farm
 /// built via the CLI so it never depends on the shared fixture (yaks-f81a).
 #[test]
 fn list_needs_filters_to_blocked() {
@@ -210,7 +210,7 @@ fn list_needs_filters_to_blocked() {
 }
 
 /// Positional-title create works (not only `--title`), and `create --json`
-/// emits a parseable id + on-disk path. Throwaway herd built via the CLI so it
+/// emits a parseable id + on-disk path. Throwaway farm built via the CLI so it
 /// never touches the shared fixture (yaks-2120).
 #[test]
 fn create_positional_title_and_json() {
@@ -267,17 +267,17 @@ fn create_positional_title_and_json() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `scan-ids` is the private-mode leak check: text carrying a real herd id is
+/// `scan-ids` is the private-mode leak check: text carrying a real farm id is
 /// flagged and the command exits NON-ZERO (so a pre-commit hook fails), while
 /// text with only id-shaped-but-fake tokens is clean and exits zero. Runs
-/// against the shared fixture herd, whose ids are `fix-000N` (yaks-d4d3).
+/// against the shared fixture farm, whose ids are `fix-000N` (yaks-d4d3).
 #[test]
 fn scan_ids_flags_real_ids_and_is_clean_otherwise() {
-    let herd = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/herd");
+    let farm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/farm");
     let scan = |stdin: &str| -> (bool, String) {
         let out = Command::cargo_bin("yaks")
             .unwrap()
-            .current_dir(&herd)
+            .current_dir(&farm)
             .arg("scan-ids")
             .write_stdin(stdin)
             .output()
@@ -285,7 +285,7 @@ fn scan_ids_flags_real_ids_and_is_clean_otherwise() {
         (out.status.success(), String::from_utf8(out.stdout).unwrap())
     };
 
-    // A real herd id (fix-0004) leaks: flagged with line:col, exits non-zero.
+    // A real farm id (fix-0004) leaks: flagged with line:col, exits non-zero.
     let (ok, stdout) = scan("intro line\nleaked ref fix-0004 in prose\n");
     assert!(
         !ok,
@@ -311,7 +311,7 @@ fn scan_ids_flags_real_ids_and_is_clean_otherwise() {
     // --json emits a parseable array carrying the found id.
     let out = Command::cargo_bin("yaks")
         .unwrap()
-        .current_dir(&herd)
+        .current_dir(&farm)
         .args(["scan-ids", "--json"])
         .write_stdin("see fix-0002 here\n")
         .output()
@@ -338,7 +338,7 @@ fn show_labels_line_has(show_out: &str, label: &str) -> bool {
 /// Bulk `update` applies the same edit to every id in an explicit id-list, and a
 /// missing id in the batch is reported + exits non-zero while the good ids still
 /// apply. Explicit id-list only; filter-driven selection is deferred (yaks-7cc8).
-/// Throwaway herd built via the CLI so it never touches the shared fixture.
+/// Throwaway farm built via the CLI so it never touches the shared fixture.
 #[test]
 fn update_bulk_and_partial_failure() {
     let dir = std::env::temp_dir().join(format!("yaks-bulkupdate-{}", std::process::id()));
@@ -423,7 +423,7 @@ fn update_bulk_and_partial_failure() {
 /// `yaks bulk` is filter-driven and DESTRUCTIVE-CAPABLE, so the safety model
 /// (yaks-7cc8) is exercised end to end: dry-run by default changes nothing,
 /// --commit applies, and both an unfiltered run and a mutation-less run refuse.
-/// Throwaway herd built via the CLI so it never touches the shared fixture.
+/// Throwaway farm built via the CLI so it never touches the shared fixture.
 #[test]
 fn bulk_dry_run_commit_and_refusals() {
     let dir = std::env::temp_dir().join(format!("yaks-bulk-{}", std::process::id()));
@@ -530,7 +530,7 @@ fn bulk_dry_run_commit_and_refusals() {
         "unmatched yak must not be mutated"
     );
 
-    // (c) No filter flag -> refuse (never operate on the whole herd).
+    // (c) No filter flag -> refuse (never operate on the whole farm).
     let (ok, _stdout, stderr) = raw(&["bulk", "--add-label", "z"]);
     assert!(!ok, "unfiltered bulk must exit non-zero");
     assert!(

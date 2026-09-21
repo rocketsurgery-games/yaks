@@ -477,7 +477,7 @@ pub fn set_config_prefix(root: &Path, new: &str) -> Result<()> {
     Ok(())
 }
 
-/// The values [`init`] seeds a new herd's `config.yaml` with. The `Default`
+/// The values [`init`] seeds a new farm's `config.yaml` with. The `Default`
 /// impl mirrors the built-in fallbacks in [`read_config`] (prefix "yak",
 /// type "task", priority 3, vim keybindings).
 pub struct InitConfig {
@@ -500,13 +500,13 @@ impl Default for InitConfig {
 
 /// Result of [`init`].
 pub enum InitOutcome {
-    /// A fresh herd was written at the `.yaks/` path.
+    /// A fresh farm was written at the `.yaks/` path.
     Created,
     /// The `.yaks/` directory already existed; nothing was written.
     AlreadyExists,
 }
 
-/// Create a fresh herd at `root` (the `.yaks/` directory itself): the four
+/// Create a fresh farm at `root` (the `.yaks/` directory itself): the four
 /// status subdirectories, a `config.yaml` seeded from `cfg`, and the `schema`
 /// marker for this build. Refuses to touch an existing `.yaks/` — the caller
 /// gets [`InitOutcome::AlreadyExists`] and nothing is written.
@@ -935,8 +935,8 @@ pub enum SchemaStatus {
     Newer(u32),
 }
 
-/// Compare the herd's `.yaks/schema` marker against `SCHEMA`. A missing or
-/// unparseable marker is treated as compatible (don't block hand-made herds).
+/// Compare the farm's `.yaks/schema` marker against `SCHEMA`. A missing or
+/// unparseable marker is treated as compatible (don't block hand-made farms).
 pub fn schema_status(root: &Path) -> SchemaStatus {
     let Ok(raw) = fs::read_to_string(root.join("schema")) else {
         return SchemaStatus::Compatible;
@@ -999,7 +999,7 @@ mod tests {
 
     #[test]
     fn unknown_frontmatter_survives_a_round_trip() {
-        // A herd written by a newer/other tool: fields this binary doesn't model,
+        // A farm written by a newer/other tool: fields this binary doesn't model,
         // both scalar and block-style, plus a real note. None may be dropped.
         let text = "---\n\
             id: yaksrs-9f0a\n\
@@ -1437,7 +1437,7 @@ mod init_tests {
         assert_eq!(read.default_priority, 1);
         assert!(!read.vim_mode);
 
-        // A fresh herd is discoverable and empty.
+        // A fresh farm is discoverable and empty.
         assert_eq!(discover_root(&base).unwrap(), root);
         assert!(load(&root, &[Status::Hairy]).unwrap().is_empty());
 
@@ -1445,7 +1445,7 @@ mod init_tests {
     }
 
     #[test]
-    fn init_refuses_to_clobber_existing_herd() {
+    fn init_refuses_to_clobber_existing_farm() {
         let base = temp_dir();
         let root = base.join(".yaks");
         assert!(matches!(

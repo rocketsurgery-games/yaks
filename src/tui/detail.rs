@@ -16,7 +16,7 @@ pub enum Target {
     Task(String),
     Url(String),
     /// A markdown image link `![alt](path)` — an attached artifact, opened
-    /// externally (path is relative to the herd's `.yaks/` root).
+    /// externally (path is relative to the farm's `.yaks/` root).
     Artifact(String),
 }
 

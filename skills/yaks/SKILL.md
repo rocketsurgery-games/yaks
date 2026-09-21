@@ -19,7 +19,7 @@ Yaks is a single self-contained binary — a plain command-line tool. Run it dir
 
 The npm package is `@rocketsurgery/yaks` (the unscoped `yaks` was taken, so it's published under the `rocketsurgery` org); the command it installs is `yaks`. Every example below is written as `yaks <cmd>` — substitute whichever invocation works for you. The CLI is stateless: each call is independent, there's nothing to keep running.
 
-**Starting a fresh herd.** If there's no `.yaks/` directory yet, create one with `yaks init` (run in the repo root). It scaffolds `.yaks/{hairy,shaving,shorn,dead}/` plus a `config.yaml`; tune the defaults with `--prefix`, `--type`, and `--priority`. It refuses to clobber an existing herd, so it's safe to run.
+**Starting a fresh farm.** If there's no `.yaks/` directory yet, create one with `yaks init` (run in the repo root). It scaffolds `.yaks/{hairy,shaving,shorn,dead}/` plus a `config.yaml`; tune the defaults with `--prefix`, `--type`, and `--priority`. It refuses to clobber an existing farm, so it's safe to run.
 
 Add `--json` to any query command (`list`, `show`, `next`, `tangled`, `search`, `stats`, `rollup`, `inbox`, `log`, `doctor`) for machine-readable output. `yaks create --json` also prints the new yak's id and file path, which is handy when you create a yak and immediately act on it.
 
@@ -34,6 +34,11 @@ The **verbs** are the transitions, and they don't all match their state's spelli
 
 "Yak shaving" is the background meme (endless incidental tasks); the tool's states and verbs are the precise vocabulary — prefer them over loose phrasing so humans and agents stay unconfused.
 
+Three **containers** name where yaks live and how they group:
+- a **farm** is one `.yaks/` directory — the store the CLI and TUI operate on.
+- a **herd** is a group of yaks sharing an id prefix within a farm. A farm usually has one, but can hold several — create into a specific herd with `yaks create --prefix <herd>`. This lets one (typically private) farm track several projects at once, each with its own prefix.
+- a **family** is a yak-tree: a parent yak together with its descendants.
+
 ## Hard rules
 
 1. **NEVER write code without an active shaving yak.** Before touching any code — even a one-line fix — you must have a yak in shaving state. If you don't, stop and `yaks shave <id>` one first (create it if needed). No exceptions.
@@ -47,23 +52,23 @@ Yaks runs in one of two modes, with different habits. **Figure out which mode yo
 - `.yaks/` is gitignored or otherwise untracked → **local-only** (a private scratchpad).
 - `.yaks/` is committed alongside the code → **team** (a shared tracker).
 
-To check, **use `git ls-files .yaks`** — it lists files in **team** mode and prints nothing when the herd is untracked (**local-only**). Prefer this signal: it is reliable across *every* hiding method. Do **not** rely on `git check-ignore .yaks` alone — the self-contained `.yaks/.gitignore` = `*` method ignores the directory's *contents*, not the `.yaks` entry itself, so `git check-ignore .yaks` reports "not ignored" for a fully-private herd. If you do use `check-ignore`, test a path *inside* it (`git check-ignore .yaks/config.yaml`). If a fresh checkout is genuinely ambiguous, default to local-only — the safer assumption.
+To check, **use `git ls-files .yaks`** — it lists files in **team** mode and prints nothing when the farm is untracked (**local-only**). Prefer this signal: it is reliable across *every* hiding method. Do **not** rely on `git check-ignore .yaks` alone — the self-contained `.yaks/.gitignore` = `*` method ignores the directory's *contents*, not the `.yaks` entry itself, so `git check-ignore .yaks` reports "not ignored" for a fully-private farm. If you do use `check-ignore`, test a path *inside* it (`git check-ignore .yaks/config.yaml`). If a fresh checkout is genuinely ambiguous, default to local-only — the safer assumption.
 
 **Local-only.** The yak files live only on this machine; they're planning memory, not shared history.
 - Never `git add` yak files or include them in commits.
 - Keep yaks invisible to everyone else: don't mention them — or their IDs — in commit messages, PR titles/descriptions, code comments, or external trackers. Describe the change in plain terms ("add retry logic"), not "shorn yak-1234".
 
 Pick the hiding method that fits — they differ in blast radius:
-- **Root `.gitignore`** (add a `.yaks/` line): simplest, but the ignore rule is itself committed, so the team sees that a herd exists.
-- **`.yaks/.gitignore` containing `*`**: self-contained — the herd hides itself with no edit to the repo root. Use this **only** for a plain, non-nested local-only herd; the `*` also blinds any git repo *inside* `.yaks/`, so it's the wrong tool for the multi-machine pattern below.
-- **`.git/info/exclude`**: per-repo and untracked, so nothing about the herd touches the committed tree. This is the right choice when `.yaks/` is itself a nested repo.
-- **Global `core.excludesFile`**: ignore `.yaks/` across every repo on the machine at once — handy when you keep private herds in many projects.
+- **Root `.gitignore`** (add a `.yaks/` line): simplest, but the ignore rule is itself committed, so the team sees that a farm exists.
+- **`.yaks/.gitignore` containing `*`**: self-contained — the farm hides itself with no edit to the repo root. Use this **only** for a plain, non-nested local-only farm; the `*` also blinds any git repo *inside* `.yaks/`, so it's the wrong tool for the multi-machine pattern below.
+- **`.git/info/exclude`**: per-repo and untracked, so nothing about the farm touches the committed tree. This is the right choice when `.yaks/` is itself a nested repo.
+- **Global `core.excludesFile`**: ignore `.yaks/` across every repo on the machine at once — handy when you keep private farms in many projects.
 
-> **Footgun:** `git clean -fdx` in the outer repo deletes an ignored/excluded `.yaks/` (and, in the nested case, its git history) — `-x` sweeps ignored files too. A gitignored `.yaks/` is also **not** carried into fresh clones or other git worktrees, so it's simply absent there. Push a private herd often, or you can lose it.
+> **Footgun:** `git clean -fdx` in the outer repo deletes an ignored/excluded `.yaks/` (and, in the nested case, its git history) — `-x` sweeps ignored files too. A gitignored `.yaks/` is also **not** carried into fresh clones or other git worktrees, so it's simply absent there. Push a private farm often, or you can lose it.
 
-**Local-only across machines.** To sync a private herd between machines without committing it to the code repo, give `.yaks/` its **own** git repo on a private remote, nested inside the project:
-- `cd .yaks && git init`, add a private remote, and commit the herd there. Run all herd git ops from inside `.yaks/`.
-- Hide the nested repo from the **outer** repo with `.git/info/exclude` — never the `*` trick, which would also blind the herd's own repo. The outer repo then ignores `.yaks/` cleanly instead of flagging it as an embedded repo.
+**Local-only across machines.** To sync a private farm between machines without committing it to the code repo, give `.yaks/` its **own** git repo on a private remote, nested inside the project:
+- `cd .yaks && git init`, add a private remote, and commit the farm there. Run all farm git ops from inside `.yaks/`.
+- Hide the nested repo from the **outer** repo with `.git/info/exclude` — never the `*` trick, which would also blind the farm's own repo. The outer repo then ignores `.yaks/` cleanly instead of flagging it as an embedded repo.
 - Habit: **pull before, push after** a work session so machines stay in sync. yaks needs no configuration for this — discovery finds `.yaks/` exactly as always.
 
 **Team.** The yak files are part of the repo — treat them like code.
@@ -76,13 +81,13 @@ Pick the hiding method that fits — they differ in blast radius:
 
 Whichever mode you're in, yaks are a **private, fine-grained layer**. Keep yak IDs and `[yaks:…]` markers out of anything a broader audience reads — **pull-request titles/descriptions and external issue trackers** (Jira, Linear, GitHub Issues). This one keeps going wrong under light guidance, so treat it as firm: leaking a yak ID upstream is almost never right.
 
-Enforce it mechanically with **`yaks scan-ids`**: it reads a file and/or piped stdin and exits non-zero if any token is a real yak-id in this herd (printing each as `line:col  id`). Wire it into a pre-commit or PR hook to catch a leaking id before it ships — especially valuable in local-only mode, where yak IDs must stay out of commit messages too.
+Enforce it mechanically with **`yaks scan-ids`**: it reads a file and/or piped stdin and exits non-zero if any token is a real yak-id in this farm (printing each as `line:col  id`). Wire it into a pre-commit or PR hook to catch a leaking id before it ships — especially valuable in local-only mode, where yak IDs must stay out of commit messages too.
 
 Most projects that use an external tracker don't use yaks team-wide; yaks roll **up** to those issues. When a PR or issue needs a reference, use the **external** key, not the yak ID: run `yaks rollup --keys` over the shipping set and paste that — the forge links the PR to the issue natively. The **yaks-tracker** skill covers this projection in full.
 
 ## You are working alongside a human
 
-The herd is shared. A human may be editing yaks in the `yaks tui` (or by hand) **while you work** — creating yaks, moving them between states, jotting notes. So expect **working-tree drift in `.yaks/`** that you didn't cause: a touched `updated:` timestamp, a yak moved `hairy ↔ shaving`, a new file you didn't create. This is **normal and expected**, not an error to flag or fix.
+The farm is shared. A human may be editing yaks in the `yaks tui` (or by hand) **while you work** — creating yaks, moving them between states, jotting notes. So expect **working-tree drift in `.yaks/`** that you didn't cause: a touched `updated:` timestamp, a yak moved `hairy ↔ shaving`, a new file you didn't create. This is **normal and expected**, not an error to flag or fix.
 
 - Don't revert, restage, or "clean up" `.yaks/` changes you didn't make.
 - When committing (team mode), stage **only** the specific yak files your work touched — never `git add .yaks` wholesale.
@@ -110,7 +115,7 @@ A parent yak's state should reflect its children:
 
 ## Labels — keep them few and purposeful
 
-Labels are for slicing the herd later (`yaks list --label ui`), not for elaborate classification. Absent discipline, agents invent sprawling taxonomies that help no one.
+Labels are for slicing the farm later (`yaks list --label ui`), not for elaborate classification. Absent discipline, agents invent sprawling taxonomies that help no one.
 
 - **Reuse before inventing.** Check what already exists (`yaks list`, `yaks stats`) and prefer an existing label over a near-synonym (`ui` vs `interface` vs `frontend` — pick one).
 - **Prefer broad, durable areas** (`ui`, `search`, `docs`, `skills`, `rust`) over hyper-specific one-offs. A label earns its keep only if you'd plausibly filter on it.
@@ -123,8 +128,8 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 
 | Command | What it does |
 |---------|-------------|
-| `yaks init` | Scaffold a new `.yaks/` herd in the current directory. `--prefix`, `--type`, `--priority`, `--emacs`. Works without an existing herd |
-| `yaks create` | Create a new task (in hairy). Title is positional (`yaks create "Fix the login crash"`; `--title` still works for back-compat); `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description`, `--verify`, `--json` (print the new id + path) |
+| `yaks init` | Scaffold a new `.yaks/` farm in the current directory. `--prefix`, `--type`, `--priority`, `--emacs`. Works without an existing farm |
+| `yaks create` | Create a new task (in hairy). Title is positional (`yaks create "Fix the login crash"`; `--title` still works for back-compat); `--type`, `--priority`, `--parent`, `--prefix` (id prefix for this yak; defaults to the config prefix — lets one `.yaks/` hold several prefixes), `--labels`, `--depends-on`, `--source`, `--description`, `--verify`, `--json` (print the new id + path) |
 | `yaks list` | List tasks with optional filters (`--all` also includes dead) |
 | `yaks show` | Show full details of a task |
 | `yaks refs` | List what a task points at (parent, deps, id mentions), flagging danglers |
@@ -147,13 +152,13 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks dep` | Add/remove a dependency between tasks |
 | `yaks reparent` | Move a task under a new `--parent` (or `--unparent` to top-level) |
 | `yaks bulk` | Apply one field edit (and/or reparent) to every yak matching a filter. **Dry-run by default**; pass `--commit` to apply. Refuses to run without at least one filter flag *and* at least one mutation flag |
-| `yaks rename` | Rename a yak + rewrite every reference to it across the herd |
+| `yaks rename` | Rename a yak + rewrite every reference to it across the farm |
 | `yaks rename-prefix` | Migrate all yaks from one id prefix to another; `--dry-run` to preview |
 | `yaks stats` | Show task statistics |
 | `yaks rollup` | Group yaks by the external issue they roll up to (`--keys` for just the keys) |
-| `yaks doctor` | Read-only herd-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on issues, so it's CI-usable. `--json` emits issues as JSON |
+| `yaks doctor` | Read-only farm-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on issues, so it's CI-usable. `--json` emits issues as JSON |
 | `yaks doctor --strict` | Also flags shorn yaks with no recorded note, and shorn yaks whose `verify:` command did not last PASS — a shear without evidence (the evidence-before-shear rule) |
-| `yaks scan-ids` | Scan a file and/or stdin for tokens that are real yak-ids in this herd — a private-mode leak check; exits non-zero if any are found |
+| `yaks scan-ids` | Scan a file and/or stdin for tokens that are real yak-ids in this farm — a private-mode leak check; exits non-zero if any are found |
 | `yaks tui` | Open the interactive terminal UI |
 
 The state-transition verbs (`shave`, `shorn`, `regrow`, `slaughter`, `revive`) and `reparent` accept **multiple ids** in one call, applying the same move to each. Attribute any note with `--as <actor>` (else `$YAKS_ACTOR`, else the git user); attribution never implies ownership.
@@ -183,7 +188,7 @@ Details go here.
 
 Child tasks use `--parent <id>` on create. Every ID is flat (`{prefix}-{4hex}`) and stable for the task's whole life; the parent/child relationship lives in the `parent:` frontmatter field, not in the ID. Move a task with `yaks reparent <id> --parent <new>` (or `--unparent`), which just rewrites that one field. `yaks show` displays parent and children automatically.
 
-> Older herds may still contain dotted IDs (e.g. `yak-a1b2.1`) created before this change. Those dots are now just opaque characters — the `parent:` field is authoritative — so don't parse IDs to infer hierarchy.
+> Older farms may still contain dotted IDs (e.g. `yak-a1b2.1`) created before this change. Those dots are now just opaque characters — the `parent:` field is authoritative — so don't parse IDs to infer hierarchy.
 
 The prefix, default type, and default priority come from `.yaks/config.yaml` (falling back to `yak` / `task` / `3`). A nested `verify:` map there (label → command, plus an optional `default`) supplies the default verification command for a yak that has no explicit `verify:` field, resolved by the yak's labels — so the project's levers are named once (e.g. `ui: cargo test -p yaks`).
 
@@ -195,11 +200,11 @@ Many yaks can roll up to one external issue. `yaks rollup` groups yaks by their 
 
 ## Referencing other yaks
 
-Beyond the structural links (`parent:`, `depends_on:`), you can mention one yak from another's title, description, or a note just by writing its **full id** — `{prefix}-{4hex}`, using **this herd's configured prefix** (in `.yaks/config.yaml`; don't hardcode a prefix you saw in another repo). A mention is recognized by matching the token against real yak ids, so:
+Beyond the structural links (`parent:`, `depends_on:`), you can mention one yak from another's title, description, or a note just by writing its **full id** — `{prefix}-{4hex}`, using **this farm's configured prefix** (in `.yaks/config.yaml`; don't hardcode a prefix you saw in another repo). A mention is recognized by matching the token against real yak ids, so:
 
 - **Always write the full id** (`yak-0af1`), never the bare 4-hex shorthand (`0af1`). Only the full form is detected and linked; a bare tail reads as ordinary prose.
 - `[[yak-0af1]]` wiki-brackets work too and render as a bare link.
-- Because matching is against real ids (not a prefix regex), mentions keep resolving even in a herd mid-migration with mixed prefixes.
+- Because matching is against real ids (not a prefix regex), mentions keep resolving even in a farm mid-migration with mixed prefixes.
 
 In `yaks tui`, a mention is highlighted and followable (Tab / `[` / `]` to cycle, Enter to follow).
 
@@ -207,7 +212,7 @@ Use **`yaks refs <id>`** to see everything a yak points at — parent, dependenc
 
 ### Renaming safely
 
-`yaks rename <old> <new>` renames a yak and rewrites **every** reference to it (parent, `depends_on`, and id mentions in bodies/titles) across the herd, matching whole ids only so lookalike prose is left untouched. `yaks rename-prefix <old> <new>` does the same for a whole prefix at once (e.g. migrating `yaksrs` → `yaks`) and updates `.yaks/config.yaml`. Both take **`--dry-run`** — always preview a bulk rename first.
+`yaks rename <old> <new>` renames a yak and rewrites **every** reference to it (parent, `depends_on`, and id mentions in bodies/titles) across the farm, matching whole ids only so lookalike prose is left untouched. `yaks rename-prefix <old> <new>` does the same for a whole prefix at once (e.g. migrating `yaksrs` → `yaks`) and updates `.yaks/config.yaml`. Both take **`--dry-run`** — always preview a bulk rename first.
 
 ## Filtering
 
@@ -234,7 +239,7 @@ Examples:
 Safety rails:
 
 - **Dry-run by default.** Without `--commit`, `bulk` only prints the matched set and the intended mutation — it changes nothing. Pass `--commit` to actually apply.
-- **Never operates on the whole herd.** It refuses to run without at least one filter flag, and refuses without at least one mutation flag.
+- **Never operates on the whole farm.** It refuses to run without at least one filter flag, and refuses without at least one mutation flag.
 - **Field edits + reparent only** — no state transitions (use `shave`/`shorn`/`regrow`/`slaughter`/`revive` for those).
 
 Examples:

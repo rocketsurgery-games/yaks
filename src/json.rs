@@ -2,13 +2,13 @@
 //! snapshot
 //! tests. serde_json's `preserve_order` keeps key order deterministic.
 //!
-//! Pure rendering: takes typed results from `herd` and returns `Value`s.
+//! Pure rendering: takes typed results from `farm` and returns `Value`s.
 
 use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
-use crate::herd::Stats;
+use crate::farm::Stats;
 use crate::model::{Status, Task};
 use crate::rollup::Group;
 
@@ -75,7 +75,7 @@ pub fn create_value(t: &Task, path: &Path) -> Value {
     v
 }
 
-pub fn log_array(entries: &[crate::herd::LogEntry]) -> Value {
+pub fn log_array(entries: &[crate::farm::LogEntry]) -> Value {
     Value::Array(
         entries
             .iter()
@@ -158,7 +158,7 @@ pub fn rollup_value(groups: &[Group]) -> Value {
     )
 }
 
-pub fn doctor_array(issues: &[crate::herd::Issue]) -> Value {
+pub fn doctor_array(issues: &[crate::farm::Issue]) -> Value {
     Value::Array(
         issues
             .iter()

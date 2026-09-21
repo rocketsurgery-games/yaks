@@ -405,7 +405,7 @@ pub(crate) fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
     let tabs_w = disp_width(&spans.iter().map(|s| s.content.as_ref()).collect::<String>());
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
     // Right-aligned slot on the tab row: a transient notification takes it when
-    // present (Python placement); otherwise the persistent herd-scope indicator
+    // present (Python placement); otherwise the persistent family-scope indicator
     // for tree views. `~` marks a view inheriting the global default (auto) vs
     // an explicit per-view override.
     if let Some(n) = &app.notification {
@@ -440,11 +440,11 @@ pub(crate) fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         let av = app.active_view();
         if !(av.is_flat() || av.key == "working-set") {
-            let (marker, val) = match app.herd_scope.get(&av.key) {
+            let (marker, val) = match app.family_scope.get(&av.key) {
                 Some(s) => ("", s.as_str()),
-                None => ("~", view::HerdScope::DEFAULT.as_str()),
+                None => ("~", view::FamilyScope::DEFAULT.as_str()),
             };
-            let label = format!("herd: {marker}{val}");
+            let label = format!("family: {marker}{val}");
             // The indicator yields rather than overwrite tabs when the strip is
             // too wide to fit it.
             if tabs_w + disp_width(&label) < area.width as usize {
@@ -1096,7 +1096,7 @@ pub(crate) fn help_hint(app: &App) -> String {
     };
     match app.focus {
         Focus::List => format!(
-            "Tab:view  j/k:move  l:detail  h:herd  v:views  c/C:new  E:edit  X:del  S:state  D:dep  {filter_hint}  ?:help"
+            "Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:edit  X:del  S:state  D:dep  {filter_hint}  ?:help"
         ),
         Focus::Detail => format!(
             "h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S:state  {filter_hint}  q:quit"

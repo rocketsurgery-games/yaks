@@ -195,7 +195,7 @@ mod tests {
         }
     }
 
-    fn herd() -> Vec<Task> {
+    fn farm() -> Vec<Task> {
         vec![
             t("a", Status::Shorn, &[], None),
             t("b", Status::Hairy, &["a"], None), // ready (dep a shorn)
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn transitive_deps_detect_cycles() {
         // b -> a ; c -> d. b reaches a; c does not reach b.
-        let h = herd();
+        let h = farm();
         assert!(depends_on_transitively(&h, "b", "a"));
         assert!(!depends_on_transitively(&h, "a", "b"));
         assert!(!depends_on_transitively(&h, "c", "b"));
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn ready_only_is_hairy_with_resolved_deps() {
-        let h = herd();
+        let h = farm();
         let spec = FilterSpec {
             statuses: vec![Status::Hairy],
             ready_only: true,
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn tangled_only_is_hairy_with_unresolved_deps() {
-        let h = herd();
+        let h = farm();
         let spec = FilterSpec {
             statuses: vec![Status::Hairy],
             tangled_only: true,
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn needs_only_keeps_only_blocked_yaks() {
-        let mut h = herd();
+        let mut h = farm();
         // Block "d" (a hairy leaf). needs_only should keep only the blocked one,
         // composing with whatever status scope the view carries.
         h.iter_mut().find(|t| t.id == "d").unwrap().needs = Some("human".into());
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn ready_only_excludes_a_needs_block() {
-        let mut h = herd();
+        let mut h = farm();
         let spec = FilterSpec {
             statuses: vec![Status::Hairy],
             ready_only: true,
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn default_scope_excludes_dead() {
-        let h = herd();
+        let h = farm();
         let got = ids(apply(&h, &FilterSpec::default(), false));
         assert!(!got.contains(&"z".to_string()));
         assert!(got.contains(&"a".to_string()));
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn parent_of_scopes_to_descendants() {
-        let h = herd();
+        let h = farm();
         let spec = FilterSpec {
             parent: Some("b".into()),
             ..Default::default()
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn search_is_case_insensitive_over_id_title_body() {
-        let h = herd();
+        let h = farm();
         let spec = FilterSpec {
             search: Some("TITLE C".into()),
             ..Default::default()

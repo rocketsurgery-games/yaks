@@ -3,7 +3,7 @@
 //! All drawing goes through the pure `render(&App, &mut Frame)`, so the same
 //! painter can target a real terminal (crossterm) or an in-memory `TestBackend`
 //! buffer (snapshot tests + the future demo-cast pipeline). Key handling only
-//! mutates `App`; mutating keys route through the `Herd` facade and then reload.
+//! mutates `App`; mutating keys route through the `Farm` facade and then reload.
 
 mod actions;
 mod cache;
@@ -57,11 +57,11 @@ use ratatui::crossterm::terminal::{
     supports_keyboard_enhancement,
 };
 
-use crate::filter::{self, FilterSpec};
-use crate::herd::{
-    AttachOutcome, CreateOutcome, DepOutcome, Herd, MoveOutcome, NewTask, Reparent, TaskEdit,
+use crate::farm::{
+    AttachOutcome, CreateOutcome, DepOutcome, Farm, MoveOutcome, NewTask, Reparent, TaskEdit,
     UpdateOutcome,
 };
+use crate::filter::{self, FilterSpec};
 use crate::model::{Status, Task};
 
 use create::*;
@@ -215,11 +215,11 @@ fn clone_spec(f: &FilterSpec) -> FilterSpec {
     f.clone()
 }
 
-/// TUI state. Holds the loaded task set plus (in live use) a `Herd` handle so
+/// TUI state. Holds the loaded task set plus (in live use) a `Farm` handle so
 /// mutations re-query through the core. Per-tab tree views are derived on demand.
 pub struct App {
-    /// `None` in read-only snapshot tests; `Some` in live use (`with_herd`).
-    herd: Option<Herd>,
+    /// `None` in read-only snapshot tests; `Some` in live use (`with_farm`).
+    farm: Option<Farm>,
     all: Vec<Task>,
     /// Ordered views; pinned ones form the tab strip. Replaces fixed tabs.
     views: Vec<view::View>,
@@ -243,10 +243,10 @@ pub struct App {
     nav_back: Vec<String>,
     nav_fwd: Vec<String>,
     collapsed: HashSet<String>,
-    /// Per-view herd-scope overrides, keyed by `View::key` (persisted in the
+    /// Per-view family-scope overrides, keyed by `View::key` (persisted in the
     /// UI-state cache). A missing entry means the view inherits the global
-    /// default ("auto"). See [`view::HerdScope`].
-    herd_scope: HashMap<String, view::HerdScope>,
+    /// default ("auto"). See [`view::FamilyScope`].
+    family_scope: HashMap<String, view::FamilyScope>,
     /// The live view filter applied by the tree (re-colors + prunes). The inbox
     /// (yaks awaiting a human) is just `FilterSpec::needs_only` on this filter
     /// — surfaced via the Inbox view and the drawer's `inbox` chip, not a mode.
@@ -262,9 +262,9 @@ pub struct App {
     overlay: Overlay,
     /// Transient one-line status message shown until the next mutation.
     notification: Option<String>,
-    /// Editor keybinding profile (vim vs emacs), from herd config.
+    /// Editor keybinding profile (vim vs emacs), from farm config.
     editor_vim: bool,
-    /// The herd's configured id prefix (e.g. `yaks`), for autocomplete: typing
+    /// The farm's configured id prefix (e.g. `yaks`), for autocomplete: typing
     /// `<ref_prefix>-` while editing opens the yak-ref picker.
     ref_prefix: String,
     /// Timestamp of the last `Esc` in an editor overlay, for detecting a rapid
@@ -278,19 +278,19 @@ pub struct App {
     cmdline: Option<String>,
     /// Ids marked for multi-select bulk actions (`m` toggles the cursor's yak).
     /// A bulk state transition (`S` with a non-empty set) loops these ids
-    /// through `herd.transition`, then clears the set. See [`App::toggle_selected`].
+    /// through `farm.transition`, then clears the set. See [`App::toggle_selected`].
     selected: HashSet<String>,
     quit: bool,
 }
 
 impl App {
-    /// Read-only constructor: renders `all` with no herd behind it. Mutating
+    /// Read-only constructor: renders `all` with no farm behind it. Mutating
     /// keys become no-ops. Used by snapshot tests and any preview caller.
     pub fn new(all: Vec<Task>) -> Self {
         let views = view::default_views();
         let filter = clone_spec(&views[0].spec);
         App {
-            herd: None,
+            farm: None,
             all,
             views,
             view: 0,
@@ -305,7 +305,7 @@ impl App {
             nav_back: Vec::new(),
             nav_fwd: Vec::new(),
             collapsed: HashSet::new(),
-            herd_scope: HashMap::new(),
+            family_scope: HashMap::new(),
             filter,
             page: 10,
             detail_page: 10,
@@ -322,28 +322,28 @@ impl App {
         }
     }
 
-    /// Live constructor: loads the current herd view and keeps the handle so
+    /// Live constructor: loads the current farm view and keeps the handle so
     /// mutations can re-query after each change.
-    pub fn with_herd(herd: Herd) -> Result<Self> {
+    pub fn with_farm(farm: Farm) -> Result<Self> {
         // Load every status incl. dead. The tree/flat views scope down to what
         // each shows, but keeping dead in the model lets the ancestor walk root
         // a live yak beneath a slaughtered parent, lets a Dead filter surface
         // slaughtered yaks, and treats a dep on a dead yak as resolved (fe00).
-        let all = herd.list(FilterSpec::default(), true)?;
-        let cfg = herd.config();
+        let all = farm.list(FilterSpec::default(), true)?;
+        let cfg = farm.config();
         let vim = cfg.vim_mode;
-        let ui = cache::load(herd.root());
-        let views = views_store::load_views(herd.root());
-        let working_set = views_store::load_working_set(herd.root());
+        let ui = cache::load(farm.root());
+        let views = views_store::load_views(farm.root());
+        let working_set = views_store::load_working_set(farm.root());
         let mut app = App::new(all);
         app.editor_vim = vim;
         app.ref_prefix = cfg.prefix;
         app.collapsed = ui.collapsed;
-        app.herd_scope = ui.herd;
+        app.family_scope = ui.family;
         app.filter = clone_spec(&views[0].spec);
         app.views = views;
         app.working_set = working_set;
-        app.herd = Some(herd);
+        app.farm = Some(farm);
         app.clamp_cursor();
         Ok(app)
     }

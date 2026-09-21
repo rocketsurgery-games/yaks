@@ -7,7 +7,7 @@ description: Minimal, harness-agnostic conventions for taking one yak from hairy
 
 Repo-internal conventions for working a single yak with a trail a human or
 another agent can trust later. Deliberately minimal. Prefer the smallest habit
-that keeps the herd honest; do not grow this into a heavyweight flow.
+that keeps the farm honest; do not grow this into a heavyweight flow.
 
 Run the yaks CLI directly. In this checkout use `./target/release/yaks` (the
 `yaks` on `PATH` may be older); elsewhere use `yaks`.
@@ -21,7 +21,7 @@ Run the yaks CLI directly. In this checkout use `./target/release/yaks` (the
    `yaks tangled`), and no note asks for something to happen first. If a note
    redirects the work, follow it or ask rather than pressing on.
 3. **Claim it.** `yaks shave <id>` moves it to shaving and signals to everyone
-   sharing the herd that it is taken. Shave its parent too if the parent is still
+   sharing the farm that it is taken. Shave its parent too if the parent is still
    hairy.
 
 **When a decision needs a human, ask and hand back — don't block-and-wait.**
@@ -98,7 +98,7 @@ semantics, scope), not trivia.
 
 ## Optional: attribution (multi-agent)
 
-When more than one agent shares a herd, name yourself in notes so others can
+When more than one agent shares a farm, name yourself in notes so others can
 trace who did what. Attribution is first-class: `yaks update <id> --as <actor>
 --note "..."` stamps the note `[actor]` (the actor resolves `--as` →
 `$YAKS_ACTOR` → git `user.name`). Attribution, never ownership — the yak still

@@ -12,10 +12,10 @@ pub fn run(mut app: App) -> Result<()> {
 }
 
 fn event_loop(term: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
-    // Best-effort filesystem watch on the herd's `.yaks/` tree so external edits
+    // Best-effort filesystem watch on the farm's `.yaks/` tree so external edits
     // (including the user's own, from another process) refresh the UI. Kept
     // alive for the loop's duration; `_watcher` must not be dropped early.
-    let watch_path = app.herd.as_ref().map(|h| h.root().to_path_buf());
+    let watch_path = app.farm.as_ref().map(|h| h.root().to_path_buf());
     let (_watcher, rx) = setup_watcher(watch_path);
     let mut dirty = false;
     loop {

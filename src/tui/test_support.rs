@@ -6,7 +6,7 @@
 //! declaration in `tui.rs` is `#[cfg(test)]`), so nothing ships in release.
 
 use super::{App, handle_key, render};
-use crate::herd::Herd;
+use crate::farm::Farm;
 use crate::model::{Status, Task};
 use crate::store::{self, SCHEMA};
 use ratatui::Terminal;
@@ -112,8 +112,8 @@ pub(crate) fn linked() -> App {
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// A temp project dir containing a `.yaks/` herd seeded with `tasks`.
-pub(crate) fn temp_herd(tasks: &[Task]) -> (PathBuf, Herd) {
+/// A temp project dir containing a `.yaks/` farm seeded with `tasks`.
+pub(crate) fn temp_farm(tasks: &[Task]) -> (PathBuf, Farm) {
     let mut proj = std::env::temp_dir();
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     proj.push(format!("yaksrs-tui-{}-{}", std::process::id(), n));
@@ -125,11 +125,11 @@ pub(crate) fn temp_herd(tasks: &[Task]) -> (PathBuf, Herd) {
     for t in tasks {
         store::write::save(&root, t).unwrap();
     }
-    let herd = match Herd::open(&proj) {
+    let farm = match Farm::open(&proj) {
         Ok(h) => h,
-        Err(_) => panic!("failed to open temp herd"),
+        Err(_) => panic!("failed to open temp farm"),
     };
-    (proj, herd)
+    (proj, farm)
 }
 
 pub(crate) fn press(app: &mut App, chars: &str) {

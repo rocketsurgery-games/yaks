@@ -1,6 +1,6 @@
 # TUI guide
 
-`yaks tui` opens an interactive terminal UI over the same herd the CLI operates
+`yaks tui` opens an interactive terminal UI over the same farm the CLI operates
 on. Every mutation writes the same `.yaks/` files, so the TUI and CLI are
 interchangeable.
 
@@ -16,7 +16,7 @@ interchangeable.
 - **Filter drawer** (`f`) — toggle status / type / priority chips, a label and
   search box, a parent scope, and `ready` / `tangled` / `inbox` predicates. The
   drawer composes into any view.
-- **Status bar** — the active herd, view, and cursor context.
+- **Status bar** — the active farm, view, and cursor context.
 
 ## Signals
 

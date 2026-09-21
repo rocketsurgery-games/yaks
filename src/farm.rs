@@ -1,4 +1,4 @@
-//! The core operations facade. `Herd` owns every yaks operation as a typed,
+//! The core operations facade. `Farm` owns every yaks operation as a typed,
 //! print-free method so the CLI, the TUI, and (later) a long-lived process
 //! serving editor/IDE plugins all sit thinly on top of the same logic. Each
 //! method performs a WHOLE operation (validation + fs mutation) and returns a
@@ -23,23 +23,26 @@ pub use crate::store::{DepOutcome, MoveOutcome, Reparent};
 const NON_DEAD: [Status; 3] = [Status::Hairy, Status::Shaving, Status::Shorn];
 const EVERY: [Status; 4] = [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead];
 
-/// Why opening a herd failed.
+/// Why opening a farm failed.
 pub enum OpenError {
-    NoHerd(String),
+    NoFarm(String),
     SchemaTooNew { found: u32, supported: u32 },
 }
 
-/// A handle to one `.yaks/` herd. Cheap to construct; holds no cache yet
+/// A handle to one `.yaks/` farm. Cheap to construct; holds no cache yet
 /// (leaves room for a future stat-validated index without changing callers).
-pub struct Herd {
+pub struct Farm {
     root: PathBuf,
-    /// Set when the herd's schema predates this build (best-effort read).
+    /// Set when the farm's schema predates this build (best-effort read).
     pub schema_warning: Option<String>,
 }
 
 /// Fields for a new task (defaults resolved from config inside `create`).
 pub struct NewTask {
     pub title: String,
+    /// Which herd (id prefix) the new yak joins. `None` uses the farm's default
+    /// prefix, so one farm can hold several herds.
+    pub prefix: Option<String>,
     pub kind: Option<String>,
     pub priority: Option<u8>,
     pub parent: Option<String>,
@@ -71,6 +74,9 @@ pub struct TaskEdit {
 pub enum CreateOutcome {
     Created(Box<Task>),
     ParentNotFound(String),
+    /// An explicit `--prefix` that would mint an id outside the reference
+    /// grammar (prefix must be `[a-z0-9]+`).
+    InvalidPrefix(String),
 }
 
 pub enum UpdateOutcome {
@@ -138,7 +144,7 @@ pub struct Commits {
     pub by_file: Vec<String>,
 }
 
-/// Outcome of a rename operation ([`Herd::rename_many`]).
+/// Outcome of a rename operation ([`Farm::rename_many`]).
 pub enum RenameOutcome {
     /// The rename was applied, or (when `plan.applied` is false) planned.
     Done(RenamePlan),
@@ -182,8 +188,8 @@ pub struct LogEntry {
     pub note: String,
 }
 
-/// One integrity problem found by [`Herd::doctor`]. Read-only: doctor never
-/// mutates the herd, it only reports.
+/// One integrity problem found by [`Farm::doctor`]. Read-only: doctor never
+/// mutates the farm, it only reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Issue {
     pub kind: IssueKind,
@@ -244,10 +250,10 @@ impl IssueKind {
     }
 }
 
-impl Herd {
+impl Farm {
     /// Discover the nearest `.yaks/` above `cwd` and apply the schema gate.
-    pub fn open(cwd: &Path) -> std::result::Result<Herd, OpenError> {
-        let root = store::discover_root(cwd).map_err(|e| OpenError::NoHerd(e.to_string()))?;
+    pub fn open(cwd: &Path) -> std::result::Result<Farm, OpenError> {
+        let root = store::discover_root(cwd).map_err(|e| OpenError::NoFarm(e.to_string()))?;
         let schema_warning = match store::schema_status(&root) {
             SchemaStatus::Newer(found) => {
                 return Err(OpenError::SchemaTooNew {
@@ -256,23 +262,23 @@ impl Herd {
                 });
             }
             SchemaStatus::Older(v) => Some(format!(
-                "herd schema v{v} predates this yaks (v{}); reading best-effort.",
+                "farm schema v{v} predates this yaks (v{}); reading best-effort.",
                 store::SCHEMA
             )),
             SchemaStatus::Compatible => None,
         };
-        Ok(Herd {
+        Ok(Farm {
             root,
             schema_warning,
         })
     }
 
-    /// The effective per-herd config (prefix, defaults, editor mode).
+    /// The effective per-farm config (prefix, defaults, editor mode).
     pub fn config(&self) -> store::Config {
         store::read_config(&self.root)
     }
 
-    /// The herd's `.yaks/` root, e.g. for locating the per-user UI-state cache.
+    /// The farm's `.yaks/` root, e.g. for locating the per-user UI-state cache.
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -500,7 +506,7 @@ impl Herd {
         }))
     }
 
-    /// A read-only herd-integrity pass: collect every problem worth a human's
+    /// A read-only farm-integrity pass: collect every problem worth a human's
     /// attention without touching a single file. Ordering is deterministic
     /// (by kind, then id) so text and `--json` output are stable and
     /// CI-diffable.
@@ -517,7 +523,7 @@ impl Herd {
         let mut issues = Vec::new();
 
         // id -> the statuses it was loaded under (one entry per file on disk).
-        // A well-formed herd has exactly one file, hence one status, per id.
+        // A well-formed farm has exactly one file, hence one status, per id.
         let mut by_id: std::collections::BTreeMap<&str, Vec<Status>> =
             std::collections::BTreeMap::new();
         for t in &tasks {
@@ -640,14 +646,14 @@ impl Herd {
         }))
     }
 
-    /// Rename one yak, a convenience over [`Herd::rename_many`].
+    /// Rename one yak, a convenience over [`Farm::rename_many`].
     pub fn rename(&self, old: &str, new: &str, dry_run: bool) -> Result<RenameOutcome> {
         self.rename_many(&[(old.to_string(), new.to_string())], dry_run)
     }
 
     /// Migrate every yak whose id is `{old}-<tail>` to `{new}-<tail>`, rewriting
-    /// all references (via [`Herd::rename_many`]) and, on a real successful run,
-    /// flipping the herd's configured `prefix` to `new` so future ids match.
+    /// all references (via [`Farm::rename_many`]) and, on a real successful run,
+    /// flipping the farm's configured `prefix` to `new` so future ids match.
     /// The `{old}-` boundary means `rename_prefix("yaks", ..)` never touches a
     /// `yaksrs-` id.
     pub fn rename_prefix(&self, old: &str, new: &str, dry_run: bool) -> Result<RenameOutcome> {
@@ -669,7 +675,7 @@ impl Herd {
     }
 
     /// Rename one or more yaks in a single pass, rewriting every reference to
-    /// them across the whole herd: the file name + `id` of each subject, and the
+    /// them across the whole farm: the file name + `id` of each subject, and the
     /// `parent`, `depends_on`, title, and body mentions of every task that
     /// points at one. References are matched as whole tokens validated against
     /// real ids (via `refs`), so lookalike prose is never touched. With
@@ -792,7 +798,16 @@ impl Herd {
                 return Ok(CreateOutcome::ParentNotFound(p.clone()));
             }
         }
-        let id = store::generate_id(&self.root, &cfg.prefix)?;
+        // Route to a specific herd (id prefix) within the farm when asked;
+        // otherwise join the farm's default prefix. An explicit prefix is
+        // validated via the reference grammar so we never mint an
+        // un-referenceable id.
+        let prefix = match new.prefix.as_deref().filter(|p| !p.is_empty()) {
+            Some(p) if refs::has_ref_shape(&format!("{p}-0000")) => p.to_string(),
+            Some(p) => return Ok(CreateOutcome::InvalidPrefix(p.to_string())),
+            None => cfg.prefix.clone(),
+        };
+        let id = store::generate_id(&self.root, &prefix)?;
         let now = store::now_iso();
         let task = Task {
             id,
@@ -874,7 +889,7 @@ impl Herd {
 
     /// Write `data` to `.yaks/artifacts/{id}/{name}` and append a markdown image
     /// link to the task body. `name` should be a bare filename. The artifacts
-    /// tree lives inside the herd and, in team mode, commits alongside `.yaks/`
+    /// tree lives inside the farm and, in team mode, commits alongside `.yaks/`
     /// (the root `.gitignore` explicitly un-ignores `.yaks/artifacts/`, yaks-52eb)
     /// so an attachment is shareable evidence, not just local scratch.
     pub fn attach(&self, id: &str, name: &str, data: &[u8]) -> Result<AttachOutcome> {
@@ -984,20 +999,20 @@ mod tests {
 
     static SEQ: AtomicU64 = AtomicU64::new(0);
 
-    /// A temp herd (a `.yaks/` under a fresh parent dir) plus an open handle.
-    fn temp_herd() -> (PathBuf, Herd) {
+    /// A temp farm (a `.yaks/` under a fresh parent dir) plus an open handle.
+    fn temp_farm() -> (PathBuf, Farm) {
         let mut parent = std::env::temp_dir();
         let n = SEQ.fetch_add(1, Ordering::Relaxed);
-        parent.push(format!("yaksrs-herd-refs-{}-{}", std::process::id(), n));
+        parent.push(format!("yaksrs-farm-refs-{}-{}", std::process::id(), n));
         let root = parent.join(".yaks");
         for st in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
             std::fs::create_dir_all(root.join(st.dir())).unwrap();
         }
-        let herd = match Herd::open(&parent) {
+        let farm = match Farm::open(&parent) {
             Ok(h) => h,
-            Err(_) => panic!("failed to open temp herd at {parent:?}"),
+            Err(_) => panic!("failed to open temp farm at {parent:?}"),
         };
-        (root, herd)
+        (root, farm)
     }
 
     fn task(id: &str, status: Status) -> Task {
@@ -1025,7 +1040,7 @@ mod tests {
     /// yaks stay out.
     #[test]
     fn inbox_shows_blocked_yaks_regardless_of_status() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         let mut blocked_hairy = task("yak-0001", Status::Hairy);
         blocked_hairy.needs = Some("human".into());
         let mut blocked_shorn = task("yak-0002", Status::Shorn);
@@ -1034,7 +1049,7 @@ mod tests {
         store::write::save(&root, &blocked_shorn).unwrap();
         store::write::save(&root, &task("yak-0003", Status::Hairy)).unwrap(); // unblocked
 
-        let mut got: Vec<String> = herd
+        let mut got: Vec<String> = farm
             .inbox(FilterSpec::default())
             .unwrap()
             .into_iter()
@@ -1049,7 +1064,7 @@ mod tests {
     /// a real yak.
     #[test]
     fn refs_flags_danglers_and_validated_mentions() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         store::write::save(&root, &task("yak-0002", Status::Shorn)).unwrap();
         store::write::save(&root, &task("yak-0003", Status::Hairy)).unwrap();
         let mut subject = task("yak-0001", Status::Hairy);
@@ -1059,7 +1074,7 @@ mod tests {
         subject.body = "see yak-0002 and [[yak-0003]] but not yak-9999".into();
         store::write::save(&root, &subject).unwrap();
 
-        let r = herd.refs("yak-0001").unwrap().expect("subject exists");
+        let r = farm.refs("yak-0001").unwrap().expect("subject exists");
         let got: Vec<(RefKind, &str, bool, Option<usize>)> = r
             .entries
             .iter()
@@ -1080,8 +1095,64 @@ mod tests {
 
     #[test]
     fn refs_none_for_missing_task() {
-        let (_root, herd) = temp_herd();
-        assert!(herd.refs("yak-dead").unwrap().is_none());
+        let (_root, farm) = temp_farm();
+        assert!(farm.refs("yak-dead").unwrap().is_none());
+    }
+
+    fn new_task(title: &str, prefix: Option<&str>) -> NewTask {
+        NewTask {
+            title: title.into(),
+            prefix: prefix.map(Into::into),
+            kind: None,
+            priority: None,
+            parent: None,
+            labels: vec![],
+            depends_on: vec![],
+            source: None,
+            description: None,
+            verify: None,
+        }
+    }
+
+    #[test]
+    fn create_routes_to_the_requested_prefix_over_the_config_default() {
+        // The farm's config prefix is `yak` (temp_farm default), but an explicit
+        // prefix routes the new yak into a different farm within the same root.
+        let (_root, farm) = temp_farm();
+        match farm
+            .create(new_task("cross-farm yak", Some("proj")))
+            .unwrap()
+        {
+            CreateOutcome::Created(t) => {
+                assert!(t.id.starts_with("proj-"), "expected proj- id, got {}", t.id)
+            }
+            _ => panic!("expected Created"),
+        }
+    }
+
+    #[test]
+    fn create_without_a_prefix_uses_the_config_default() {
+        let (_root, farm) = temp_farm();
+        let default = farm.config().prefix;
+        match farm.create(new_task("local yak", None)).unwrap() {
+            CreateOutcome::Created(t) => assert!(
+                t.id.starts_with(&format!("{default}-")),
+                "expected {default}- id, got {}",
+                t.id
+            ),
+            _ => panic!("expected Created"),
+        }
+    }
+
+    #[test]
+    fn create_rejects_a_malformed_prefix() {
+        let (_root, farm) = temp_farm();
+        // Uppercase/space are outside the reference grammar, so the yak is not
+        // minted rather than producing an un-referenceable id.
+        assert!(matches!(
+            farm.create(new_task("bad", Some("Bad Prefix"))).unwrap(),
+            CreateOutcome::InvalidPrefix(_)
+        ));
     }
 
     fn done(out: RenameOutcome) -> RenamePlan {
@@ -1093,7 +1164,7 @@ mod tests {
 
     #[test]
     fn rename_rewrites_every_reference_surface() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
         let mut child = task("yaksrs-0002", Status::Hairy);
         child.parent = Some("yaksrs-0001".into());
@@ -1101,7 +1172,7 @@ mod tests {
         child.body = "blocked by yaksrs-0001, see [[yaksrs-0001]] and yaksrs-0009".into();
         store::write::save(&root, &child).unwrap();
 
-        let plan = done(herd.rename("yaksrs-0001", "yaks-0001", false).unwrap());
+        let plan = done(farm.rename("yaksrs-0001", "yaks-0001", false).unwrap());
         assert!(plan.applied);
         assert_eq!(
             plan.renames,
@@ -1128,10 +1199,10 @@ mod tests {
 
     #[test]
     fn rename_rejects_collision_with_existing_id() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
         store::write::save(&root, &task("yaks-0001", Status::Hairy)).unwrap();
-        match herd.rename("yaksrs-0001", "yaks-0001", true).unwrap() {
+        match farm.rename("yaksrs-0001", "yaks-0001", true).unwrap() {
             RenameOutcome::Collision(id) => assert_eq!(id, "yaks-0001"),
             _ => panic!("expected collision"),
         }
@@ -1139,9 +1210,9 @@ mod tests {
 
     #[test]
     fn rename_dry_run_leaves_files_untouched() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
-        let plan = done(herd.rename("yaksrs-0001", "yaks-0001", true).unwrap());
+        let plan = done(farm.rename("yaksrs-0001", "yaks-0001", true).unwrap());
         assert!(!plan.applied);
         assert!(root.join("hairy/yaksrs-0001.md").is_file());
         assert!(!root.join("hairy/yaks-0001.md").exists());
@@ -1149,7 +1220,7 @@ mod tests {
 
     #[test]
     fn rename_many_migrates_a_prefix_batch_across_statuses() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
         let mut b = task("yaksrs-0002", Status::Shorn);
         b.depends_on = vec!["yaksrs-0001".into()];
@@ -1159,7 +1230,7 @@ mod tests {
             ("yaksrs-0001".to_string(), "yaks-0001".to_string()),
             ("yaksrs-0002".to_string(), "yaks-0002".to_string()),
         ];
-        let plan = done(herd.rename_many(&pairs, false).unwrap());
+        let plan = done(farm.rename_many(&pairs, false).unwrap());
         assert_eq!(plan.renames.len(), 2);
         assert!(root.join("hairy/yaks-0001.md").is_file());
         assert!(root.join("shorn/yaks-0002.md").is_file());
@@ -1171,7 +1242,7 @@ mod tests {
 
     #[test]
     fn rename_prefix_migrates_matching_ids_and_flips_config() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
         let mut b = task("yaksrs-0002", Status::Hairy);
         b.depends_on = vec!["yaksrs-0001".into()];
@@ -1179,7 +1250,7 @@ mod tests {
         // A different-prefix id must be left alone (the boundary is `yaksrs-`).
         store::write::save(&root, &task("yaks-abcd", Status::Hairy)).unwrap();
 
-        let plan = done(herd.rename_prefix("yaksrs", "yaks", false).unwrap());
+        let plan = done(farm.rename_prefix("yaksrs", "yaks", false).unwrap());
         let news: Vec<&str> = plan.renames.iter().map(|(_, n)| n.as_str()).collect();
         assert_eq!(news, vec!["yaks-0001", "yaks-0002"]);
         assert!(root.join("hairy/yaks-0001.md").is_file());
@@ -1192,28 +1263,28 @@ mod tests {
 
     #[test]
     fn rename_prefix_dry_run_does_not_flip_config_or_move_files() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         store::write::save(&root, &task("yaksrs-0001", Status::Hairy)).unwrap();
-        let plan = done(herd.rename_prefix("yaksrs", "yaks", true).unwrap());
+        let plan = done(farm.rename_prefix("yaksrs", "yaks", true).unwrap());
         assert!(!plan.applied);
         assert!(!root.join("config.yaml").exists());
         assert!(root.join("hairy/yaksrs-0001.md").is_file());
     }
 
     /// The multi-id transition path (`yaks shorn a b c`) drives the CLI batch by
-    /// calling [`Herd::transition`] once per id. A clean batch moves every id;
+    /// calling [`Farm::transition`] once per id. A clean batch moves every id;
     /// a partial-failure batch (one good id + one nonexistent) still moves the
     /// good id and flags a failure, which the CLI turns into a non-zero exit.
     #[test]
     fn transition_batch_moves_valid_ids_and_flags_missing() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         store::write::save(&root, &task("yak-0001", Status::Hairy)).unwrap();
         store::write::save(&root, &task("yak-0002", Status::Hairy)).unwrap();
 
         // All-good batch: both ids move to shorn, nothing flagged.
         let mut any_failed = false;
         for id in ["yak-0001", "yak-0002"] {
-            if herd.transition(id, Status::Shorn).unwrap() != MoveOutcome::Moved {
+            if farm.transition(id, Status::Shorn).unwrap() != MoveOutcome::Moved {
                 any_failed = true;
             }
         }
@@ -1227,7 +1298,7 @@ mod tests {
         let mut outcomes = Vec::new();
         let mut any_failed = false;
         for id in ["yak-0003", "yak-nope"] {
-            let outcome = herd.transition(id, Status::Shorn).unwrap();
+            let outcome = farm.transition(id, Status::Shorn).unwrap();
             if outcome != MoveOutcome::Moved {
                 any_failed = true;
             }
@@ -1248,14 +1319,14 @@ mod tests {
     /// yak has, and stays silent about references that do resolve.
     #[test]
     fn doctor_flags_dangling_parent_and_depends_on() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         store::write::save(&root, &task("yak-0002", Status::Shorn)).unwrap();
         let mut subject = task("yak-0001", Status::Hairy);
         subject.parent = Some("yak-0404".into()); // no such yak
         subject.depends_on = vec!["yak-0002".into(), "yak-0405".into()]; // one dangles
         store::write::save(&root, &subject).unwrap();
 
-        let issues = herd.doctor(false).unwrap();
+        let issues = farm.doctor(false).unwrap();
         let got: Vec<(IssueKind, Vec<&str>)> = issues
             .iter()
             .map(|i| (i.kind, i.ids.iter().map(String::as_str).collect()))
@@ -1274,11 +1345,11 @@ mod tests {
     /// merge hazard) is flagged once as a duplicate-status clash.
     #[test]
     fn doctor_flags_same_id_in_two_status_dirs() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         store::write::save(&root, &task("yak-0001", Status::Hairy)).unwrap();
         store::write::save(&root, &task("yak-0001", Status::Shorn)).unwrap();
 
-        let issues = herd.doctor(false).unwrap();
+        let issues = farm.doctor(false).unwrap();
         assert_eq!(issues.len(), 1, "one duplicated id -> one clash");
         assert_eq!(issues[0].kind, IssueKind::DuplicateStatus);
         assert_eq!(issues[0].ids, vec!["yak-0001"]);
@@ -1289,16 +1360,16 @@ mod tests {
         );
     }
 
-    /// A well-formed herd (resolvable parent + dep, one status per id) is clean.
+    /// A well-formed farm (resolvable parent + dep, one status per id) is clean.
     #[test]
-    fn doctor_clean_herd_has_no_issues() {
-        let (root, herd) = temp_herd();
+    fn doctor_clean_farm_has_no_issues() {
+        let (root, farm) = temp_farm();
         let mut a = task("yak-0001", Status::Hairy);
         a.parent = Some("yak-0002".into());
         a.depends_on = vec!["yak-0002".into()];
         store::write::save(&root, &a).unwrap();
         store::write::save(&root, &task("yak-0002", Status::Shorn)).unwrap();
-        assert!(herd.doctor(false).unwrap().is_empty());
+        assert!(farm.doctor(false).unwrap().is_empty());
     }
 
     /// Strict mode flags a shorn yak with no recorded note (a completion without
@@ -1307,7 +1378,7 @@ mod tests {
     /// Plain `doctor` ignores all of them.
     #[test]
     fn doctor_strict_flags_shorn_yak_without_a_note() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         // Shorn with an evidence note: clean.
         let mut with_note = task("yak-0001", Status::Shorn);
         with_note.body =
@@ -1320,12 +1391,12 @@ mod tests {
 
         // Non-strict doctor ignores evidence entirely.
         assert!(
-            herd.doctor(false).unwrap().is_empty(),
+            farm.doctor(false).unwrap().is_empty(),
             "plain doctor must not flag missing evidence"
         );
 
         // Strict flags only the note-less shorn yak; the note-less dead yak is exempt.
-        let issues = herd.doctor(true).unwrap();
+        let issues = farm.doctor(true).unwrap();
         assert_eq!(
             issues.len(),
             1,
@@ -1341,7 +1412,7 @@ mod tests {
     /// is clean; a yak with no `verify:` command is not subject to the check.
     #[test]
     fn doctor_strict_flags_shorn_yak_whose_verify_did_not_pass() {
-        let (root, herd) = temp_herd();
+        let (root, farm) = temp_farm();
         let note = |ts: &str, text: &str| store::append_note("", ts, Some("t"), text);
 
         // verify: + last run PASS -> clean.
@@ -1381,13 +1452,13 @@ mod tests {
 
         // Plain doctor ignores verification entirely.
         assert!(
-            herd.doctor(false)
+            farm.doctor(false)
                 .unwrap()
                 .iter()
                 .all(|i| i.kind != IssueKind::UnverifiedShear)
         );
 
-        let mut flagged: Vec<String> = herd
+        let mut flagged: Vec<String> = farm
             .doctor(true)
             .unwrap()
             .into_iter()

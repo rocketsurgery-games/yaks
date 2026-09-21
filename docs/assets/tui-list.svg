@@ -28,7 +28,7 @@ text{white-space:pre}
 <text y="59.5"><tspan x="18.4">yaks-3901</tspan><tspan x="119.2" class="s2">p1</tspan><tspan x="144.4">task     🪒</tspan><tspan x="245.2">Coordination substrate for parallel yak-shaving</tspan><tspan x="715.6" class="s0">[coord, git]</tspan></text>
 <text y="77.5"><tspan x="35.2" class="s3">yaks-b517</tspan><tspan x="119.2" class="s4">p2</tspan><tspan x="144.4" class="s5">feature</tspan><tspan x="220.0">🪒</tspan><tspan x="245.2">HITL: needs-human frontmatter + inbox surfacing</tspan><tspan x="715.6" class="s6">[cli, ui]</tspan><tspan x="799.6" class="s7">⏳</tspan></text>
 <text y="95.5"><tspan x="35.2" class="s3">yaks-3677</tspan><tspan x="119.2" class="s8">p3</tspan><tspan x="144.4" class="s5">feature</tspan><tspan x="220.0">🪒</tspan><tspan x="245.2">TUI doc screenshots via headless buffer-&gt;SVG</tspan><tspan x="732.4" class="s6">[ui, docs]</tspan></text>
-<text y="113.5"><tspan x="10.0" class="s9">*</tspan><tspan x="18.4" class="s10">  yaks-70e5</tspan><tspan x="119.2" class="s11">p3</tspan><tspan x="144.4" class="s12">feature</tspan><tspan x="220.0" class="s0">🦬</tspan><tspan x="236.8" class="s0"> yaks diff &lt;refA&gt; &lt;refB&gt;: ref-generic herd diff</tspan><tspan x="774.4" class="s6">[cli]</tspan></text>
-<text y="365.5"><tspan x="10.0" class="s13">Tab:view  j/k:move  l:detail  h:herd  v:views  c/C:new  E:edit  X:del  S:state  D:dep  f:filter</tspan></text>
+<text y="113.5"><tspan x="10.0" class="s9">*</tspan><tspan x="18.4" class="s10">  yaks-70e5</tspan><tspan x="119.2" class="s11">p3</tspan><tspan x="144.4" class="s12">feature</tspan><tspan x="220.0" class="s0">🦬</tspan><tspan x="236.8" class="s0"> yaks diff &lt;refA&gt; &lt;refB&gt;: ref-generic farm diff</tspan><tspan x="774.4" class="s6">[cli]</tspan></text>
+<text y="365.5"><tspan x="10.0" class="s13">Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:edit  X:del  S:state  D:dep  f:filte</tspan></text>
 </g>
 </svg>

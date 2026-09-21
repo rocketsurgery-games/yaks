@@ -38,8 +38,13 @@ cargo build --release
 
 ## Quick start
 
-A herd is just a `.yaks/` directory. Create one at your project root and start
+A farm is just a `.yaks/` directory. Create one at your project root and start
 tracking:
+
+Within a farm, yaks group into **herds** by id prefix — a farm can hold several
+(`yaks create --prefix <herd>`), so one (typically private) farm can track
+several projects at once — and a parent yak with its descendants forms a
+**family**.
 
 ```sh
 mkdir .yaks
@@ -105,7 +110,7 @@ when all of them are shorn (or dead), and *tangled* otherwise.
 | `yaks bulk` | Apply one field edit (and/or reparent) to every yak matching a filter. **Dry-run by default** — pass `--commit` to apply. Requires a filter *and* a mutation flag |
 | `yaks rollup` | group yaks by the external issue they roll up to (`--keys` for a PR body) |
 | `yaks stats` | task statistics |
-| `yaks doctor` | read-only herd-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on problems, so it's CI-usable. `--json` for machine output |
+| `yaks doctor` | read-only farm-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on problems, so it's CI-usable. `--json` for machine output |
 | `yaks doctor --strict` | also flags shorn yaks with no recorded note — a shear without evidence (the evidence-before-shear rule) |
 | `yaks scan-ids [file]` | flag real yak-ids in text (file and/or stdin) — a leak check for a pre-commit / PR gate; exits non-zero if any are found |
 | `yaks tui` | open the interactive terminal UI |
@@ -123,13 +128,13 @@ attribute the note (falling back to `$YAKS_ACTOR`, then the git user).
 `--unparent`) *applies* the change to each. It is **dry-run by default**:
 without `--commit` it just prints the matched set and the intended mutation,
 changing nothing. It refuses to run without at least one filter flag (so it
-never touches the whole herd) and without at least one mutation flag. It only
+never touches the whole farm) and without at least one mutation flag. It only
 edits fields and reparents — no state transitions (use `shave`/`shorn`/etc. for
 those). Example: `yaks bulk --label auth --set-priority 1 --commit`.
 
 ## Interactive TUI
 
-`yaks tui` opens a full-screen browser over the herd — views by state, a detail
+`yaks tui` opens a full-screen browser over the farm — views by state, a detail
 pane, inline create/edit, dependency and reparent pickers, search, and an
 embedded modal editor (vim or emacs keybindings, per `.yaks/config.yaml`). It
 auto-refreshes when the files change underneath it, so it stays in sync if you
@@ -163,41 +168,41 @@ installs them too:
 npx openskills install rocketsurgery-games/yaks
 ```
 
-## Public and private herds
+## Public and private farms
 
-Because a herd is just a `.yaks/` directory, *you* decide whether it's shared or
+Because a farm is just a `.yaks/` directory, *you* decide whether it's shared or
 private by choosing whether git tracks it.
 
 **Public (team).** Commit `.yaks/` alongside the code. The task list travels with
 the repo, shows up in PRs and `git log`, and yak moves merge with the change that
 completed them. This project works this way — it tracks its own work in a
-committed herd.
+committed farm.
 
 **Private (local-only).** Keep `.yaks/` out of the code repo and it becomes a
 personal scratchpad no one else sees. Hide it whichever way fits:
 
 - a `.yaks/` line in the root `.gitignore` — simplest, but the rule is committed;
-- a `.yaks/.gitignore` containing `*`, so the herd hides itself with no change to
-  the repo root — for a plain, non-nested herd only;
+- a `.yaks/.gitignore` containing `*`, so the farm hides itself with no change to
+  the repo root — for a plain, non-nested farm only;
 - `.git/info/exclude`, which is per-repo and never committed;
 - a global `core.excludesFile`, to ignore `.yaks/` across every project at once.
 
-**Private across machines.** To carry a private herd between machines without
+**Private across machines.** To carry a private farm between machines without
 committing it to the code repo, give `.yaks/` its own git repo on a private
 remote, nested inside the project:
 
 ```sh
 cd .yaks
 git init && git remote add origin <your-private-remote>
-# work from inside .yaks/ for herd git ops; pull before, push after
+# work from inside .yaks/ for farm git ops; pull before, push after
 ```
 
 Hide the nested repo from the outer repo with `.git/info/exclude` (not the `*`
-trick, which would also blind the herd's own repo). yaks needs no configuration —
+trick, which would also blind the farm's own repo). yaks needs no configuration —
 it discovers `.yaks/` exactly as before.
 
 > **Heads up:** `git clean -fdx` in the outer repo will delete an ignored or
-> excluded `.yaks/`, including a nested herd's history. Push a private herd
+> excluded `.yaks/`, including a nested farm's history. Push a private farm
 > often, and remember a gitignored `.yaks/` won't appear in fresh clones or other
 > worktrees.
 

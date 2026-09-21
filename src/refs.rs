@@ -10,8 +10,8 @@
 //! - **Wiki alias** — `[[yak-0af1]]`. The brackets are cosmetic; callers
 //!   normalize them away with [`strip_wikilinks`] before scanning, so the
 //!   rendered text shows a bare reference and offsets line up with the display.
-//! - **Reserved (not yet implemented, see yaks-15f7)** — a herd-qualified form
-//!   `<herd>:<prefix>-<tail>` for cross-herd references. `:` is deliberately not
+//! - **Reserved (not yet implemented, see yaks-15f7)** — a farm-qualified form
+//!   `<farm>:<prefix>-<tail>` for cross-farm references. `:` is deliberately not
 //!   a ref char, so today `other:yak-0af1` scans as the local id `yak-0af1`;
 //!   when federation lands, the qualifier is parsed here rather than at a caller.
 //!
@@ -19,11 +19,11 @@
 //!
 //! A candidate token is a reference **iff it exactly equals a real yak id**
 //! ([`resolve`]). Nothing keys off the configured prefix, which is what lets a
-//! herd mid-migration (a mix of `yak-` and `yaksrs-` ids) keep linking
+//! farm mid-migration (a mix of `yak-` and `yaksrs-` ids) keep linking
 //! correctly, and why bare-hex shorthand like `0af1` is intentionally *not*
 //! resolved — agents are nudged to write the full `prefix-0af1` form (skill
 //! yaks-3563). The set of "real ids" is supplied by the caller as a predicate,
-//! so it can widen from one herd to a friend-set (yaks-15f7) without any change
+//! so it can widen from one farm to a friend-set (yaks-15f7) without any change
 //! here.
 
 use std::collections::HashSet;
@@ -333,7 +333,7 @@ mod tests {
 
     #[test]
     fn reserved_qualifier_colon_scans_local_id_for_now() {
-        // Until yaks-15f7 lands, the herd qualifier is not parsed; the local id
+        // Until yaks-15f7 lands, the farm qualifier is not parsed; the local id
         // still resolves and the `other:` part is simply not a ref char run.
         let set = ids(&["yak-0001"]);
         let got = scan("other:yak-0001", known_from(&set));

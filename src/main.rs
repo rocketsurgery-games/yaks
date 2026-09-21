@@ -1,13 +1,13 @@
 //! yaks — a filesystem-native task tracker.
 //!
-//! This binary is a thin CLI over `herd::Herd` (the print-free core ops
-//! facade): every command is parse args -> call one Herd op -> render (text or
+//! This binary is a thin CLI over `farm::Farm` (the print-free core ops
+//! facade): every command is parse args -> call one Farm op -> render (text or
 //! --json). Tasks live as markdown files under `.yaks/`; status is the folder.
 
 mod actor;
 mod clipboard;
+mod farm;
 mod filter;
-mod herd;
 mod json;
 mod model;
 mod refs;
@@ -20,12 +20,12 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use std::env;
 
-use filter::FilterSpec;
-use herd::{
-    AttachOutcome, Commits, CreateOutcome, DepOutcome, Herd, Issue, IssueKind, LogEntry,
+use farm::{
+    AttachOutcome, Commits, CreateOutcome, DepOutcome, Farm, Issue, IssueKind, LogEntry,
     MoveOutcome, NewTask, OpenError, RefKind, RenameOutcome, RenamePlan, Reparent, Show, Stats,
     TaskEdit, TaskRefs, UpdateOutcome,
 };
+use filter::FilterSpec;
 use model::{Status, Task};
 use std::path::PathBuf;
 
@@ -66,7 +66,7 @@ struct FilterFlags {
 
 impl FilterFlags {
     /// True when at least one selector is set. Bulk mutation refuses an
-    /// unfiltered run, so it uses this to guarantee the whole herd is never the
+    /// unfiltered run, so it uses this to guarantee the whole farm is never the
     /// implicit target.
     fn any_set(&self) -> bool {
         !self.status.is_empty()
@@ -138,8 +138,8 @@ enum Command {
         #[arg(long = "as")]
         as_actor: Option<String>,
     },
-    /// Scan text for tokens that are real yak-ids in this herd — a leak check
-    /// for private-mode herds (pre-commit / PR hook). Reads a FILE and/or
+    /// Scan text for tokens that are real yak-ids in this farm — a leak check
+    /// for private-mode farms (pre-commit / PR hook). Reads a FILE and/or
     /// stdin, prints each found id as `line:col  id`, and EXITS NON-ZERO if
     /// any are found (clean text exits zero).
     ScanIds {
@@ -206,6 +206,10 @@ enum Command {
         priority: Option<u8>,
         #[arg(long)]
         parent: Option<String>,
+        /// Which herd (id prefix) the new yak joins; defaults to the farm's
+        /// configured prefix. Lets one farm hold several herds.
+        #[arg(long)]
+        prefix: Option<String>,
         #[arg(long, num_args = 1..)]
         labels: Vec<String>,
         #[arg(long = "depends-on", num_args = 1..)]
@@ -327,7 +331,7 @@ enum Command {
     /// Apply the same field edit (and/or reparent) to every yak matching a
     /// filter. DRY-RUN BY DEFAULT: without --commit it only prints the matched
     /// set and the mutation, changing nothing. Requires at least one filter flag
-    /// (never operates on the whole herd) and at least one mutation flag. Field
+    /// (never operates on the whole farm) and at least one mutation flag. Field
     /// edits + reparent only — no state transitions (see yaks-7cc8).
     Bulk {
         #[command(flatten)]
@@ -355,7 +359,7 @@ enum Command {
         commit: bool,
     },
     /// Rename a yak, updating its file + id and every reference to it
-    /// (parent, depends_on, and body/title mentions) across the herd.
+    /// (parent, depends_on, and body/title mentions) across the farm.
     Rename {
         old: String,
         new: String,
@@ -364,7 +368,7 @@ enum Command {
         dry_run: bool,
     },
     /// Migrate every yak from one id prefix to another (e.g. yaksrs -> yaks),
-    /// rewriting all references and updating the herd's configured prefix.
+    /// rewriting all references and updating the farm's configured prefix.
     RenamePrefix {
         old: String,
         new: String,
@@ -372,8 +376,8 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Create a new .yaks/ herd in the current directory (hairy/ shaving/
-    /// shorn/ dead/ + config.yaml + schema). Works without an existing herd.
+    /// Create a new .yaks/ farm in the current directory (hairy/ shaving/
+    /// shorn/ dead/ + config.yaml + schema). Works without an existing farm.
     Init {
         /// Id prefix for new yaks (default: yak).
         #[arg(long)]
@@ -389,14 +393,14 @@ enum Command {
         emacs: bool,
     },
     /// Install the bundled agent skills (yaks, yaks-tracker) into a skills
-    /// directory. Works anywhere — no herd required.
+    /// directory. Works anywhere — no farm required.
     Skills {
         #[command(subcommand)]
         action: SkillsAction,
     },
     /// Group yaks by the external issue they roll up to.
     Rollup(RollupArgs),
-    /// Read-only herd-integrity check: report duplicate-status ids and dangling
+    /// Read-only farm-integrity check: report duplicate-status ids and dangling
     /// parent/depends_on references. Exits non-zero when any issue is found.
     Doctor {
         /// Emit the issues as JSON.
@@ -434,7 +438,7 @@ enum DepAction {
 #[derive(Subcommand)]
 enum SkillsAction {
     /// Write the bundled SKILL.md files into a skills directory
-    /// (default: ~/.agents/skills). Works without a herd.
+    /// (default: ~/.agents/skills). Works without a farm.
     Install {
         /// Target skills directory (e.g. ~/.claude/skills). Defaults to ~/.agents/skills.
         #[arg(long)]
@@ -448,9 +452,9 @@ enum SkillsAction {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // `init` creates a herd where none exists, and `skills` installs the skill
-    // that teaches an agent how to use yaks (likely before any herd exists) —
-    // both must run without opening a herd, so handle them first.
+    // `init` creates a farm where none exists, and `skills` installs the skill
+    // that teaches an agent how to use yaks (likely before any farm exists) —
+    // both must run without opening a farm, so handle them first.
     if let Command::Init {
         prefix,
         kind,
@@ -464,26 +468,26 @@ fn main() -> Result<()> {
         return run_skills(action);
     }
 
-    let herd = match Herd::open(&env::current_dir()?) {
+    let farm = match Farm::open(&env::current_dir()?) {
         Ok(h) => h,
         Err(OpenError::SchemaTooNew { found, supported }) => {
             eprintln!(
-                "error: this herd uses schema v{found}, newer than this yaks supports (v{supported}). Upgrade yaks."
+                "error: this farm uses schema v{found}, newer than this yaks supports (v{supported}). Upgrade yaks."
             );
             std::process::exit(1);
         }
-        Err(OpenError::NoHerd(m)) => {
+        Err(OpenError::NoFarm(m)) => {
             eprintln!("error: {m}");
             std::process::exit(1);
         }
     };
-    if let Some(w) = &herd.schema_warning {
+    if let Some(w) = &farm.schema_warning {
         eprintln!("warning: {w}");
     }
 
     match cli.command {
         Command::List { filter, all, json } => {
-            let rows = herd.list(build_spec(filter), all)?;
+            let rows = farm.list(build_spec(filter), all)?;
             render_rows(&rows, json, "No tasks found.")?;
         }
         Command::Search {
@@ -493,7 +497,7 @@ fn main() -> Result<()> {
         } => {
             let mut spec = build_spec(filter);
             spec.search = Some(query);
-            let rows = herd.list(spec, false)?;
+            let rows = farm.list(spec, false)?;
             render_rows(&rows, json, "No tasks found.")?;
         }
         Command::Log {
@@ -502,10 +506,10 @@ fn main() -> Result<()> {
             by,
             json,
         } => {
-            let entries = herd.log(build_spec(filter), since.as_deref(), by.as_deref())?;
+            let entries = farm.log(build_spec(filter), since.as_deref(), by.as_deref())?;
             render_log(&entries, json)?;
         }
-        Command::Show { id, json } => match herd.show(&id)? {
+        Command::Show { id, json } => match farm.show(&id)? {
             None => {
                 eprintln!("no such task: {id}");
                 std::process::exit(1);
@@ -518,20 +522,20 @@ fn main() -> Result<()> {
                 }
             }
         },
-        Command::Rename { old, new, dry_run } => report_rename(herd.rename(&old, &new, dry_run)?),
+        Command::Rename { old, new, dry_run } => report_rename(farm.rename(&old, &new, dry_run)?),
         Command::RenamePrefix { old, new, dry_run } => {
-            report_rename(herd.rename_prefix(&old, &new, dry_run)?)
+            report_rename(farm.rename_prefix(&old, &new, dry_run)?)
         }
-        Command::Init { .. } => unreachable!("init is handled before opening a herd"),
-        Command::Skills { .. } => unreachable!("skills is handled before opening a herd"),
-        Command::Refs { id } => match herd.refs(&id)? {
+        Command::Init { .. } => unreachable!("init is handled before opening a farm"),
+        Command::Skills { .. } => unreachable!("skills is handled before opening a farm"),
+        Command::Refs { id } => match farm.refs(&id)? {
             None => {
                 eprintln!("no such task: {id}");
                 std::process::exit(1);
             }
             Some(r) => render_refs(&r),
         },
-        Command::Commits { id } => match herd.commits(&id)? {
+        Command::Commits { id } => match farm.commits(&id)? {
             None => {
                 eprintln!("no such task: {id}");
                 std::process::exit(1);
@@ -540,10 +544,10 @@ fn main() -> Result<()> {
         },
         Command::Verify { ids, as_actor } => {
             let actor = actor::resolve(as_actor.as_deref());
-            let cfg = herd.config();
+            let cfg = farm.config();
             let mut all_ok = true;
             for id in &ids {
-                let Some(show) = herd.show(id)? else {
+                let Some(show) = farm.show(id)? else {
                     eprintln!("no such task: {id}");
                     std::process::exit(1);
                 };
@@ -566,7 +570,7 @@ fn main() -> Result<()> {
                 println!("verify {id} ({source}): {cmd}");
                 let (ok, verdict) = run_verify_command(&cmd)?;
                 all_ok &= ok;
-                herd.update(
+                farm.update(
                     id,
                     TaskEdit {
                         note: Some(format!("verify: `{cmd}` -> {verdict}")),
@@ -597,7 +601,7 @@ fn main() -> Result<()> {
                 eprintln!("error: attachment path has no filename: {}", path.display());
                 std::process::exit(1);
             };
-            match herd.attach(&id, name, &data)? {
+            match farm.attach(&id, name, &data)? {
                 AttachOutcome::NotFound => {
                     eprintln!("no such task: {id}");
                     std::process::exit(1);
@@ -606,7 +610,7 @@ fn main() -> Result<()> {
                     println!("attached {n} to {id} (.yaks/artifacts/{id}/{n})");
                     if let Some(text) = note {
                         let actor = actor::resolve(as_actor.as_deref());
-                        herd.update(
+                        farm.update(
                             &id,
                             TaskEdit {
                                 note: Some(text),
@@ -620,9 +624,9 @@ fn main() -> Result<()> {
         }
         Command::ScanIds { file, json } => {
             let text = read_scan_input(file.as_deref())?;
-            // Validate against the herd's real ids, the same membership test the
+            // Validate against the farm's real ids, the same membership test the
             // renderer highlights links with (refs is prefix-agnostic).
-            let known = store::all_ids(herd.root());
+            let known = store::all_ids(farm.root());
             let found = refs::scan_text(&text, |t| known.contains(t));
             render_scan_ids(&found, json)?;
             if !found.is_empty() {
@@ -631,7 +635,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Next { filter, json } => {
-            let rows = herd.next(build_spec(filter))?;
+            let rows = farm.next(build_spec(filter))?;
             if json {
                 json::print(&json::tasks_array(&rows))?;
             } else if rows.is_empty() {
@@ -644,7 +648,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Tangled { filter, json } => {
-            let rows = herd.tangled(build_spec(filter))?;
+            let rows = farm.tangled(build_spec(filter))?;
             if json {
                 json::print(&json::tangled_array(&rows))?;
             } else if rows.is_empty() {
@@ -662,7 +666,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Stats { json } => {
-            let s = herd.stats()?;
+            let s = farm.stats()?;
             if json {
                 json::print(&json::stats_value(&s))?;
             } else {
@@ -675,6 +679,7 @@ fn main() -> Result<()> {
             kind,
             priority,
             parent,
+            prefix,
             labels,
             depends_on,
             source,
@@ -691,6 +696,7 @@ fn main() -> Result<()> {
             };
             let new = NewTask {
                 title,
+                prefix,
                 kind,
                 priority,
                 parent,
@@ -700,14 +706,18 @@ fn main() -> Result<()> {
                 description,
                 verify,
             };
-            match herd.create(new)? {
+            match farm.create(new)? {
                 CreateOutcome::ParentNotFound(p) => {
                     eprintln!("error: parent task {p} not found");
                     std::process::exit(1);
                 }
+                CreateOutcome::InvalidPrefix(p) => {
+                    eprintln!("error: invalid prefix {p:?} (use lowercase letters and digits)");
+                    std::process::exit(1);
+                }
                 CreateOutcome::Created(t) => {
                     if json {
-                        let path = herd
+                        let path = farm
                             .root()
                             .join(t.status.dir())
                             .join(format!("{}.md", t.id));
@@ -746,7 +756,7 @@ fn main() -> Result<()> {
                 note,
                 actor,
             };
-            update_many(&herd, &ids, edit)?;
+            update_many(&farm, &ids, edit)?;
         }
         Command::Ask {
             id,
@@ -755,7 +765,7 @@ fn main() -> Result<()> {
             as_actor,
         } => {
             let actor = actor::resolve(as_actor.as_deref());
-            match herd.set_needs(&id, Some(needs.clone()), actor.as_deref(), note.as_deref())? {
+            match farm.set_needs(&id, Some(needs.clone()), actor.as_deref(), note.as_deref())? {
                 None => {
                     eprintln!("error: task {id} not found");
                     std::process::exit(1);
@@ -773,7 +783,7 @@ fn main() -> Result<()> {
         }
         Command::Answer { id, note, as_actor } => {
             let actor = actor::resolve(as_actor.as_deref());
-            match herd.set_needs(&id, None, actor.as_deref(), note.as_deref())? {
+            match farm.set_needs(&id, None, actor.as_deref(), note.as_deref())? {
                 None => {
                     eprintln!("error: task {id} not found");
                     std::process::exit(1);
@@ -782,30 +792,30 @@ fn main() -> Result<()> {
             }
         }
         Command::Inbox { filter, json } => {
-            let rows = herd.inbox(build_spec(filter))?;
+            let rows = farm.inbox(build_spec(filter))?;
             render_rows(&rows, json, "Inbox empty: nothing awaiting a human.")?;
         }
         Command::Shave { ids } => transition_many(
-            &herd,
+            &farm,
             &ids,
             Status::Shaving,
             "already being shaved",
             "Shaving",
         )?,
         Command::Shorn { ids } => {
-            transition_many(&herd, &ids, Status::Shorn, "already shorn", "Shorn!")?
+            transition_many(&farm, &ids, Status::Shorn, "already shorn", "Shorn!")?
         }
         Command::Regrow { ids } => {
-            transition_many(&herd, &ids, Status::Hairy, "already hairy", "Regrown:")?
+            transition_many(&farm, &ids, Status::Hairy, "already hairy", "Regrown:")?
         }
         Command::Slaughter { ids } => {
-            transition_many(&herd, &ids, Status::Dead, "already dead", "Slaughtered:")?
+            transition_many(&farm, &ids, Status::Dead, "already dead", "Slaughtered:")?
         }
         Command::Revive { ids } => {
-            transition_many(&herd, &ids, Status::Hairy, "already hairy", "Revived:")?
+            transition_many(&farm, &ids, Status::Hairy, "already hairy", "Revived:")?
         }
         Command::Dep { action } => match action {
-            DepAction::Add { id, dep_id } => match herd.dep_add(&id, &dep_id)? {
+            DepAction::Add { id, dep_id } => match farm.dep_add(&id, &dep_id)? {
                 DepOutcome::TaskNotFound => {
                     eprintln!("error: task {id} not found");
                     std::process::exit(1);
@@ -818,7 +828,7 @@ fn main() -> Result<()> {
                 DepOutcome::Added => println!("Added dependency: {id} -> {dep_id}"),
                 _ => {}
             },
-            DepAction::Remove { id, dep_id } => match herd.dep_remove(&id, &dep_id)? {
+            DepAction::Remove { id, dep_id } => match farm.dep_remove(&id, &dep_id)? {
                 DepOutcome::TaskNotFound => {
                     eprintln!("error: task {id} not found");
                     std::process::exit(1);
@@ -841,7 +851,7 @@ fn main() -> Result<()> {
                 eprintln!("error: specify --parent TASK_ID or --unparent");
                 std::process::exit(1);
             };
-            reparent_many(&herd, &ids, new_parent)?;
+            reparent_many(&farm, &ids, new_parent)?;
         }
         Command::Bulk {
             filter,
@@ -853,10 +863,10 @@ fn main() -> Result<()> {
             unparent,
             commit,
         } => {
-            // Safety rule 1: never operate on the whole herd implicitly.
+            // Safety rule 1: never operate on the whole farm implicitly.
             if !filter.any_set() {
                 eprintln!(
-                    "error: bulk requires at least one filter flag (e.g. --label, --status, --priority); refusing to select the whole herd"
+                    "error: bulk requires at least one filter flag (e.g. --label, --status, --priority); refusing to select the whole farm"
                 );
                 std::process::exit(1);
             }
@@ -878,7 +888,7 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
 
-            let rows = herd.list(build_spec(filter), false)?;
+            let rows = farm.list(build_spec(filter), false)?;
             if rows.is_empty() {
                 println!("No yaks matched the filter; nothing to do.");
                 return Ok(());
@@ -921,15 +931,15 @@ fn main() -> Result<()> {
                     note: None,
                     actor: None,
                 };
-                update_many(&herd, &ids, edit)?;
+                update_many(&farm, &ids, edit)?;
             }
             if does_reparent {
                 let new_parent = if unparent { None } else { reparent };
-                reparent_many(&herd, &ids, new_parent)?;
+                reparent_many(&farm, &ids, new_parent)?;
             }
         }
         Command::Rollup(args) => {
-            let (groups, unsourced) = herd.rollup(&build_spec(args.filter))?;
+            let (groups, unsourced) = farm.rollup(&build_spec(args.filter))?;
             if args.keys {
                 let mut seen = std::collections::HashSet::new();
                 let keys: Vec<String> = groups
@@ -967,7 +977,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Doctor { json, strict } => {
-            let issues = herd.doctor(strict)?;
+            let issues = farm.doctor(strict)?;
             if json {
                 json::print(&json::doctor_array(&issues))?;
             } else {
@@ -982,7 +992,7 @@ fn main() -> Result<()> {
             size,
             diff,
         } => {
-            let app = tui::App::with_herd(herd)?;
+            let app = tui::App::with_farm(farm)?;
             if headless {
                 let (w, h) = parse_size(size.as_deref());
                 toque::run(
@@ -1045,8 +1055,8 @@ fn parse_status(s: &str) -> Option<Status> {
 /// Transition a single yak, printing a per-id result line. Returns `true` on
 /// success (moved or already there) and `false` on failure (not found), so a
 /// batch caller can process every id and set the exit code once at the end.
-fn transition(herd: &Herd, id: &str, dest: Status, already: &str, done: &str) -> Result<bool> {
-    match herd.transition(id, dest)? {
+fn transition(farm: &Farm, id: &str, dest: Status, already: &str, done: &str) -> Result<bool> {
+    match farm.transition(id, dest)? {
         MoveOutcome::NotFound => {
             eprintln!("error: task {id} not found");
             Ok(false)
@@ -1066,7 +1076,7 @@ fn transition(herd: &Herd, id: &str, dest: Status, already: &str, done: &str) ->
 /// one fails (no abort-on-first-error); if any id was not found, the process
 /// exits non-zero after the whole batch is handled.
 fn transition_many(
-    herd: &Herd,
+    farm: &Farm,
     ids: &[String],
     dest: Status,
     already: &str,
@@ -1074,7 +1084,7 @@ fn transition_many(
 ) -> Result<()> {
     let mut any_failed = false;
     for id in ids {
-        if !transition(herd, id, dest, already, done)? {
+        if !transition(farm, id, dest, already, done)? {
             any_failed = true;
         }
     }
@@ -1086,8 +1096,8 @@ fn transition_many(
 
 /// Apply `edit` to a single id, printing the per-id result. Returns false only
 /// when the id was not found (so the caller can exit non-zero).
-fn update_one(herd: &Herd, id: &str, edit: TaskEdit) -> Result<bool> {
-    match herd.update(id, edit)? {
+fn update_one(farm: &Farm, id: &str, edit: TaskEdit) -> Result<bool> {
+    match farm.update(id, edit)? {
         UpdateOutcome::NotFound => {
             eprintln!("error: task {id} not found");
             Ok(false)
@@ -1123,10 +1133,10 @@ fn run_verify_command(cmd: &str) -> std::io::Result<(bool, String)> {
     Ok((status.success(), verdict))
 }
 
-fn update_many(herd: &Herd, ids: &[String], edit: TaskEdit) -> Result<()> {
+fn update_many(farm: &Farm, ids: &[String], edit: TaskEdit) -> Result<()> {
     let mut any_failed = false;
     for id in ids {
-        if !update_one(herd, id, edit.clone())? {
+        if !update_one(farm, id, edit.clone())? {
             any_failed = true;
         }
     }
@@ -1139,8 +1149,8 @@ fn update_many(herd: &Herd, ids: &[String], edit: TaskEdit) -> Result<()> {
 /// Reparent a single id, printing the per-id result. Returns false on any
 /// reparent error (not found, cycle, already-a-child, ...) so the caller can
 /// exit non-zero, matching the single-id command's behavior.
-fn reparent_one(herd: &Herd, id: &str, new_parent: Option<String>) -> Result<bool> {
-    match herd.reparent(id, new_parent)? {
+fn reparent_one(farm: &Farm, id: &str, new_parent: Option<String>) -> Result<bool> {
+    match farm.reparent(id, new_parent)? {
         Reparent::Error(msg) => {
             eprintln!("error: {msg}");
             Ok(false)
@@ -1161,10 +1171,10 @@ fn reparent_one(herd: &Herd, id: &str, new_parent: Option<String>) -> Result<boo
 /// Reparent every id to the same destination, one at a time. All ids are
 /// processed even if one fails; if any failed, the process exits non-zero after
 /// the whole batch is handled. Mirrors `transition_many`.
-fn reparent_many(herd: &Herd, ids: &[String], new_parent: Option<String>) -> Result<()> {
+fn reparent_many(farm: &Farm, ids: &[String], new_parent: Option<String>) -> Result<()> {
     let mut any_failed = false;
     for id in ids {
-        if !reparent_one(herd, id, new_parent.clone())? {
+        if !reparent_one(farm, id, new_parent.clone())? {
             any_failed = true;
         }
     }
@@ -1241,11 +1251,11 @@ fn render_log(entries: &[LogEntry], json: bool) -> Result<()> {
 
 fn render_doctor(issues: &[Issue]) {
     if issues.is_empty() {
-        println!("All clear: no herd-integrity issues found.");
+        println!("All clear: no farm-integrity issues found.");
         return;
     }
     let noun = if issues.len() == 1 { "issue" } else { "issues" };
-    println!("Found {} herd-integrity {noun}:", issues.len());
+    println!("Found {} farm-integrity {noun}:", issues.len());
     let mut last: Option<IssueKind> = None;
     for i in issues {
         if last != Some(i.kind) {
@@ -1324,7 +1334,7 @@ fn run_init(
             std::process::exit(1);
         }
         store::InitOutcome::Created => {
-            println!("Initialized empty yaks herd in {}", root.display());
+            println!("Initialized empty yaks farm in {}", root.display());
             println!(
                 "  prefix {}  ·  default type {}  ·  default priority {}",
                 cfg.prefix, cfg.default_type, cfg.default_priority

@@ -1,10 +1,10 @@
 ---
 id: yaks-15f7
-title: Allow the TUI to handle multiple .yaks dirs
+title: 'One farm, many herds: consolidate multiple prefixes in a single .yaks'
 type: idea
 priority: 3
 created: '2026-08-27T22:51:04Z'
-updated: '2026-08-30T01:40:39Z'
+updated: '2026-09-21T17:32:21Z'
 depends_on:
 - yaks-0187
 ---
@@ -39,3 +39,7 @@ OPEN DESIGN QUESTIONS:
 6. Enforce prefix uniqueness when friending (detect collision -> offer rename-prefix).
 
 SUGGESTED SLICES: (a) read-only multi-herd VIEW (load union, herd badges, cross-herd refs resolve via unioned known-set) — delivers most value; (b) friend/workspace config; (c) cross-herd mutations (create routing, rename across roots); (d) explicit herd: qualifier + collision enforcement.
+
+---
+▸ 2026-09-21T17:32:21Z [agent]
+PLAN SET (session with Joel): pivot from federation (multiple .yaks roots / friends) to CONSOLIDATION: one farm (.yaks) holding several herds (prefixes). Rationale: dissolves the hard federation problems instead of solving them. No roots to pipe to CLI/TUI, so the env-var-in-embedded-agents worry goes away and ordinary discovery finds one farm. Cross-herd refs already resolve (validation-based, prefix-agnostic; proven on mixed data during the yaksrs to yaks migration). Rename integrity is free since all refs live in one root. One TUI, one private backup repo. Accepted caveats: a farm is one privacy unit (no per-project team/private mix), and a unified view of yaks committed in their own repos is NOT served (judged uncommon; federation stays the fallback for that case). Vocabulary proposed: farm=whole .yaks, herd=prefix-group, family=yak-tree (gated by the docs/naming child). Fleshed out the family below; starting the shears on create-routing.
