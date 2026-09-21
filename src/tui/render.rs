@@ -176,6 +176,7 @@ pub(crate) fn help_content() -> Vec<Line<'static>> {
         entry("E", "Edit field/desc/comment at cursor"),
         entry("P / T / L / S", "Priority / type / labels / state"),
         entry("D / R", "Add dependency / reparent"),
+        entry("H", "Move to another herd (multi-herd farm)"),
         entry("M", "Add a comment (note)"),
         entry("a", "Ask / answer (raise / clear needs block)"),
         entry(

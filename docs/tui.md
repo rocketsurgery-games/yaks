@@ -29,8 +29,10 @@ interchangeable.
   (`family: remaining`; a leading `~` means it inherits the global default).
   Cycle it with `h`.
 - In a **multi-herd farm** (one `.yaks/` holding several id prefixes / herds),
-  each row's id prefix is tinted by herd so herds are easy to scan, and the
-  create form's header shows which herd a new yak will join.
+  each row's id prefix is tinted by herd so herds are easy to scan, the create
+  form's header shows which herd a new yak will join, and the detail pane gains a
+  `Herd` field (between `Type` and `Priority`) that `H` moves the yak between.
+  On a single-herd farm none of this chrome appears.
 
 ## Keys
 

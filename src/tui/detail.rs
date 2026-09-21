@@ -219,23 +219,44 @@ pub fn build(task: &Task, all: &[Task]) -> Vec<DLine> {
     } else {
         task.labels.join(", ")
     };
+    // Whether the farm spans more than one herd (id prefix). Mirrors the
+    // App-level `is_multi_herd` present-prefix rule (a herd is a dashed id
+    // prefix), so the Herd field appears exactly when the id colour / create
+    // picker do — and stays absent (no noise) on a single-herd farm.
+    let multi_herd = {
+        let mut prefixes: HashSet<&str> = HashSet::new();
+        for t in all {
+            if let Some((p, _)) = t.id.split_once('-') {
+                prefixes.insert(p);
+            }
+        }
+        prefixes.len() > 1
+    };
     let mut out = vec![
         section(&format!("Task: {}", task.id)),
         empty(),
         field("Title:", &task.title),
         field("Status:", status_word(task.status)),
-        field("Type:", &task.kind),
-        field("Priority:", &format!("p{}", task.priority)),
-        field("Created:", &opt_date(&task.created)),
-        field("Updated:", &opt_date(&task.updated)),
-        field("Labels:", &labels),
     ];
-
     // A `needs` block is state worth seeing next to Status (mirrors CLI `show`).
     // Carries a warning accent (Kind::Warn) so it reads as a blocker.
     if let Some(n) = &task.needs {
-        out.insert(4, warn_field("Needs:", n));
+        out.push(warn_field("Needs:", n));
     }
+    out.push(field("Type:", &task.kind));
+    // On a multi-herd farm, surface the yak's herd (its id prefix) as a field
+    // between Type and Priority, so it's visible and the `H` key's effect has
+    // somewhere to land (yaks-71d1). A herd is `prefix-tail`; an id without a
+    // `-` (test fixtures) names no herd.
+    if multi_herd {
+        if let Some((prefix, _)) = task.id.split_once('-') {
+            out.push(field("Herd:", prefix));
+        }
+    }
+    out.push(field("Priority:", &format!("p{}", task.priority)));
+    out.push(field("Created:", &opt_date(&task.created)));
+    out.push(field("Updated:", &opt_date(&task.updated)));
+    out.push(field("Labels:", &labels));
 
     if !task.depends_on.is_empty() {
         out.push(empty());
@@ -561,6 +582,34 @@ mod detail_tests {
         // The Needs line carries the warning accent, not a plain field.
         let dlines = build(&task, &[task.clone()]);
         assert_eq!(dlines[needs_i].kind, Kind::Warn);
+    }
+
+    #[test]
+    fn herd_line_shows_only_on_a_multi_herd_farm() {
+        // Single-herd farm (one dashed prefix): no Herd line — it would just
+        // echo the id prefix and add noise (yaks-71d1).
+        let solo = vec![t("web-0001", None, &[]), t("web-0002", None, &[])];
+        let single: Vec<String> = build(&solo[0], &solo)
+            .iter()
+            .map(|l| l.text.clone())
+            .collect();
+        assert!(!single.iter().any(|l| l.starts_with("Herd:")));
+        // Multi-herd farm (two prefixes): a Herd line appears, between Type and
+        // Priority, naming this yak's prefix.
+        let mixed = vec![t("web-0001", None, &[]), t("api-0001", None, &[])];
+        let lines: Vec<String> = build(&mixed[0], &mixed)
+            .iter()
+            .map(|l| l.text.clone())
+            .collect();
+        let herd_i = lines.iter().position(|l| l.starts_with("Herd:")).unwrap();
+        let type_i = lines.iter().position(|l| l.starts_with("Type:")).unwrap();
+        let pri_i = lines
+            .iter()
+            .position(|l| l.starts_with("Priority:"))
+            .unwrap();
+        assert_eq!(herd_i, type_i + 1);
+        assert_eq!(pri_i, herd_i + 1);
+        assert!(lines[herd_i].contains("web"));
     }
 
     #[test]

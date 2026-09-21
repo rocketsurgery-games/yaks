@@ -1537,6 +1537,24 @@ mod live {
     }
 
     #[test]
+    fn herd_pick_works_from_the_detail_pane() {
+        // The detail pane is the "full edit UI"; H must move the herd there too,
+        // not only from the list (yaks-71d1). Enter detail with `l`, then `H1`.
+        let (_dir, farm) = temp_farm(&[
+            task("web-0001", "web one", Status::Hairy, 3, None),
+            task("api-0002", "api two", Status::Hairy, 3, None),
+        ]);
+        let mut app = App::with_farm(farm).unwrap();
+        app.select_id("web-0001");
+        press(&mut app, "lH1");
+        assert!(
+            app.task("api-0001").is_some(),
+            "moved to the api herd from detail"
+        );
+        assert_eq!(app.notification.as_deref(), Some("moved to api"));
+    }
+
+    #[test]
     fn herd_pick_single_herd_is_a_hint_noop() {
         // Herds only exist in a multi-herd farm; a single-herd farm no-ops with
         // a hint rather than opening an empty picker.

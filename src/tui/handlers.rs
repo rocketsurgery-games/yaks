@@ -1533,6 +1533,7 @@ pub(crate) fn handle_key(app: &mut App, k: KeyEvent) {
                 KeyCode::Char('E') => app.open_edit_at_cursor(),
                 KeyCode::Char('D') => app.open_dep_picker(),
                 KeyCode::Char('R') => app.open_reparent_picker(),
+                KeyCode::Char('H') => app.open_herd_picker(),
                 KeyCode::Char('c') => app.open_create(false),
                 KeyCode::Char('C') => app.open_create(true),
                 KeyCode::Char('f') => app.open_drawer(),

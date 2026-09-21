@@ -85,12 +85,26 @@ rasterizer botches the color emoji, so a browser engine is the lever.
 
 ## Keeping docs current
 
-A user-facing change is not done until its docs are. When you add or change a CLI
-command or flag, a TUI key or behavior, or a workflow, update `docs/` **and** the
-bundled skills (`skills/yaks`, `skills/yaks-tracker`) in the **same** change —
-never a follow-up. The bundled skills are embedded in the binary
-(`src/skills.rs`), so `cargo test -p yaks skills` guards them; `docs/` has no such
-gate, so treat docs↔reality parity as part of the change's evidence.
+A user-facing change is not done until its docs **and its own in-app help** are.
+When you add or change a CLI command or flag, a TUI key or behavior, or a
+workflow, update every surface that describes it, in the **same** change — never
+a follow-up:
+
+- `docs/` (`docs/cli.md`, `docs/tui.md`, `docs/README.md`) and `README.md`.
+- the bundled skills (`skills/yaks`, `skills/yaks-tracker`).
+- for a CLI change: the clap `--help` text — the `///` doc comments and
+  `#[arg(...)]`/`#[command(...)]` help on the command/flag in `src/main.rs`.
+- for a TUI key/behavior: the `?` help overlay (`help_content` in
+  `src/tui/render.rs`) **and**, if the key is common enough to belong there, the
+  compact bottom help bar (`help_hint`). A new key that lands in the handler but
+  not in `help_content` is invisible to users (this is how yaks-71d1's `H`
+  shipped half-done).
+
+The bundled skills are embedded in the binary (`src/skills.rs`), so
+`cargo test -p yaks skills` guards them; the other surfaces have no gate, so
+treat docs/help↔reality parity as part of the change's evidence — grep for the
+old name/key across `docs/`, `skills/`, `README.md`, and `src/` and confirm every
+description matches the shipped behavior.
 
 ## Releasing
 
