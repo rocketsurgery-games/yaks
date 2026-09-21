@@ -267,6 +267,9 @@ pub struct App {
     /// The farm's configured id prefix (e.g. `yaks`), for autocomplete: typing
     /// `<ref_prefix>-` while editing opens the yak-ref picker.
     ref_prefix: String,
+    /// The farm's declared herd set (`Config::known_herds`); unioned with the
+    /// prefixes actually present to form the create-form herd picker's choices.
+    config_herds: Vec<String>,
     /// Timestamp of the last `Esc` in an editor overlay, for detecting a rapid
     /// double-`Esc` (a Ctrl-C-equivalent cancel gesture). See [`App::register_double_esc`].
     last_esc: Option<std::time::Instant>,
@@ -314,6 +317,7 @@ impl App {
             notification: None,
             editor_vim: true,
             ref_prefix: "yak".to_string(),
+            config_herds: Vec::new(),
             last_esc: None,
             dirty_cancel: None,
             cmdline: None,
@@ -337,6 +341,7 @@ impl App {
         let working_set = views_store::load_working_set(farm.root());
         let mut app = App::new(all);
         app.editor_vim = vim;
+        app.config_herds = cfg.known_herds();
         app.ref_prefix = cfg.prefix;
         app.collapsed = ui.collapsed;
         app.family_scope = ui.family;

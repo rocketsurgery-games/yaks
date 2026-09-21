@@ -56,19 +56,23 @@ impl App {
         });
     }
 
-    /// True when the loaded farm spans more than one herd (id prefix) — what
-    /// makes the per-herd id colouring worth showing.
-    pub(crate) fn is_multi_herd(&self) -> bool {
-        let mut seen = std::collections::HashSet::new();
+    /// The create-form herd picker's choices: the farm's declared herds unioned
+    /// with the id prefixes actually present, sorted and de-duplicated.
+    pub(crate) fn herd_choices(&self) -> Vec<String> {
+        let mut set: std::collections::BTreeSet<String> =
+            self.config_herds.iter().cloned().collect();
         for t in &self.all {
             if let Some(p) = t.id.split('-').next() {
-                seen.insert(p);
-                if seen.len() > 1 {
-                    return true;
-                }
+                set.insert(p.to_string());
             }
         }
-        false
+        set.into_iter().collect()
+    }
+
+    /// True when the farm spans more than one herd (declared or present) — what
+    /// activates the per-herd id colour and the create-form herd picker.
+    pub(crate) fn is_multi_herd(&self) -> bool {
+        self.herd_choices().len() > 1
     }
 
     /// Re-query the farm view after a mutation and keep the cursor in range.

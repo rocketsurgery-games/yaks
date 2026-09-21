@@ -325,28 +325,22 @@ impl App {
         if child && parent.is_none() {
             return;
         }
-        let herd = self.herd_for_new(parent.as_deref());
-        self.overlay = Overlay::Create(CreateForm::new(self.editor_vim, parent, herd));
-    }
-
-    /// The target herd (id prefix) for a new yak, or `None` in a single-herd
-    /// farm (where the config default applies). In a multi-herd farm, inherit
-    /// the reference yak's herd — the parent for a child create, else the
-    /// selected row — so `c` near a herd creates into it.
-    fn herd_for_new(&self, reference: Option<&str>) -> Option<String> {
-        let mut prefixes = std::collections::HashSet::new();
-        for t in &self.all {
-            if let Some(p) = t.id.split('-').next() {
-                prefixes.insert(p);
-            }
-        }
-        if prefixes.len() <= 1 {
-            return None;
-        }
-        reference
-            .map(String::from)
+        // In a multi-herd farm, offer a herd picker seeded to the reference
+        // yak's herd (the parent for a child create, else the selected row).
+        let choices = if self.is_multi_herd() {
+            self.herd_choices()
+        } else {
+            Vec::new()
+        };
+        let seed = parent
+            .clone()
             .or_else(|| self.selected_id())
-            .and_then(|id| id.split('-').next().map(String::from))
+            .and_then(|id| id.split('-').next().map(String::from));
+        let herd_idx = seed
+            .as_deref()
+            .and_then(|p| choices.iter().position(|c| c == p))
+            .unwrap_or(0);
+        self.overlay = Overlay::Create(CreateForm::new(self.editor_vim, parent, choices, herd_idx));
     }
 
     /// Open the shared form seeded from the selected task, for editing (E).

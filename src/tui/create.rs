@@ -46,17 +46,24 @@ pub(crate) struct CreateForm {
     /// Create: the (optional) parent for the new task. Edit: unused (reparent
     /// is a separate action); shown in the header for context.
     pub(crate) parent: Option<String>,
-    /// Create: the target herd (id prefix) for the new yak, in a multi-herd
-    /// farm; `None` uses the config default (and is the norm in a single-herd
-    /// farm). Shown in the header; passed as the new yak's prefix. Unused on edit.
-    pub(crate) herd: Option<String>,
+    /// Create, multi-herd farm only: the herd (id prefix) choices for the new
+    /// yak and the selected index, rendered as a chip row (like type/priority).
+    /// Empty in a single-herd farm (then `create` uses the config default) and
+    /// unused on edit. The selection is passed as the new yak's prefix.
+    pub(crate) herds: Vec<String>,
+    pub(crate) herd_idx: usize,
     /// `Some(id)` when editing an existing task; `None` when creating.
     pub(crate) edit_id: Option<String>,
     pub(crate) handler: EditorEventHandler,
 }
 
 impl CreateForm {
-    pub(crate) fn new(vim: bool, parent: Option<String>, herd: Option<String>) -> Self {
+    pub(crate) fn new(
+        vim: bool,
+        parent: Option<String>,
+        herds: Vec<String>,
+        herd_idx: usize,
+    ) -> Self {
         CreateForm {
             title: text_field("", vim),
             labels: text_field("", vim),
@@ -68,7 +75,8 @@ impl CreateForm {
             pri_idx: pri_index(3), // p3
             row: 0,
             parent,
-            herd,
+            herds,
+            herd_idx,
             edit_id: None,
             handler: make_handler(vim),
         }
@@ -92,7 +100,8 @@ impl CreateForm {
             pri_idx: pri_index(task.priority),
             row: 0,
             parent: task.parent.clone(),
-            herd: None,
+            herds: Vec::new(),
+            herd_idx: 0,
             edit_id: Some(task.id.clone()),
             handler: make_handler(vim),
         }
@@ -102,14 +111,30 @@ impl CreateForm {
         self.edit_id.is_some()
     }
 
+    /// Whether the herd-picker chip row is shown: create only, and only when the
+    /// farm spans more than one herd (id prefix).
+    pub(crate) fn has_herd_row(&self) -> bool {
+        self.edit_id.is_none() && self.herds.len() > 1
+    }
+
+    /// Non-content header rows, including the optional herd row.
+    fn header_rows(&self) -> usize {
+        HEADER_ROWS + self.has_herd_row() as usize
+    }
+
+    /// The chosen target herd (id prefix), or `None` in a single-herd farm.
+    pub(crate) fn target_herd(&self) -> Option<String> {
+        self.herds.get(self.herd_idx).cloned()
+    }
+
     pub(crate) fn row_count(&self) -> usize {
-        HEADER_ROWS + self.blocks.len()
+        self.header_rows() + self.blocks.len()
     }
 
     /// The content-block index for the current row, when the cursor is on one.
     pub(crate) fn content_index(&self) -> Option<usize> {
         self.row
-            .checked_sub(HEADER_ROWS)
+            .checked_sub(self.header_rows())
             .filter(|&i| i < self.blocks.len())
     }
 
@@ -142,6 +167,10 @@ impl CreateForm {
             2 => {
                 let n = PRI_CHOICES.len() as i32;
                 self.pri_idx = (self.pri_idx as i32 + delta).rem_euclid(n) as usize;
+            }
+            r if r == HEADER_ROWS && self.has_herd_row() => {
+                let n = self.herds.len() as i32;
+                self.herd_idx = (self.herd_idx as i32 + delta).rem_euclid(n) as usize;
             }
             _ => {}
         }
@@ -186,24 +215,33 @@ impl CreateForm {
 }
 
 pub(crate) fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
-    let [header_r, title_r, type_r, pri_r, labels_r, content_r] = Layout::vertical([
+    let has_herd = f.has_herd_row();
+    let mut constraints = vec![
         Constraint::Length(1), // header
         Constraint::Length(1), // title
         Constraint::Length(1), // type chips
         Constraint::Length(1), // priority chips
         Constraint::Length(1), // labels
-        Constraint::Min(0),    // content-block stack
-    ])
-    .areas(area);
+    ];
+    if has_herd {
+        constraints.push(Constraint::Length(1)); // herd chips
+    }
+    constraints.push(Constraint::Min(0)); // content-block stack
+    let rects = Layout::vertical(constraints).split(area);
+    let header_r = rects[0];
+    let title_r = rects[1];
+    let type_r = rects[2];
+    let pri_r = rects[3];
+    let labels_r = rects[4];
+    let (herd_r, content_r) = if has_herd {
+        (Some(rects[5]), rects[6])
+    } else {
+        (None, rects[5])
+    };
     let header = match (&f.edit_id, &f.parent) {
         (Some(id), _) => format!("Edit {id}"),
         (None, Some(p)) => format!("New task (child of {p})"),
         (None, None) => "New yak".to_string(),
-    };
-    // In a multi-herd farm, surface which herd the new yak lands in.
-    let header = match (&f.edit_id, &f.herd) {
-        (None, Some(h)) => format!("{header} \u{b7} herd: {h}"),
-        _ => header,
     };
     frame.render_widget(
         Paragraph::new(Span::styled(
@@ -258,6 +296,23 @@ pub(crate) fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
         frame,
         labels_r,
     );
+    if let Some(hr) = herd_r {
+        let herds: Vec<(String, bool)> = f
+            .herds
+            .iter()
+            .enumerate()
+            .map(|(i, h)| (h.clone(), i == f.herd_idx))
+            .collect();
+        render_chip_row(
+            f.row == HEADER_ROWS,
+            f.herd_idx,
+            CREATE_LABEL_W,
+            "herd",
+            &herds,
+            frame,
+            hr,
+        );
+    }
     render_content_stack(f, frame, content_r);
 }
 

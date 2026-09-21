@@ -99,7 +99,7 @@ fn create_targets_the_reference_herd_in_a_multi_herd_farm() {
     ]);
     app.open_create(false);
     match &app.overlay {
-        Overlay::Create(f) => assert_eq!(f.herd.as_deref(), Some("api")),
+        Overlay::Create(f) => assert_eq!(f.target_herd().as_deref(), Some("api")),
         _ => panic!("expected create overlay"),
     }
 }
@@ -123,6 +123,38 @@ fn is_multi_herd_reflects_distinct_id_prefixes() {
 }
 
 #[test]
+fn create_form_herd_picker_cycles_the_target_in_a_multi_herd_farm() {
+    let mut app = App::new(vec![
+        task("api-0001", "a", Status::Hairy, 3, None),
+        task("web-0001", "w", Status::Hairy, 3, None),
+    ]);
+    app.open_create(false);
+    {
+        let Overlay::Create(f) = &mut app.overlay else {
+            panic!("expected create overlay")
+        };
+        assert!(
+            f.has_herd_row(),
+            "multi-herd farm shows the herd picker row"
+        );
+        assert_eq!(
+            f.target_herd().as_deref(),
+            Some("api"),
+            "seeded to the selected row's herd"
+        );
+        f.row = HEADER_ROWS; // move the cursor onto the herd chip row
+        f.move_chip(1);
+        assert_eq!(f.target_herd().as_deref(), Some("web"));
+    }
+    // The herd chip row renders (its label is visible text).
+    let frame = draw(&app, 80, 16);
+    assert!(
+        frame.contains("herd"),
+        "herd chip row label renders:\n{frame}"
+    );
+}
+
+#[test]
 fn create_has_no_herd_target_in_a_single_herd_farm() {
     // One herd -> no explicit target; create falls through to the config default.
     let mut app = App::new(vec![
@@ -131,7 +163,7 @@ fn create_has_no_herd_target_in_a_single_herd_farm() {
     ]);
     app.open_create(false);
     match &app.overlay {
-        Overlay::Create(f) => assert!(f.herd.is_none()),
+        Overlay::Create(f) => assert!(f.target_herd().is_none()),
         _ => panic!("expected create overlay"),
     }
 }
