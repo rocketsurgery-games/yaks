@@ -36,6 +36,7 @@ Run `yaks <command> --help` for full flags. Most read commands accept the shared
 | `reparent <ids…> --parent <id>` | Move yaks under a new parent (or `--unparent` to top-level). |
 | `rename <old> <new>` | Rename a yak's id, updating every reference across the farm. |
 | `rename-prefix <old> <new>` | Migrate every id from one prefix to another (e.g. `yaksrs` → `yaks`). |
+| `merge <path> [--dry-run]` | Merge another farm's yaks (all statuses + artifacts) into this one, preserving ids and status. Non-destructive (source left intact); refuses on id collisions — reconcile the source's prefix with `rename-prefix` first. |
 | `bulk <filter> <mutation>` | Filter-driven field edit. **Dry-run by default** — prints the matched set + the mutation and changes nothing without `--commit`. Requires ≥1 filter flag (never the whole farm) and ≥1 mutation flag (`--add-label`/`--remove-label`/`--set-priority`/`--set-type`/`--reparent`/`--unparent`). Field edits + reparent only — no state transitions. |
 
 ## Verification

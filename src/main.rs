@@ -22,8 +22,8 @@ use std::env;
 
 use farm::{
     AttachOutcome, Commits, CreateOutcome, DepOutcome, Farm, Issue, IssueKind, LogEntry,
-    MoveOutcome, NewTask, OpenError, RefKind, RenameOutcome, RenamePlan, Reparent, Show, Stats,
-    TaskEdit, TaskRefs, UpdateOutcome,
+    MergeOutcome, MoveOutcome, NewTask, OpenError, RefKind, RenameOutcome, RenamePlan, Reparent,
+    Show, Stats, TaskEdit, TaskRefs, UpdateOutcome,
 };
 use filter::FilterSpec;
 use model::{Status, Task};
@@ -376,6 +376,16 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Merge another farm's yaks into this one (consolidation). Copies every yak
+    /// (all statuses) and its artifacts, preserving ids and status; refuses on
+    /// id collisions. Non-destructive — the source is left intact.
+    Merge {
+        /// Path to the source farm: a `.yaks/` directory or a dir containing one.
+        source: String,
+        /// Preview the plan without copying anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Create a new .yaks/ farm in the current directory (hairy/ shaving/
     /// shorn/ dead/ + config.yaml + schema). Works without an existing farm.
     Init {
@@ -525,6 +535,48 @@ fn main() -> Result<()> {
         Command::Rename { old, new, dry_run } => report_rename(farm.rename(&old, &new, dry_run)?),
         Command::RenamePrefix { old, new, dry_run } => {
             report_rename(farm.rename_prefix(&old, &new, dry_run)?)
+        }
+        Command::Merge { source, dry_run } => {
+            match farm.merge(std::path::Path::new(&source), dry_run)? {
+                MergeOutcome::NoSource(p) => {
+                    eprintln!("error: no .yaks/ farm found at {p}");
+                    std::process::exit(1);
+                }
+                MergeOutcome::Collision(ids) => {
+                    eprintln!(
+                        "error: {} id(s) exist in both farms; reconcile the source's prefix with `yaks rename-prefix` first:",
+                        ids.len()
+                    );
+                    for id in ids {
+                        eprintln!("  {id}");
+                    }
+                    std::process::exit(1);
+                }
+                MergeOutcome::Done(plan) => {
+                    let verb = if plan.applied {
+                        "merged"
+                    } else {
+                        "would merge"
+                    };
+                    println!(
+                        "{verb} {} yak(s) from {}",
+                        plan.yaks.len(),
+                        plan.source.display()
+                    );
+                    for (id, st) in &plan.yaks {
+                        println!("  {id} [{}]", st.dir());
+                    }
+                    if !plan.artifacts.is_empty() {
+                        let a = if plan.applied { "copied" } else { "to copy" };
+                        println!("{} artifact set(s) {a}", plan.artifacts.len());
+                    }
+                    if plan.applied {
+                        println!("source left intact at {}", plan.source.display());
+                    } else {
+                        println!("(dry run — nothing written; re-run without --dry-run to apply)");
+                    }
+                }
+            }
         }
         Command::Init { .. } => unreachable!("init is handled before opening a farm"),
         Command::Skills { .. } => unreachable!("skills is handled before opening a farm"),

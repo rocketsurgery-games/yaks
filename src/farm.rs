@@ -79,6 +79,30 @@ pub enum CreateOutcome {
     InvalidPrefix(String),
 }
 
+/// Outcome of merging another farm into this one ([`Farm::merge`]).
+pub enum MergeOutcome {
+    /// Merge is valid, and (unless `dry_run`) was applied.
+    Done(MergePlan),
+    /// No `.yaks/` farm was found at the given path (or it resolves to this
+    /// same farm).
+    NoSource(String),
+    /// Ids present in BOTH farms; nothing was written. Reconcile the source's
+    /// prefix with `rename-prefix`, then retry.
+    Collision(Vec<String>),
+}
+
+/// The per-yak plan produced by [`Farm::merge`].
+pub struct MergePlan {
+    /// Whether the plan was applied (`false` for a dry run).
+    pub applied: bool,
+    /// The resolved source farm root the yaks came from.
+    pub source: PathBuf,
+    /// Each merged yak as `(id, status)`, sorted by id.
+    pub yaks: Vec<(String, Status)>,
+    /// Ids whose `artifacts/<id>/` directory was also copied.
+    pub artifacts: Vec<String>,
+}
+
 pub enum UpdateOutcome {
     Updated,
     NoChanges,
@@ -930,6 +954,86 @@ impl Farm {
     pub fn reparent(&self, id: &str, new_parent: Option<String>) -> Result<Reparent> {
         store::reparent(&self.root, id, new_parent)
     }
+
+    /// Merge every yak from the farm at `source` into this one, preserving each
+    /// yak's status (subdir) and file bytes verbatim and copying any
+    /// `artifacts/<id>/` alongside. Non-destructive: the source is left intact
+    /// (remove or symlink it yourself once satisfied). Refuses on any id
+    /// collision — unique prefixes per herd make these rare; reconcile a clash
+    /// with `rename-prefix` in the source first. `dry_run` reports the plan
+    /// without writing.
+    pub fn merge(&self, source: &Path, dry_run: bool) -> Result<MergeOutcome> {
+        let Some(src_root) = resolve_farm_root(source) else {
+            return Ok(MergeOutcome::NoSource(source.display().to_string()));
+        };
+        if let (Ok(a), Ok(b)) = (
+            std::fs::canonicalize(&src_root),
+            std::fs::canonicalize(&self.root),
+        ) {
+            if a == b {
+                return Ok(MergeOutcome::NoSource(source.display().to_string()));
+            }
+        }
+        // Every source yak, by walking each status dir (file stem = id), kept as
+        // raw bytes so frontmatter/body round-trip exactly.
+        let mut found: Vec<(String, Status, PathBuf)> = Vec::new();
+        for st in [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead] {
+            let Ok(rd) = std::fs::read_dir(src_root.join(st.dir())) else {
+                continue;
+            };
+            for entry in rd.flatten() {
+                let p = entry.path();
+                if p.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                    found.push((stem.to_string(), st, p));
+                }
+            }
+        }
+        // Refuse if any id already lives in the destination (would clobber).
+        let dest_ids = store::all_ids(&self.root);
+        let mut collisions: Vec<String> = found
+            .iter()
+            .filter(|(id, _, _)| dest_ids.contains(id))
+            .map(|(id, _, _)| id.clone())
+            .collect();
+        collisions.sort();
+        collisions.dedup();
+        if !collisions.is_empty() {
+            return Ok(MergeOutcome::Collision(collisions));
+        }
+        found.sort_by(|a, b| a.0.cmp(&b.0));
+        let yaks: Vec<(String, Status)> =
+            found.iter().map(|(id, st, _)| (id.clone(), *st)).collect();
+        let mut artifacts: Vec<String> = found
+            .iter()
+            .filter(|(id, _, _)| src_root.join("artifacts").join(id).is_dir())
+            .map(|(id, _, _)| id.clone())
+            .collect();
+        artifacts.sort();
+        if !dry_run {
+            for (_id, st, path) in &found {
+                let dest_dir = self.root.join(st.dir());
+                std::fs::create_dir_all(&dest_dir)?;
+                let name = path.file_name().expect("md file has a name");
+                std::fs::copy(path, dest_dir.join(name))
+                    .with_context(|| format!("copying {}", path.display()))?;
+            }
+            for id in &artifacts {
+                copy_dir_all(
+                    &src_root.join("artifacts").join(id),
+                    &self.root.join("artifacts").join(id),
+                )?;
+            }
+        }
+        Ok(MergeOutcome::Done(MergePlan {
+            applied: !dry_run,
+            source: src_root,
+            yaks,
+            artifacts,
+        }))
+    }
 }
 
 fn git_log(root: &Path, args: &[&str]) -> Result<Vec<String>> {
@@ -989,6 +1093,37 @@ fn fold_counts<K: std::hash::Hash + Eq, I: Iterator<Item = K>>(it: I) -> Vec<(K,
         *m.entry(k).or_insert(0) += 1;
     }
     m.into_iter().collect()
+}
+
+/// Resolve a user-supplied path to a farm root: accept either the `.yaks/`
+/// directory itself or a directory that contains one.
+fn resolve_farm_root(p: &Path) -> Option<PathBuf> {
+    let is_farm = |d: &Path| {
+        [Status::Hairy, Status::Shaving, Status::Shorn, Status::Dead]
+            .iter()
+            .any(|st| d.join(st.dir()).is_dir())
+    };
+    if is_farm(p) {
+        return Some(p.to_path_buf());
+    }
+    let nested = p.join(".yaks");
+    is_farm(&nested).then_some(nested)
+}
+
+/// Recursively copy `src` into `dst` (carries a merged yak's `artifacts/<id>/`).
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1153,6 +1288,63 @@ mod tests {
             farm.create(new_task("bad", Some("Bad Prefix"))).unwrap(),
             CreateOutcome::InvalidPrefix(_)
         ));
+    }
+
+    fn created_id(out: CreateOutcome) -> String {
+        match out {
+            CreateOutcome::Created(t) => t.id,
+            _ => panic!("expected Created"),
+        }
+    }
+
+    #[test]
+    fn merge_copies_a_disjoint_farm_preserving_status() {
+        let (dest_root, dest) = temp_farm();
+        let (src_root, src) = temp_farm();
+        // Source yaks live in a different herd (prefix) so ids can't collide.
+        let a = created_id(src.create(new_task("source hairy", Some("proj"))).unwrap());
+        let b = created_id(src.create(new_task("source done", Some("proj"))).unwrap());
+        src.transition(&b, Status::Shorn).unwrap();
+
+        let plan = match dest.merge(&src_root, false).unwrap() {
+            MergeOutcome::Done(p) => p,
+            _ => panic!("expected Done"),
+        };
+        assert!(plan.applied && plan.yaks.len() == 2);
+        // Each landed under its original status dir, and both now resolve.
+        assert!(dest_root.join("hairy").join(format!("{a}.md")).is_file());
+        assert!(dest_root.join("shorn").join(format!("{b}.md")).is_file());
+        let ids = store::all_ids(&dest_root);
+        assert!(ids.contains(&a) && ids.contains(&b));
+        // Non-destructive: the source keeps its files.
+        assert!(src_root.join("hairy").join(format!("{a}.md")).is_file());
+    }
+
+    #[test]
+    fn merge_refuses_on_id_collision_and_writes_nothing() {
+        let (dest_root, dest) = temp_farm();
+        let (src_root, _src) = temp_farm();
+        store::write::save(&dest_root, &task("yak-0001", Status::Hairy)).unwrap();
+        store::write::save(&src_root, &task("yak-0001", Status::Shaving)).unwrap();
+        store::write::save(&src_root, &task("yak-0002", Status::Hairy)).unwrap();
+        match dest.merge(&src_root, false).unwrap() {
+            MergeOutcome::Collision(ids) => assert_eq!(ids, vec!["yak-0001".to_string()]),
+            _ => panic!("expected Collision"),
+        }
+        // Refused wholesale: the non-colliding source yak was not copied either.
+        assert!(!store::all_ids(&dest_root).contains("yak-0002"));
+    }
+
+    #[test]
+    fn merge_dry_run_reports_but_writes_nothing() {
+        let (dest_root, dest) = temp_farm();
+        let (src_root, src) = temp_farm();
+        let id = created_id(src.create(new_task("s", Some("proj"))).unwrap());
+        match dest.merge(&src_root, true).unwrap() {
+            MergeOutcome::Done(p) => assert!(!p.applied && p.yaks.len() == 1),
+            _ => panic!("expected Done"),
+        }
+        assert!(!store::all_ids(&dest_root).contains(&id));
     }
 
     fn done(out: RenameOutcome) -> RenamePlan {
