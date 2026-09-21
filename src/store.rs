@@ -15,19 +15,102 @@ use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Walk up from `start` until a directory containing `.yaks/` is found.
-pub fn discover_root(start: &Path) -> Result<PathBuf> {
+/// A resolved farm: its `.yaks/` root, plus an optional per-repo herd prefix
+/// supplied by a pointer file (see [`discover`]).
+pub struct Discovered {
+    pub root: PathBuf,
+    /// The `prefix:` from a `.yaks` pointer file, if discovery followed one.
+    /// Becomes this repo's default herd for `create` — below an explicit
+    /// `--prefix`, above the farm's config default.
+    pub prefix: Option<String>,
+}
+
+/// Walk up from `start` to the farm the CLI/TUI should operate on. At each
+/// level the `.yaks` entry is resolved as:
+/// - a **directory** (or a symlink to one) — the farm root itself;
+/// - a **pointer file** — a regular file whose `path:` names a farm elsewhere
+///   (absolute, `~/`-relative, or relative to the pointer's own directory) and
+///   whose optional `prefix:` becomes this repo's default herd. This lets
+///   several repos share one out-of-tree farm with no environment variable.
+pub fn discover(start: &Path) -> Result<Discovered> {
     let mut dir = start;
     loop {
         let candidate = dir.join(".yaks");
         if candidate.is_dir() {
-            return Ok(candidate);
+            return Ok(Discovered {
+                root: candidate,
+                prefix: None,
+            });
+        }
+        if candidate.is_file() {
+            let (path, prefix) = parse_pointer(&candidate)?;
+            let root = resolve_pointer_root(dir, &path)?;
+            return Ok(Discovered { root, prefix });
         }
         match dir.parent() {
             Some(p) => dir = p,
             None => anyhow::bail!("no .yaks/ directory found at or above {}", start.display()),
         }
     }
+}
+
+/// Parse a `.yaks` pointer file: `key: value` lines recognizing `path`
+/// (required) and `prefix` (optional). Blank lines and `#` comments are ignored.
+fn parse_pointer(file: &Path) -> Result<(String, Option<String>)> {
+    let text = fs::read_to_string(file)
+        .with_context(|| format!("reading farm pointer {}", file.display()))?;
+    let mut path: Option<String> = None;
+    let mut prefix: Option<String> = None;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = trimmed.split_once(':') {
+            match k.trim() {
+                "path" => path = non_empty(unquote(v)),
+                "prefix" => prefix = non_empty(unquote(v)),
+                _ => {}
+            }
+        }
+    }
+    match path {
+        Some(p) => Ok((p, prefix)),
+        None => anyhow::bail!("farm pointer {} has no `path:`", file.display()),
+    }
+}
+
+/// Resolve a pointer's `path` (absolute, `~/…`, or relative to `base`) to a
+/// farm root: accept the `.yaks/` dir itself or a directory containing one.
+fn resolve_pointer_root(base: &Path, path: &str) -> Result<PathBuf> {
+    let expanded = match path.strip_prefix("~/") {
+        Some(rest) => match std::env::var("HOME") {
+            Ok(home) if !home.is_empty() => PathBuf::from(home).join(rest),
+            _ => PathBuf::from(path),
+        },
+        None => PathBuf::from(path),
+    };
+    let joined = if expanded.is_absolute() {
+        expanded
+    } else {
+        base.join(expanded)
+    };
+    let is_farm = |d: &Path| {
+        ["hairy", "shaving", "shorn", "dead"]
+            .iter()
+            .any(|sub| d.join(sub).is_dir())
+    };
+    if is_farm(&joined) {
+        return Ok(joined);
+    }
+    let nested = joined.join(".yaks");
+    if is_farm(&nested) {
+        return Ok(nested);
+    }
+    anyhow::bail!(
+        "farm pointer path {} is not a .yaks/ farm",
+        joined.display()
+    )
 }
 
 /// Load every task file in the given statuses, sorted by id.
@@ -1438,7 +1521,7 @@ mod init_tests {
         assert!(!read.vim_mode);
 
         // A fresh farm is discoverable and empty.
-        assert_eq!(discover_root(&base).unwrap(), root);
+        assert_eq!(discover(&base).unwrap().root, root);
         assert!(load(&root, &[Status::Hairy]).unwrap().is_empty());
 
         let _ = fs::remove_dir_all(&base);

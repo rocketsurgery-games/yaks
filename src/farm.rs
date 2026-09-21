@@ -35,6 +35,10 @@ pub struct Farm {
     root: PathBuf,
     /// Set when the farm's schema predates this build (best-effort read).
     pub schema_warning: Option<String>,
+    /// This repo's default herd (id prefix), when discovery followed a `.yaks`
+    /// pointer file carrying `prefix:`. Used by `create` below an explicit
+    /// `--prefix` and above the farm's config default.
+    pointer_prefix: Option<String>,
 }
 
 /// Fields for a new task (defaults resolved from config inside `create`).
@@ -277,7 +281,8 @@ impl IssueKind {
 impl Farm {
     /// Discover the nearest `.yaks/` above `cwd` and apply the schema gate.
     pub fn open(cwd: &Path) -> std::result::Result<Farm, OpenError> {
-        let root = store::discover_root(cwd).map_err(|e| OpenError::NoFarm(e.to_string()))?;
+        let found = store::discover(cwd).map_err(|e| OpenError::NoFarm(e.to_string()))?;
+        let root = found.root;
         let schema_warning = match store::schema_status(&root) {
             SchemaStatus::Newer(found) => {
                 return Err(OpenError::SchemaTooNew {
@@ -294,6 +299,7 @@ impl Farm {
         Ok(Farm {
             root,
             schema_warning,
+            pointer_prefix: found.prefix,
         })
     }
 
@@ -822,11 +828,16 @@ impl Farm {
                 return Ok(CreateOutcome::ParentNotFound(p.clone()));
             }
         }
-        // Route to a specific herd (id prefix) within the farm when asked;
-        // otherwise join the farm's default prefix. An explicit prefix is
-        // validated via the reference grammar so we never mint an
-        // un-referenceable id.
-        let prefix = match new.prefix.as_deref().filter(|p| !p.is_empty()) {
+        // Route to a specific herd (id prefix): an explicit `--prefix` wins,
+        // else this repo's pointer-file herd, else the farm's config default.
+        // A chosen prefix is validated via the reference grammar so we never
+        // mint an un-referenceable id.
+        let prefix = match new
+            .prefix
+            .as_deref()
+            .or(self.pointer_prefix.as_deref())
+            .filter(|p| !p.is_empty())
+        {
             Some(p) if refs::has_ref_shape(&format!("{p}-0000")) => p.to_string(),
             Some(p) => return Ok(CreateOutcome::InvalidPrefix(p.to_string())),
             None => cfg.prefix.clone(),
@@ -1345,6 +1356,51 @@ mod tests {
             _ => panic!("expected Done"),
         }
         assert!(!store::all_ids(&dest_root).contains(&id));
+    }
+
+    fn temp_dir_named(tag: &str) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        p.push(format!("yaks-{tag}-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn discover_follows_a_pointer_file_with_prefix() {
+        let (farm_root, _f) = temp_farm();
+        let repo = temp_dir_named("repo");
+        std::fs::write(
+            repo.join(".yaks"),
+            format!("path: {}\nprefix: web\n", farm_root.display()),
+        )
+        .unwrap();
+        let d = store::discover(&repo).unwrap();
+        assert_eq!(d.root, farm_root);
+        assert_eq!(d.prefix.as_deref(), Some("web"));
+    }
+
+    #[test]
+    fn create_routes_via_pointer_prefix_and_explicit_wins() {
+        let (farm_root, _f) = temp_farm();
+        let repo = temp_dir_named("repo");
+        std::fs::write(
+            repo.join(".yaks"),
+            format!("path: {}\nprefix: web\n", farm_root.display()),
+        )
+        .unwrap();
+        let farm = match Farm::open(&repo) {
+            Ok(f) => f,
+            Err(_) => panic!("open via pointer failed"),
+        };
+        // No --prefix: the pointer's herd (web) routes the new yak.
+        let a = created_id(farm.create(new_task("via pointer", None)).unwrap());
+        assert!(a.starts_with("web-"), "expected web- id, got {a}");
+        // An explicit --prefix beats the pointer.
+        let b = created_id(farm.create(new_task("explicit", Some("core"))).unwrap());
+        assert!(b.starts_with("core-"), "expected core- id, got {b}");
+        let ids = store::all_ids(&farm_root);
+        assert!(ids.contains(&a) && ids.contains(&b));
     }
 
     fn done(out: RenameOutcome) -> RenamePlan {

@@ -60,3 +60,16 @@ yaks tui                       # or drive it all interactively
   machines, give `.yaks/` its own `.git` on a private remote and hide it from the
   outer repo via `.git/info/exclude`. See the **yaks** skill for the full
   breakdown and footguns.
+
+## Farms, herds, and families
+
+A **farm** is one `.yaks/` directory; a **herd** is a group of yaks sharing an id
+prefix within it (a farm can hold several — `yaks create --prefix <herd>`); a
+**family** is a parent yak and its descendants.
+
+To run several projects from one out-of-tree farm, point each repo at it: put a
+`.yaks` *file* at the repo root with `path:` (the shared farm) and an optional
+`prefix:` (that repo's herd). Discovery follows the pointer — every command then
+operates on the shared farm, and `yaks create` routes new yaks into that repo's
+herd with no flag. A `.yaks` symlink to the farm works too. Fold existing farms
+together with `yaks merge`.

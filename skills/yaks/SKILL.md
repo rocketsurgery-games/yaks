@@ -71,6 +71,11 @@ Pick the hiding method that fits — they differ in blast radius:
 - Hide the nested repo from the **outer** repo with `.git/info/exclude` — never the `*` trick, which would also blind the farm's own repo. The outer repo then ignores `.yaks/` cleanly instead of flagging it as an embedded repo.
 - Habit: **pull before, push after** a work session so machines stay in sync. yaks needs no configuration for this — discovery finds `.yaks/` exactly as always.
 
+**Several repos, one farm (out-of-tree).** To track several projects in one private farm that lives *outside* their repos, point each repo at it rather than giving each its own `.yaks/`:
+- **Pointer file (recommended):** put a `.yaks` *file* (not a directory) at the repo root with `path: <path to the shared .yaks>` and, optionally, `prefix: <this repo's herd>`. `path` may be absolute, `~/`-relative, or relative to the repo. Discovery follows it, so every `yaks` command in that repo operates on the shared farm — and `yaks create` (with no `--prefix`) routes new yaks into that repo's herd automatically.
+- **Symlink (zero-config):** alternatively symlink `.yaks` → the shared farm. Discovery follows it too, but every repo then shares one config prefix, so pass `yaks create --prefix <herd>` per repo.
+- Keep the pointer/symlink out of the shared repo (`.git/info/exclude`), exactly like a private farm. Consolidate existing separate farms into the shared one with `yaks merge`.
+
 **Team.** The yak files are part of the repo — treat them like code.
 - Commit the shorn yak move together with the code that completed it (hard rule 2).
 - Yak IDs are fine in commit messages and other in-repo references — collaborators can resolve them from the committed files.

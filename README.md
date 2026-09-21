@@ -201,6 +201,22 @@ Hide the nested repo from the outer repo with `.git/info/exclude` (not the `*`
 trick, which would also blind the farm's own repo). yaks needs no configuration —
 it discovers `.yaks/` exactly as before.
 
+**Several repos, one farm.** To track several projects in a single out-of-tree
+farm, put a `.yaks` *file* (not a directory) at each repo root pointing at the
+shared farm:
+
+```
+path: ~/work/shared-farm/.yaks
+prefix: web
+```
+
+Discovery follows the pointer, so every command in that repo operates on the
+shared farm and `yaks create` routes new yaks into that repo's herd (`prefix`)
+with no flag. A `.yaks` symlink to the farm works too (but every repo then
+shares one prefix). Keep the pointer/symlink out of the shared repo with
+`.git/info/exclude`, and use `yaks merge` to fold existing farms into the shared
+one.
+
 > **Heads up:** `git clean -fdx` in the outer repo will delete an ignored or
 > excluded `.yaks/`, including a nested farm's history. Push a private farm
 > often, and remember a gitignored `.yaks/` won't appear in fresh clones or other
