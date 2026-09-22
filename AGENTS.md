@@ -79,6 +79,12 @@ LOOKING at the rendered frame (and via `cargo test -p yaks docshots --
 snapshots in `src/tui.rs`). If a change has no lever to see its effect,
 `yaks ask` rather than declare it done on faith.
 
+Don't keep that frame to yourself: `yaks attach` the rendered frame (or a
+headless text serialization) to the yak as evidence, so a reviewer sees what you
+saw — the shipped `skills/yaks` "Evidence before you shear" rule, applied here.
+For a durable UI state, prefer a `docshots` scene + a `docs/` embed over a
+one-off frame.
+
 To actually *look* at an SVG frame, rasterize it to PNG with headless Chrome
 (recipe in `docs/tui.md`) — yaks stays out of rasterization, and a pure-Rust
 rasterizer botches the color emoji, so a browser engine is the lever.

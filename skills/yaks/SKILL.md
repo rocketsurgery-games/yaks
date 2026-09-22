@@ -109,7 +109,17 @@ In `yaks tui` the same flow is one key: `a` asks or answers the selected yak in 
 1. **Session start** — run `yaks list` and `yaks next` to see current state.
 2. **Before writing code** — `yaks shave <id>` (create the yak first if needed).
 3. **While working** — append progress notes with `yaks update <id> --note "what you found / decided / changed"`. This builds a running log in the markdown body so future sessions have context.
-4. **When the work is done** — `yaks update <id> --note "…"` with a brief shorn summary (what was done, what was learned, any yaks spawned), then `yaks shorn <id>`. In team mode, stage the shorn yak move together with the code and commit them in one commit whenever practical.
+4. **When the work is done** — gather evidence (see **Evidence before you shear**), append a brief shorn summary (what was done, what was learned, the evidence, any yaks spawned), then `yaks shorn <id>`. In team mode, stage the shorn yak move together with the code and commit them in one commit whenever practical.
+
+## Evidence before you shear
+
+A yak is shorn against **evidence, not vibes**. "It compiles", a green proxy, or a self-report is not enough — verify against the **real artifact** and record the proof on the yak so a human or a later agent can trust it (and re-run it).
+
+- **Scriptable check → a `verify:` command.** When the proof is a command (a test, a build, a linter), store it (`yaks update <id> --verify '<cmd>'`) and run `yaks verify <id>` — it records the PASS/FAIL as a note, and because it's stored, a reviewer, CI, or a later agent can re-run it. `yaks doctor --strict` enforces that a shorn yak's `verify:` last passed.
+- **User-facing / UI change → attach what it looks like.** Drive the real UI (don't infer it from the diff) and `yaks attach` the evidence: a **screenshot** of the rendered state, or a **text serialization** of it (a headless frame, the rendered HTML/DOM, a snapshot dump). "The tests pass" does not prove a UI actually renders or behaves. And update **every surface the change is exposed through** — in-app help, `--help`, and docs — in the *same* change: a key or flag that works but is undocumented or invisible in help shipped half-done.
+- **No lever to verify this kind of change?** `yaks ask <id>` the human whether to build one, rather than shearing on faith.
+
+`yaks attach` keeps evidence as an external file under `.yaks/artifacts/<id>/` (committed in team mode) and links it in the body — so never paste a large or binary artifact (an SVG included) inline into a note. (It also edits the tracked yak `.md`, so stage that alongside the artifact.)
 
 ## Parent/child state rules
 

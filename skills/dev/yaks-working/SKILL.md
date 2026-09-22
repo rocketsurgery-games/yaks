@@ -65,6 +65,14 @@ semantics, scope), not trivia.
   stage it deliberately alongside the artifact. Evidence is general: the outcome achieved and
   seen, appropriate to the yak's kind (a research/decision yak's evidence is its
   finding/rationale; dead yaks are exempt).
+- **A UI change's evidence is what it looks like.** For any user-facing/UI
+  change, `yaks attach` a **screenshot or a text serialization** of the affected
+  state (a rendered frame, a headless text dump, the rendered HTML/DOM) — not
+  just a passing test — and update every surface that exposes the change (in-app
+  help, `--help`, docs) in the same change. A key or flag that works but is
+  undocumented or invisible in help shipped half-done (the yaks-71d1 `H` key
+  landed in the handler but not the `?` overlay, and edited the wrong surface,
+  precisely because no one drove the real UI or attached a frame).
 - **Scriptable evidence is a `verify:` command.** When the check is a command (a
   test, a build, an artifact producer), store it on the yak (`--verify`) and run
   `yaks verify <id>`: it records the PASS/FAIL as a note and, because it's stored,
