@@ -126,6 +126,36 @@ fn app_at(w: u16, h: u16) -> App {
     app
 }
 
+/// A two-herd farm (`web-*` + `api-*`) for the multi-herd chrome shots: the
+/// per-herd id colour and the edit form's herd chip row (yaks-71d1).
+fn multi_herd_farm() -> Vec<Task> {
+    let mut api = t(
+        "api-0001",
+        "Token refresh drops the retry budget",
+        "bug",
+        2,
+        Status::Hairy,
+        None,
+    );
+    api.labels = vec!["backend".into()];
+    let mut web = t(
+        "web-0007",
+        "Settings page: surface the active herd",
+        "feature",
+        3,
+        Status::Hairy,
+        None,
+    );
+    web.labels = vec!["ui".into()];
+    vec![api, web]
+}
+
+fn multi_herd_app_at(w: u16, h: u16) -> App {
+    let mut app = App::new(multi_herd_farm());
+    HeadlessApp::on_resize(&mut app, w, h);
+    app
+}
+
 fn press(app: &mut App, c: char) {
     handle_key(app, KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
 }
@@ -203,4 +233,13 @@ fn docshots() {
     let mut app = app_at(sw, 12);
     app.notification = Some("saved view: quarterly-planning".into());
     write_svg("tui-status-below-tabs", &app, sw, 12);
+
+    // 7. Multi-herd edit form: on a two-herd farm (`web`/`api`), `E` opens the
+    //    shared edit form, which grows a `herd` chip row (seeded to the yak's
+    //    current herd) between `labels` and `description` — the editable herd
+    //    affordance (yaks-71d1).
+    let mut app = multi_herd_app_at(w, h);
+    app.select_id("web-0007");
+    press(&mut app, 'E');
+    write_svg("tui-edit-herd", &app, w, h);
 }

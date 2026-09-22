@@ -245,7 +245,57 @@ impl App {
             .filter(|l| !new_labels.contains(l))
             .cloned()
             .collect();
-        self.apply_edit(&id, edit, format!("{id} updated"));
+        // A herd change from the edit form's chip row is an id-prefix rename
+        // (tail preserved), folded into this same commit (yaks-71d1). Detect it
+        // against the yak's current prefix.
+        let new_id = f.target_herd().and_then(|nh| {
+            id.split_once('-')
+                .and_then(|(cur, tail)| (cur != nh).then(|| format!("{nh}-{tail}")))
+        });
+        let Some(new_id) = new_id else {
+            self.apply_edit(&id, edit, format!("{id} updated"));
+            return;
+        };
+        // Field edits land on the current id first, then the prefix rename moves
+        // the (now-updated) file. Two farm calls, each in its own borrow scope.
+        match &self.farm {
+            Some(h) => {
+                if let Err(e) = h.update(&id, edit) {
+                    self.notification = Some(format!("error: {e}"));
+                    return;
+                }
+            }
+            None => return,
+        }
+        let outcome = match &self.farm {
+            Some(h) => h.rename(&id, &new_id, false),
+            None => return,
+        };
+        match outcome {
+            Ok(RenameOutcome::Done(_)) => {
+                self.reload();
+                self.select_id(&new_id);
+                let herd = new_id.split_once('-').map(|(p, _)| p).unwrap_or(&new_id);
+                self.notification = Some(format!("{id} updated, moved to {herd}"));
+            }
+            Ok(RenameOutcome::Collision(t)) => {
+                self.reload_preserving_selection();
+                self.notification = Some(format!("{t} already exists"));
+            }
+            Ok(RenameOutcome::NotFound(t)) => {
+                self.reload_preserving_selection();
+                self.notification = Some(format!("{t} not found"));
+            }
+            Ok(RenameOutcome::Invalid(t)) => {
+                self.reload_preserving_selection();
+                self.notification = Some(format!("invalid id {t}"));
+            }
+            Ok(RenameOutcome::NothingToRename) => {
+                self.reload_preserving_selection();
+                self.notification = Some(format!("{id} updated"));
+            }
+            Err(e) => self.notification = Some(format!("error: {e}")),
+        }
     }
 
     pub(crate) fn open_dep_picker(&mut self) {

@@ -56,6 +56,9 @@ pub(crate) enum EditTarget {
     Type,
     Priority,
     Labels,
+    /// The herd (id prefix) chip row — present in the edit form on a multi-herd
+    /// farm; committing a change renames the yak's prefix (yaks-71d1).
+    Herd,
     Status,
     /// A content block: `0` = description, `1..` = comments.
     Content(usize),

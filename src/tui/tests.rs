@@ -2000,6 +2000,49 @@ mod live {
     }
 
     #[test]
+    fn edit_form_shows_herd_row_seeded_to_current_herd() {
+        // The edit affordance carries a herd chip row on a multi-herd farm,
+        // seeded to the yak's current herd (yaks-71d1).
+        let (_dir, farm) = temp_farm(&[
+            task("web-0001", "web one", Status::Hairy, 3, None),
+            task("api-0002", "api two", Status::Hairy, 3, None),
+        ]);
+        let mut app = App::with_farm(farm).unwrap();
+        app.select_id("web-0001");
+        press(&mut app, "E");
+        match &app.overlay {
+            Overlay::Create(f) => {
+                assert!(f.is_editing());
+                assert!(f.has_herd_row(), "edit form shows the herd row");
+                assert_eq!(f.target_herd().as_deref(), Some("web"));
+            }
+            _ => panic!("expected edit form"),
+        }
+    }
+
+    #[test]
+    fn edit_form_herd_change_renames_on_commit() {
+        // Changing the herd chip and saving renames the id prefix (tail kept),
+        // the form's fold-in of the H move (yaks-71d1).
+        let (_dir, farm) = temp_farm(&[
+            task("web-0001", "web one", Status::Hairy, 3, None),
+            task("api-0002", "api two", Status::Hairy, 3, None),
+        ]);
+        let mut app = App::with_farm(farm).unwrap();
+        app.select_id("web-0001");
+        press(&mut app, "E");
+        // title -> type -> priority -> labels -> herd (HEADER_ROWS tabs).
+        for _ in 0..HEADER_ROWS {
+            tab(&mut app);
+        }
+        // Herds are sorted ["api", "web"]; current is web (idx 1) -> left = api.
+        arrow_left(&mut app);
+        ctrl_s(&mut app);
+        assert!(app.task("web-0001").is_none(), "old id is gone");
+        assert!(app.task("api-0001").is_some(), "renamed into the api herd");
+    }
+
+    #[test]
     fn edit_form_cancel_leaves_task_unchanged() {
         let (_dir, farm) = temp_farm(&[task("t0", "solo", Status::Hairy, 3, None)]);
         let mut app = App::with_farm(farm).unwrap();

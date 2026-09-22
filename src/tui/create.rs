@@ -46,10 +46,11 @@ pub(crate) struct CreateForm {
     /// Create: the (optional) parent for the new task. Edit: unused (reparent
     /// is a separate action); shown in the header for context.
     pub(crate) parent: Option<String>,
-    /// Create, multi-herd farm only: the herd (id prefix) choices for the new
-    /// yak and the selected index, rendered as a chip row (like type/priority).
-    /// Empty in a single-herd farm (then `create` uses the config default) and
-    /// unused on edit. The selection is passed as the new yak's prefix.
+    /// Multi-herd farm only: the herd (id prefix) choices and the selected
+    /// index, rendered as a chip row (like type/priority). Empty in a
+    /// single-herd farm (then `create` uses the config default). On create the
+    /// selection is the new yak's prefix; on edit it's the yak's current herd,
+    /// and changing it renames the id prefix on commit (yaks-71d1).
     pub(crate) herds: Vec<String>,
     pub(crate) herd_idx: usize,
     /// `Some(id)` when editing an existing task; `None` when creating.
@@ -111,14 +112,15 @@ impl CreateForm {
         self.edit_id.is_some()
     }
 
-    /// Whether the herd-picker chip row is shown: create only, and only when the
-    /// farm spans more than one herd (id prefix).
+    /// Whether the herd-picker chip row is shown: only when the farm spans more
+    /// than one herd (id prefix). Shown for both create and edit — on edit,
+    /// changing it renames the yak's id prefix on commit (yaks-71d1).
     pub(crate) fn has_herd_row(&self) -> bool {
-        self.edit_id.is_none() && self.herds.len() > 1
+        self.herds.len() > 1
     }
 
     /// Non-content header rows, including the optional herd row.
-    fn header_rows(&self) -> usize {
+    pub(crate) fn header_rows(&self) -> usize {
         HEADER_ROWS + self.has_herd_row() as usize
     }
 

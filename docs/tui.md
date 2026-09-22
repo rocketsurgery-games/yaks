@@ -109,6 +109,13 @@ a `herd` chip row to scope to one or more herds. It composes into any view.
 
 ![yaks TUI filter drawer](assets/tui-drawer.svg)
 
+**Edit form** (`E`) — the shared create/edit form; on a multi-herd farm it grows
+a `herd` chip row (seeded to the yak's current herd) between `labels` and
+`description`, so changing it and saving moves the yak to that herd (an id-prefix
+rename). `H` does the same move as a one-key picker.
+
+![yaks TUI edit form with the herd chip row](assets/tui-edit-herd.svg)
+
 # Screenshots
 
 These are generated headlessly: the [`toque`](../crates/toque/README.md) crate

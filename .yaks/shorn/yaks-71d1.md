@@ -4,7 +4,7 @@ title: Edit affordance for yak herd
 type: feature
 priority: 3
 created: '2026-09-21T20:32:04Z'
-updated: '2026-09-21T23:33:19Z'
+updated: '2026-09-22T00:04:49Z'
 labels:
 - herds
 - tui
@@ -31,4 +31,12 @@ Reopen follow-up: the H herd-move was List-only and undiscoverable. Added (1) a 
 
 ---
 ▸ 2026-09-21T23:33:19Z [agent]
+verify: `cargo test --workspace` -> PASS (exit 0)
+
+---
+▸ 2026-09-22T00:04:42Z [agent]
+Reopen #2 (the real gap): the 'edit affordance' is the E create/edit form, whose herd chip row was create-only (has_herd_row gated on edit_id.is_none()). Fixes: (1) has_herd_row now = herds.len()>1 for both create+edit; (2) open_edit_focus seeds form.herds/herd_idx from the farm on multi-herd, and content-row focus keys off form.header_rows() so it stays correct with the extra row; (3) new EditTarget::Herd so E on the detail 'Herd:' line focuses the row; (4) commit_edit_form folds a herd change into the commit as an id-prefix rename (fields written first, then rename; handles all RenameOutcome). Added a tui-edit-herd docshot + docs/tui.md embed. Tests: edit_form_shows_herd_row_seeded_to_current_herd, edit_form_herd_change_renames_on_commit (265 lib green). Attached a rasterized PNG showing the herd row (api/web, web selected) between labels and description.
+
+---
+▸ 2026-09-22T00:04:49Z [agent]
 verify: `cargo test --workspace` -> PASS (exit 0)

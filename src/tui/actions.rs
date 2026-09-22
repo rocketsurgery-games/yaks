@@ -412,6 +412,17 @@ impl App {
             Some(task) => CreateForm::for_edit(self.editor_vim, task),
             None => return,
         };
+        // On a multi-herd farm, seed the herd chip row (like create) so the herd
+        // is editable in the edit form too (yaks-71d1); committing a change
+        // renames the id prefix. The row shows only when there's >1 herd.
+        if self.is_multi_herd() {
+            let choices = self.herd_choices();
+            form.herd_idx = id
+                .split_once('-')
+                .and_then(|(cur, _)| choices.iter().position(|c| c == cur))
+                .unwrap_or(0);
+            form.herds = choices;
+        }
         if let Some(t) = target {
             let last_block = form.blocks.len().saturating_sub(1);
             form.row = match t {
@@ -419,8 +430,11 @@ impl App {
                 EditTarget::Type => 1,
                 EditTarget::Priority => 2,
                 EditTarget::Labels => 3,
+                EditTarget::Herd => HEADER_ROWS,
                 EditTarget::Status => 0, // handled by open_edit_at_cursor
-                EditTarget::Content(i) => HEADER_ROWS + i.min(last_block),
+                // Content rows sit below the header rows, which include the herd
+                // row when present — so key off the form's own header_rows().
+                EditTarget::Content(i) => form.header_rows() + i.min(last_block),
             };
         }
         self.overlay = Overlay::Create(form);
@@ -437,6 +451,7 @@ impl App {
                 ("Type:", EditTarget::Type),
                 ("Priority:", EditTarget::Priority),
                 ("Labels:", EditTarget::Labels),
+                ("Herd:", EditTarget::Herd),
                 ("Status:", EditTarget::Status),
             ] {
                 if t.starts_with(label) {
