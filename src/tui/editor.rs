@@ -56,6 +56,8 @@ pub(crate) enum EditTarget {
     Type,
     Priority,
     Labels,
+    /// The external `source:` URL row (yaks-b0b4).
+    Source,
     /// The herd (id prefix) chip row — present in the edit form on a multi-herd
     /// farm; committing a change renames the yak's prefix (yaks-71d1).
     Herd,
@@ -294,9 +296,11 @@ pub(crate) fn render_query_line(
     let mut st = state.borrow_mut();
     let mode = st.mode;
     frame.render_widget(
+        // Horizontal scroll, not wrap (yaks-4da6): see `render_text_row`.
         EditorView::new(&mut st)
             .theme(editor_theme(mode))
-            .single_line(true),
+            .single_line(true)
+            .wrap(false),
         fld,
     );
 }

@@ -1,13 +1,13 @@
 ---
-source: src/tui.rs
-expression: "draw(&app, 72, 14)"
+source: src/tui/tests.rs
+expression: frame
 ---
  🦬  Hairy (1)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (1)   ⭐  Starr
 
  e0   p3 task     [rust,│ New yak
-                        │   title       new idea
+                        │ ▸ title        past the edge of the form END
                         │   type         task bug feature idea
-                        │ ▸ priority     p1 p2 p3 p4 p5
+                        │   priority     p1 p2 p3 p4 p5
                         │   labels
                         │   source
                         │   description ───────────────────────────────

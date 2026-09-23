@@ -29,13 +29,15 @@ pub(crate) struct ContentBlock {
 
 /// The create/edit task form: a right-pane form modeled on `Drawer`. Two chip
 /// rows (type/priority) are **single-select** — the cursor *is* the value —
-/// plus single-line title/labels rows and a stack of multi-line **content**
+/// plus single-line title/labels/source rows and a stack of multi-line **content**
 /// blocks (description + comments). `Ctrl-N/P`/Tab walk every row; the focused
 /// block expands to a live editor (accordion). `Ctrl-S` commits (create or
 /// update), `Esc`/`Ctrl-C` cancels. Shared by `c`/`C` (create) and `E` (edit).
 pub(crate) struct CreateForm {
     pub(crate) title: RefCell<EditorState>,
     pub(crate) labels: RefCell<EditorState>,
+    /// The `source:` external-issue URL (yaks-b0b4); empty = no source.
+    pub(crate) source: RefCell<EditorState>,
     /// `blocks[0]` is always the description; `blocks[1..]` are comments.
     pub(crate) blocks: Vec<ContentBlock>,
     /// Index into `TYPE_CHOICES` (single-select cursor==value).
@@ -68,6 +70,7 @@ impl CreateForm {
         CreateForm {
             title: text_field("", vim),
             labels: text_field("", vim),
+            source: text_field("", vim),
             blocks: vec![ContentBlock {
                 kind: content::BlockKind::Description,
                 editor: multiline_field("", vim),
@@ -96,6 +99,7 @@ impl CreateForm {
         CreateForm {
             title: text_field(&task.title, vim),
             labels: text_field(&task.labels.join(", "), vim),
+            source: text_field(task.source.as_deref().unwrap_or(""), vim),
             blocks,
             kind_idx: kind_index(&task.kind),
             pri_idx: pri_index(task.priority),
@@ -144,17 +148,18 @@ impl CreateForm {
         self.content_index().is_some()
     }
 
-    /// Single-line text rows (title, labels); content blocks are multi-line and
-    /// handled separately.
+    /// Single-line text rows (title, labels, source); content blocks are
+    /// multi-line and handled separately.
     pub(crate) fn is_line_text_row(&self) -> bool {
-        matches!(self.row, 0 | 3)
+        matches!(self.row, 0 | 3 | 4)
     }
 
-    /// The editor backing the current single-line text row (title/labels).
+    /// The editor backing the current single-line text row (title/labels/source).
     pub(crate) fn line_editor(&self) -> Option<&RefCell<EditorState>> {
         match self.row {
             0 => Some(&self.title),
             3 => Some(&self.labels),
+            4 => Some(&self.source),
             _ => None,
         }
     }
@@ -180,6 +185,11 @@ impl CreateForm {
 
     pub(crate) fn title_text(&self) -> String {
         self.title.borrow().lines.to_string().trim().to_string()
+    }
+
+    /// The trimmed source URL; empty means "no source".
+    pub(crate) fn source_text(&self) -> String {
+        self.source.borrow().lines.to_string().trim().to_string()
     }
 
     pub(crate) fn labels_vec(&self) -> Vec<String> {
@@ -224,6 +234,7 @@ pub(crate) fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
         Constraint::Length(1), // type chips
         Constraint::Length(1), // priority chips
         Constraint::Length(1), // labels
+        Constraint::Length(1), // source
     ];
     if has_herd {
         constraints.push(Constraint::Length(1)); // herd chips
@@ -235,10 +246,11 @@ pub(crate) fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
     let type_r = rects[2];
     let pri_r = rects[3];
     let labels_r = rects[4];
+    let source_r = rects[5];
     let (herd_r, content_r) = if has_herd {
-        (Some(rects[5]), rects[6])
+        (Some(rects[6]), rects[7])
     } else {
-        (None, rects[5])
+        (None, rects[6])
     };
     let header = match (&f.edit_id, &f.parent) {
         (Some(id), _) => format!("Edit {id}"),
@@ -297,6 +309,15 @@ pub(crate) fn render_create(f: &CreateForm, frame: &mut Frame, area: Rect) {
         "",
         frame,
         labels_r,
+    );
+    render_text_row(
+        f.row == 4,
+        CREATE_LABEL_W,
+        "source",
+        &f.source,
+        "",
+        frame,
+        source_r,
     );
     if let Some(hr) = herd_r {
         let herds: Vec<(String, bool)> = f

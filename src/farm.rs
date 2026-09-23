@@ -66,6 +66,7 @@ pub struct TaskEdit {
     pub description: Option<String>,
     pub add_labels: Vec<String>,
     pub remove_labels: Vec<String>,
+    /// Set the external `source:` URL; an empty string clears it.
     pub source: Option<String>,
     /// A rerunnable verification command to set on the yak (see `Task::verify`).
     pub verify: Option<String>,
@@ -906,8 +907,10 @@ impl Farm {
             changed = true;
         }
         if let Some(s) = edit.source {
-            if !s.is_empty() {
-                task.source = Some(s);
+            // An empty string clears the source (like `verify`).
+            let new = if s.is_empty() { None } else { Some(s) };
+            if new != task.source {
+                task.source = new;
                 changed = true;
             }
         }

@@ -141,6 +141,7 @@ impl App {
                     match f.row {
                         0 => f.handler.on_key_event(k, &mut f.title.borrow_mut()),
                         3 => f.handler.on_key_event(k, &mut f.labels.borrow_mut()),
+                        4 => f.handler.on_key_event(k, &mut f.source.borrow_mut()),
                         _ => {}
                     }
                 }
@@ -176,7 +177,7 @@ impl App {
                 parent: f.parent.clone(),
                 labels: f.labels_vec(),
                 depends_on: vec![],
-                source: None,
+                source: Some(f.source_text()).filter(|s| !s.is_empty()),
                 description: f.body_opt(),
                 verify: None,
             },
@@ -233,6 +234,11 @@ impl App {
         }
         if body != cur.body {
             edit.description = Some(body);
+        }
+        // Source: empty clears it (farm `update` treats "" as clear).
+        let source = f.source_text();
+        if source != cur.source.clone().unwrap_or_default() {
+            edit.source = Some(source);
         }
         edit.add_labels = new_labels
             .iter()

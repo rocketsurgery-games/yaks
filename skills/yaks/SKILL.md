@@ -147,7 +147,7 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks show` | Show full details of a task |
 | `yaks refs` | List what a task points at (parent, deps, id mentions), flagging danglers |
 | `yaks commits` | Show the git commits linked to a yak — those naming its id and those that touched its file across status moves |
-| `yaks update` | Update fields, labels (`--add-label`/`--remove-label`), or append a `--note`. Accepts multiple ids (same edit to each); `--as <actor>` attributes a note; `--verify '<cmd>'` sets/clears the yak's verification command |
+| `yaks update` | Update fields, labels (`--add-label`/`--remove-label`), or append a `--note`. Accepts multiple ids (same edit to each); `--as <actor>` attributes a note; `--verify '<cmd>'` sets/clears the yak's verification command; `--source <url>` sets/clears the external source |
 | `yaks verify` | Run a yak's verification command (its own `verify:` field, else the config `verify:` default resolved by label) and record the PASS/FAIL as an attributed note (exits non-zero on failure). Explicit — never auto-run. Gives a yak a rerunnable proof-of-correctness |
 | `yaks attach` | Attach a local file (screenshot, TUI frame) as evidence: stores it under `.yaks/artifacts/<id>/` and links it in the body. `--note`/`--as` record an attributed note. The look-at-it form of evidence, for a human or coordinator to validate |
 | `yaks ask` | Block a yak on a human decision (sets `needs`, drops it from `next`); records the question as an attributed `--note` |
@@ -224,7 +224,7 @@ herds:
 
 ### External source linking
 
-Use `--source <url>` on create or update to link a yak to an external issue (Jira, GitHub Issues, Linear, etc.). The URL is stored in the `source` frontmatter field. The relationship is a **one-way projection**: the yak points at the external issue, never the reverse, and the external tracker stays unaware of yaks.
+Use `--source <url>` on create or update to link a yak to an external issue (Jira, GitHub Issues, Linear, etc.); `--source ''` clears it, and the TUI create/edit form has a `source` row for the same. The URL is stored in the `source` frontmatter field. The relationship is a **one-way projection**: the yak points at the external issue, never the reverse, and the external tracker stays unaware of yaks.
 
 Many yaks can roll up to one external issue. `yaks rollup` groups yaks by their source (a yak with no `source:` inherits its nearest ancestor's, so one stamp on an umbrella yak covers the subtree); `yaks rollup --keys` lists the external keys to paste into a PR body. For seeding a yak from an external issue or drafting a status update back to one, see the **yaks-tracker** skill.
 

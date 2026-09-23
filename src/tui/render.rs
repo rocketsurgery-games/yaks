@@ -344,9 +344,13 @@ pub(crate) fn render_text_row(
         let mut st = cell.borrow_mut();
         let mode = st.mode;
         frame.render_widget(
+            // No wrap: an overflowing single-line field scrolls horizontally to
+            // keep the cursor visible, instead of wrapping onto a hidden second
+            // row under the next field (yaks-4da6).
             EditorView::new(&mut st)
                 .theme(editor_theme(mode))
-                .single_line(true),
+                .single_line(true)
+                .wrap(false),
             fld,
         );
     } else {

@@ -246,6 +246,7 @@ enum Command {
         add_label: Vec<String>,
         #[arg(long = "remove-label", num_args = 1..)]
         remove_label: Vec<String>,
+        /// Set (or clear, with an empty string) this yak's `source:` URL.
         #[arg(long)]
         source: Option<String>,
         /// Set (or clear, with an empty string) this yak's `verify:` command.

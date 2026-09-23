@@ -430,6 +430,7 @@ impl App {
                 EditTarget::Type => 1,
                 EditTarget::Priority => 2,
                 EditTarget::Labels => 3,
+                EditTarget::Source => 4,
                 EditTarget::Herd => HEADER_ROWS,
                 EditTarget::Status => 0, // handled by open_edit_at_cursor
                 // Content rows sit below the header rows, which include the herd
@@ -451,6 +452,7 @@ impl App {
                 ("Type:", EditTarget::Type),
                 ("Priority:", EditTarget::Priority),
                 ("Labels:", EditTarget::Labels),
+                ("Source:", EditTarget::Source),
                 ("Herd:", EditTarget::Herd),
                 ("Status:", EditTarget::Status),
             ] {

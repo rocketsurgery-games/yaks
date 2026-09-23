@@ -9,10 +9,10 @@ expression: "draw(&app, 72, 14)"
                         │   type         task bug feature idea
                         │   priority     p1 p2 p3 p4 p5
                         │   labels      rust, tui
+                        │   source
                         │ ▸ description ───────────────────────────────
                         │ First line.
                         │ Second line.
-                        │
                         │
                         │
 Tab/↑↓ rows · ←→ chips · Ctrl-S save · EscEsc/Ctrl-C cancel

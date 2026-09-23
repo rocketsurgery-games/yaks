@@ -518,6 +518,33 @@ fn e_on_title_line_opens_form_on_the_title_row() {
 }
 
 #[test]
+fn e_on_source_line_opens_form_on_the_source_row() {
+    // yaks-b0b4: `E` on the detail pane's `Source:` line focuses the form's
+    // source row, seeded with the current URL.
+    let mut t = body_with_comments();
+    t.source = Some("https://example.com/PROJ-9".into());
+    let mut app = App::new(vec![t]);
+    handle_key(&mut app, key('l'));
+    let lines = app.detail_dlines();
+    let ln = lines
+        .iter()
+        .position(|l| l.text.starts_with("Source:"))
+        .unwrap();
+    app.detail_line = ln;
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+    match &app.overlay {
+        Overlay::Create(f) => {
+            assert_eq!(f.row, 4);
+            assert_eq!(f.source_text(), "https://example.com/PROJ-9");
+        }
+        _ => panic!("E should open the edit form"),
+    }
+}
+
+#[test]
 fn ctrl_n_p_navigate_content_blocks_in_detail() {
     let mut app = App::new(vec![body_with_comments()]);
     handle_key(&mut app, key('l')); // detail; line cursor at top
@@ -588,6 +615,46 @@ fn create_form() {
 }
 
 #[test]
+fn create_form_long_title_scrolls_horizontally() {
+    // yaks-4da6: an overflowing single-line field scrolls horizontally (cursor
+    // stays visible at the end) instead of wrapping onto a hidden second row
+    // under the next field.
+    let mut app = editable();
+    handle_key(&mut app, key('c'));
+    typ(
+        &mut app,
+        "a very long title that keeps going well past the edge of the form END",
+    );
+    let frame = draw(&app, 72, 14);
+    let title = frame.lines().find(|l| l.contains("title")).unwrap();
+    assert!(title.contains("END"), "tail stays visible:\n{frame}");
+    assert!(
+        !title.contains("a very long"),
+        "head scrolled off:\n{frame}"
+    );
+    let ty = frame.lines().find(|l| l.contains("type")).unwrap();
+    assert!(ty.contains("task"), "next row not overdrawn:\n{frame}");
+    insta::assert_snapshot!(frame);
+}
+
+#[test]
+fn create_form_source_field() {
+    // yaks-b0b4: a single-line Source row sits under labels.
+    let mut app = editable();
+    handle_key(&mut app, key('c'));
+    typ(&mut app, "linked");
+    for _ in 0..4 {
+        tab_key(&mut app); // -> type, priority, labels, source
+    }
+    typ(&mut app, "https://example.com/PROJ-1");
+    match &app.overlay {
+        Overlay::Create(f) => assert_eq!(f.source_text(), "https://example.com/PROJ-1"),
+        _ => panic!("expected create form"),
+    }
+    insta::assert_snapshot!(draw(&app, 72, 14));
+}
+
+#[test]
 fn help_overlay() {
     let mut app = sample();
     handle_key(&mut app, key('?'));
@@ -628,7 +695,7 @@ fn edit_form_panel() {
         Overlay::Create(f) => assert!(f.is_editing()),
         _ => panic!("expected edit form"),
     }
-    for _ in 0..4 {
+    for _ in 0..HEADER_ROWS {
         handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     }
     insta::assert_snapshot!(draw(&app, 72, 14));
@@ -1875,6 +1942,7 @@ mod live {
         tab(&mut app); // -> type
         tab(&mut app); // -> priority
         tab(&mut app); // -> labels
+        tab(&mut app); // -> source
         tab(&mut app); // -> description (content block)
         match &app.overlay {
             Overlay::Create(f) => assert!(f.is_content_row(), "on the description block"),
@@ -1884,8 +1952,8 @@ mod live {
         back_tab(&mut app);
         match &app.overlay {
             Overlay::Create(f) => {
-                assert_eq!(f.row, 3, "focus moved back a field");
-                assert!(f.is_line_text_row(), "back on the labels row");
+                assert_eq!(f.row, 4, "focus moved back a field");
+                assert!(f.is_line_text_row(), "back on the source row");
             }
             _ => panic!("create form still open"),
         }
@@ -1903,6 +1971,7 @@ mod live {
         tab(&mut app); // -> type
         tab(&mut app); // -> priority
         tab(&mut app); // -> labels
+        tab(&mut app); // -> source
         tab(&mut app); // -> description (content block)
         handle_key(&mut app, KeyEvent::new(KeyCode::Insert, KeyModifiers::NONE));
         match &app.overlay {
@@ -1963,6 +2032,7 @@ mod live {
         tab(&mut app); // title -> type
         tab(&mut app); // -> priority
         tab(&mut app); // -> labels
+        tab(&mut app); // -> source
         tab(&mut app); // -> description content zone
         press(&mut app, "hello");
         ctrl_s(&mut app);
@@ -2125,11 +2195,11 @@ mod live {
         ctrl_s(&mut app);
         let before = app.task("t0").unwrap().body.clone();
         assert!(before.contains('\u{25b8}'));
-        // Edit: walk title→type→priority→labels→description→comment. Tab is
-        // now a normal key inside content blocks, so field-nav uses Ctrl-N.
-        // The seeded comment opens in Normal (921a), so `i` to insert.
+        // Edit: walk title→type→priority→labels→source→description→comment.
+        // Tab is now a normal key inside content blocks, so field-nav uses
+        // Ctrl-N. The seeded comment opens in Normal (921a), so `i` to insert.
         press(&mut app, "E");
-        for _ in 0..5 {
+        for _ in 0..HEADER_ROWS + 1 {
             ctrl_n(&mut app);
         }
         press(&mut app, "iX");
@@ -2282,7 +2352,7 @@ mod live {
         let (_dir, farm) = temp_farm(&[task("t0", "solo", Status::Hairy, 3, None)]);
         let mut app = App::with_farm(farm).unwrap();
         press(&mut app, "E");
-        for _ in 0..4 {
+        for _ in 0..HEADER_ROWS {
             tab(&mut app); // -> description content row (empty -> Insert)
         }
         press(&mut app, "hello");
@@ -2369,6 +2439,69 @@ mod live {
         enter(&mut app);
         assert!(app.task("c0").unwrap().parent.is_none());
         assert_eq!(app.notification.as_deref(), Some("c0 moved to top level"));
+    }
+
+    #[test]
+    fn create_form_source_is_saved() {
+        // yaks-b0b4: the Source row lands in the new yak's `source:`.
+        let (_dir, farm) = temp_farm(&[task("t0", "solo", Status::Hairy, 3, None)]);
+        let mut app = App::with_farm(farm).unwrap();
+        press(&mut app, "c");
+        press(&mut app, "linked");
+        for _ in 0..4 {
+            tab(&mut app);
+        }
+        press(&mut app, "https://example.com/X-1");
+        ctrl_s(&mut app);
+        let id = app.selected_id().unwrap();
+        let t = app.task(&id).unwrap();
+        assert_eq!(t.title, "linked");
+        assert_eq!(t.source.as_deref(), Some("https://example.com/X-1"));
+    }
+
+    #[test]
+    fn edit_form_source_set_and_clear() {
+        // yaks-b0b4: E seeds the Source row from `source:`; editing replaces it
+        // and emptying it clears the field.
+        let mut t0 = task("t0", "solo", Status::Hairy, 3, None);
+        t0.source = Some("https://old.example/1".into());
+        let (_dir, farm) = temp_farm(&[t0]);
+        let mut app = App::with_farm(farm).unwrap();
+        press(&mut app, "E");
+        for _ in 0..4 {
+            tab(&mut app);
+        }
+        match &app.overlay {
+            Overlay::Create(f) => assert_eq!(f.source_text(), "https://old.example/1"),
+            _ => panic!("expected edit form"),
+        }
+        handle_key(&mut app, KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        for _ in 0.."https://old.example/1".len() {
+            handle_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            );
+        }
+        press(&mut app, "https://new.example/2");
+        ctrl_s(&mut app);
+        assert_eq!(
+            app.task("t0").unwrap().source.as_deref(),
+            Some("https://new.example/2")
+        );
+        // Clear it.
+        press(&mut app, "E");
+        for _ in 0..4 {
+            tab(&mut app);
+        }
+        handle_key(&mut app, KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        for _ in 0.."https://new.example/2".len() {
+            handle_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            );
+        }
+        ctrl_s(&mut app);
+        assert!(app.task("t0").unwrap().source.is_none());
     }
 }
 
