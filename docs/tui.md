@@ -73,8 +73,11 @@ the pre-find scroll and cursor).
 | `X` | Slaughter (delete, with confirm) |
 | `:w` / `:q` / `:wq` | Save / cancel / save+close (editor Normal mode) |
 
-**Search & filter** — `/` inline search; `f` filter drawer; `Esc` revert filter
-to the active view.
+**Search & filter** — `/` inline search; `#` go to any yak (list or detail pane:
+a picker over every yak — type an id fragment like `a1b2`, the full id, or
+title words, then `Enter` opens its detail, switching to its view and recording
+the jump so `o` comes back); `f` filter drawer; `Esc` revert filter to the
+active view.
 
 **General** — `y` copy yak id; `?` toggle help; `q` / `Ctrl-C` quit.
 

@@ -2400,3 +2400,47 @@ fn list_scroll_up_moves_viewport_minimally() {
     assert_eq!(app.list_offset.get(), top_of_viewport - 1);
     assert_eq!(app.cursor, app.list_offset.get());
 }
+
+#[test]
+fn hash_opens_goto_picker_and_enter_jumps_to_detail() {
+    // `#` opens the fuzzy picker over every yak; typing an id and Enter jumps
+    // to its detail — across views — and records o/i history (yaks-63f3).
+    let mut app = sample(); // Hairy view, cursor on a0; b0 is Shaving
+    handle_key(&mut app, key('#'));
+    assert!(matches!(&app.overlay, Overlay::Fuzzy(fp) if fp.label == "Go to yak"));
+    press(&mut app, "b0");
+    insta::assert_snapshot!("goto_picker_with_id_typed", draw(&app, 72, 14));
+    enter_key(&mut app);
+    assert!(matches!(app.overlay, Overlay::None));
+    assert_eq!(app.focus, Focus::Detail);
+    assert_eq!(app.selected_id().as_deref(), Some("b0"));
+    assert_eq!(app.notification.as_deref(), Some("→ b0"));
+    insta::assert_snapshot!("goto_jumped_to_detail", draw(&app, 72, 14));
+    // `o` comes back to where we jumped from.
+    handle_key(&mut app, key('o'));
+    assert_eq!(app.selected_id().as_deref(), Some("a0"));
+}
+
+#[test]
+fn hash_from_detail_pane_matches_title_too() {
+    let mut app = sample();
+    enter_key(&mut app); // detail on a0
+    handle_key(&mut app, key('#'));
+    press(&mut app, "child a1");
+    enter_key(&mut app);
+    assert_eq!(app.focus, Focus::Detail);
+    assert_eq!(app.selected_id().as_deref(), Some("a1"));
+}
+
+#[test]
+fn goto_lands_even_when_an_ad_hoc_search_hides_the_target() {
+    // The jump switches to the target's status view (resetting the live
+    // filter to that view's spec), so a search that hid it doesn't block it.
+    let mut app = sample();
+    app.filter.search = Some("no such yak".into());
+    handle_key(&mut app, key('#'));
+    press(&mut app, "a1");
+    enter_key(&mut app);
+    assert_eq!(app.focus, Focus::Detail);
+    assert_eq!(app.selected_id().as_deref(), Some("a1"));
+}

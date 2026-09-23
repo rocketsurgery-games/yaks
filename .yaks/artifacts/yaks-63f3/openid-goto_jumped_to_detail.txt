@@ -1,0 +1,14 @@
+ 🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starr
+→ b0
+ b0   p1 task     🪒  Ro │ Task: b0
+                        │
+                        │ Title:       Root B shaving
+                        │ Status:      shaving
+                        │ Type:        task
+                        │ Priority:    p1
+                        │ Created:     -
+                        │ Updated:     -
+                        │ Labels:      -
+                        │
+                        │
+h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S

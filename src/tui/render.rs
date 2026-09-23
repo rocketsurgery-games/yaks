@@ -188,6 +188,7 @@ pub(crate) fn help_content() -> Vec<Line<'static>> {
         blank(),
         section("Search & filter"),
         entry("/", "Inline search"),
+        entry("#", "Go to any yak by id / title"),
         entry("f", "Filter drawer"),
         entry("Esc", "Revert filter to the active view"),
         blank(),

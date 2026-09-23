@@ -220,24 +220,34 @@ impl App {
         self.detail_match = 0;
     }
 
+    /// Jump to `id`'s detail, recording the jump for o/i history
+    /// (browser-style: a new jump clears the forward stack). Shared by
+    /// link-follow and the `#` go-to-yak picker (yaks-63f3).
+    pub(crate) fn goto_task(&mut self, id: &str) {
+        let from = self.selected_id();
+        self.open_task_in_detail(id);
+        if self.selected_id().as_deref() != Some(id) {
+            // No view shows the target (e.g. no tab for its status), so the
+            // cursor couldn't land on it; say so rather than silently no-op.
+            self.notification = Some(format!("{id} isn't shown in any view"));
+            return;
+        }
+        if let Some(cur) = from {
+            if cur != id {
+                self.nav_back.push(cur);
+                self.nav_fwd.clear();
+            }
+        }
+        self.notification = Some(format!("→ {id}"));
+    }
+
     pub(crate) fn follow_link(&mut self) {
         let jumps = self.detail_jumps();
         let Some(j) = jumps.into_iter().find(|j| j.line == self.detail_line) else {
             return;
         };
         match j.target {
-            detail::Target::Task(id) => {
-                // Record the jump for o/i history (browser-style: a new follow
-                // clears the forward stack).
-                if let Some(cur) = self.selected_id() {
-                    if cur != id {
-                        self.nav_back.push(cur);
-                        self.nav_fwd.clear();
-                    }
-                }
-                self.open_task_in_detail(&id);
-                self.notification = Some(format!("→ {id}"));
-            }
+            detail::Target::Task(id) => self.goto_task(&id),
             detail::Target::Url(u) => self.open_external(&u),
             detail::Target::Artifact(p) => self.open_external(&p),
         }

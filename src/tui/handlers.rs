@@ -322,6 +322,18 @@ impl App {
         ));
     }
 
+    /// `#` — go to any yak by id or title: the fuzzy picker over every yak;
+    /// Enter jumps to its detail with o/i history (yaks-63f3).
+    pub(crate) fn open_goto_picker(&mut self) {
+        self.overlay = Overlay::Fuzzy(FuzzyPick::new(
+            self.editor_vim,
+            "Go to yak".into(),
+            HashSet::new(),
+            false,
+            FuzzyAction::Goto,
+        ));
+    }
+
     pub(crate) fn open_reparent_picker(&mut self) {
         let Some(id) = self.selected_id() else { return };
         let mut exclude = filter::descendant_ids(&self.all, &id, true);
@@ -1241,6 +1253,11 @@ impl App {
                     Err(e) => self.notification = Some(format!("error: {e}")),
                 }
             }
+            FuzzyAction::Goto => {
+                if let Some(id) = target {
+                    self.goto_task(&id);
+                }
+            }
             FuzzyAction::InsertRef => unreachable!("InsertRef is handled before this match"),
         }
     }
@@ -1497,6 +1514,7 @@ pub(crate) fn handle_key(app: &mut App, k: KeyEvent) {
             KeyCode::Char('R') => app.open_reparent_picker(),
             KeyCode::Char('H') => app.open_herd_picker(),
             KeyCode::Char('/') => app.open_search(),
+            KeyCode::Char('#') => app.open_goto_picker(),
             KeyCode::Char('f') => app.open_drawer(),
             KeyCode::Char('*') => app.toggle_star(),
             KeyCode::Char('y') => app.copy_selected_id(),
@@ -1558,6 +1576,7 @@ pub(crate) fn handle_key(app: &mut App, k: KeyEvent) {
                 KeyCode::Char('o') => app.nav_back(),
                 KeyCode::Char('i') => app.nav_forward(),
                 KeyCode::Char('/') => app.open_detail_find(),
+                KeyCode::Char('#') => app.open_goto_picker(),
                 KeyCode::Char('n') => app.detail_find_jump(1),
                 KeyCode::Char('N') => app.detail_find_jump(-1),
                 KeyCode::Char('?') => app.open_help(),

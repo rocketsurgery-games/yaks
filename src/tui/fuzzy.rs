@@ -48,6 +48,8 @@ pub(crate) enum FuzzyAction {
     /// Insert the picked task's id at the cursor of the editor stashed in
     /// `FuzzyPick::return_to` (ref autocomplete while editing).
     InsertRef,
+    /// Jump to the picked task's detail (the `#` go-to-yak picker, yaks-63f3).
+    Goto,
 }
 
 /// Inline incremental search box. Editing it updates `App.filter.search` on
