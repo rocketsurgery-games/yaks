@@ -8,6 +8,53 @@ Two skills ship in the binary and install via `yaks skills install` (into
 `~/.agents/skills` by default); two more are experimental and repo-internal
 (under `skills/dev/`, not shipped).
 
+## Installing, updating, and staying honest
+
+The bundled `SKILL.md` files are baked into the binary, so the shipped `yaks`
+always carries the skill matching its version. Installed copies get a
+**provenance stamp** in their frontmatter, under the spec's `metadata:` field:
+
+```yaml
+metadata:
+  yaks-version: "0.0.9"
+  yaks-digest: "a64a55994a8ee572"
+```
+
+That stamp is what makes an installed skill *identifiable* rather than an
+anonymous copy, so yaks can tell "the tool moved on" from "a human edited
+this" instead of just clobbering. `yaks skills status` reports the verdict:
+
+| State | Meaning | What yaks does |
+|---|---|---|
+| `current` | Identical to this binary's copy | nothing |
+| `stale` | Untouched since install, and this yaks is newer | upgrades it |
+| `adoptable` | Unstamped but identical to ours (a pre-stamp install) | adopts it (stamps it) |
+| `held` | Untouched, but installed by a yaks **not older** than this one | nothing — refuses to downgrade |
+| `modified` | Edited after install | nothing without `--force` |
+| `unmanaged` | Unstamped and not ours — hand-written or another tool's | nothing without `--force` |
+| `source` | Resolves onto a yaks checkout's own `skills/` (often a symlink) | nothing, **even with `--force`** |
+
+**Ordinary `yaks` commands top this up automatically.** The common failure is an
+agent running against a stale skill and nobody remembering to re-run the
+installer, so a normal invocation installs what's absent and upgrades what's
+cleanly `stale`. It deliberately never touches `modified`, `unmanaged`, `held`,
+or `source`, only ever writes `~/.agents/skills` (never a project-local
+`.agents/skills`, which would be writing into your repo), and writes atomically
+so parallel agents can't tear a file. Set `YAKS_SKILLS_AUTOSYNC=0` to disable it
+for CI or sandboxes. `yaks doctor` reports anything left needing a decision.
+
+Because auto-upgrade keys on the **version**, a skills-only edit doesn't reach
+users until the next release — two binaries at the same version never fight over
+an install (that's the `held` rule). When iterating locally, use
+`yaks skills install --force`.
+
+> **If you develop yaks:** symlinking `~/.agents/skills/yaks` at this repo's
+> `skills/yaks` is a handy way to run the live skill — but it means the
+> "installed" skill *is* the source. yaks detects that (`source`) and refuses to
+> write through the link, with or without `--force`. Without that guard, an
+> older `yaks` on your `PATH` would silently revert your edits to its baked-in
+> copy, which looks exactly like an authored change in `git status`.
+
 | Skill | Ships? | Use it when… |
 |---|---|---|
 | **`yaks`** | ✓ | Managing tasks in a `.yaks/` farm — the commands, the workflow, solo vs team/private modes. |

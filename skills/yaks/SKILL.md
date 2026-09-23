@@ -172,6 +172,7 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks rollup` | Group yaks by the external issue they roll up to (`--keys` for just the keys) |
 | `yaks doctor` | Read-only farm-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on issues, so it's CI-usable. `--json` emits issues as JSON |
 | `yaks doctor --strict` | Also flags shorn yaks with no recorded note, and shorn yaks whose `verify:` command did not last PASS — a shear without evidence (the evidence-before-shear rule) |
+| `yaks skills status` | Report whether the installed copies of these skills are current, stale, or locally edited (from a provenance stamp in their frontmatter). Ordinary `yaks` commands already upgrade a cleanly-stale skill, so this is for when one is flagged as edited |
 | `yaks scan-ids` | Scan a file and/or stdin for tokens that are real yak-ids in this farm — a private-mode leak check; exits non-zero if any are found |
 | `yaks tui` | Open the interactive terminal UI |
 

@@ -106,6 +106,18 @@ a follow-up:
   not in `help_content` is invisible to users (this is how yaks-71d1's `H`
   shipped half-done).
 
+**Careful with the skills source.** `skills/{yaks,yaks-tracker}/SKILL.md` are
+embedded via `include_str!`, and `~/.agents/skills/<name>` is commonly a symlink
+back at them — so a `yaks skills install` (even with no `--dir`) used to write
+*through the link* and revert your edits to the binary's baked-in copy, looking
+exactly like an authored change in `git status`. That's yaks-d8e9; it bit twice.
+The installer now refuses any target that resolves into a yaks checkout
+(`source` state, not overridable by `--force`), the test suite sets
+`YAKS_SKILLS_AUTOSYNC=0` so `cargo test` can't touch your real skills, and a test
+asserts the embedded source is never itself stamped. If `git status` ever shows
+an unexplained `metadata:` stamp in `skills/`, that's the symptom —
+`git checkout -- skills/`.
+
 The bundled skills are embedded in the binary (`src/skills.rs`), so
 `cargo test -p yaks skills` guards them; the other surfaces have no gate, so
 treat docs/help↔reality parity as part of the change's evidence — grep for the

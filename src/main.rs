@@ -460,9 +460,17 @@ enum SkillsAction {
         /// Target skills directory (e.g. ~/.claude/skills). Defaults to ~/.agents/skills.
         #[arg(long)]
         dir: Option<String>,
-        /// Overwrite existing SKILL.md files.
+        /// Overwrite skills that were edited after they were installed. (Never
+        /// permits writing into yaks' own skills/ source.)
         #[arg(long)]
         force: bool,
+    },
+    /// Report whether each installed skill is current, stale, or locally
+    /// edited, by comparing its provenance stamp against this binary.
+    Status {
+        /// Skills directory to inspect. Defaults to ~/.agents/skills.
+        #[arg(long)]
+        dir: Option<String>,
     },
 }
 
@@ -483,6 +491,19 @@ fn main() -> Result<()> {
     }
     if let Command::Skills { action } = &cli.command {
         return run_skills(action);
+    }
+
+    // Keep the user-level skills current. The overwhelmingly common failure is
+    // an agent running against a stale skill, and nobody remembers to re-run
+    // the installer — so ordinary commands top it up. Strictly narrow: only an
+    // absent or cleanly-outdated skill is written (never a local edit, never a
+    // downgrade), only ~/.agents/skills, and never when YAKS_SKILLS_AUTOSYNC is
+    // off. `skills` and `init` are handled above, so they never trigger it.
+    for name in skills::auto_sync() {
+        eprintln!(
+            "note: updated the {name} skill for yaks {}",
+            skills::version()
+        );
     }
 
     let farm = match Farm::open(&env::current_dir()?) {
@@ -1322,18 +1343,44 @@ fn render_log(entries: &[LogEntry], json: bool) -> Result<()> {
 fn render_doctor(issues: &[Issue]) {
     if issues.is_empty() {
         println!("All clear: no farm-integrity issues found.");
+    } else {
+        let noun = if issues.len() == 1 { "issue" } else { "issues" };
+        println!("Found {} farm-integrity {noun}:", issues.len());
+        let mut last: Option<IssueKind> = None;
+        for i in issues {
+            if last != Some(i.kind) {
+                println!("\n{}:", i.kind.heading());
+                last = Some(i.kind);
+            }
+            println!("  {}", i.message);
+        }
+    }
+    render_skill_advisory();
+}
+
+/// Report installed skills that startup auto-sync deliberately won't touch.
+///
+/// This is an *environment* advisory, not farm integrity, so it sits outside
+/// `Farm::doctor` and never affects its exit code. Auto-sync silently handles
+/// absent and cleanly-stale skills; what it can't resolve is a skill someone
+/// edited by hand — which would otherwise sit stale forever with no signal.
+fn render_skill_advisory() {
+    let base = skills::default_dir();
+    let stuck: Vec<_> = skills::status(&base)
+        .into_iter()
+        .filter(|s| s.state.has_local_edits())
+        .collect();
+    if stuck.is_empty() {
         return;
     }
-    let noun = if issues.len() == 1 { "issue" } else { "issues" };
-    println!("Found {} farm-integrity {noun}:", issues.len());
-    let mut last: Option<IssueKind> = None;
-    for i in issues {
-        if last != Some(i.kind) {
-            println!("\n{}:", i.kind.heading());
-            last = Some(i.kind);
-        }
-        println!("  {}", i.message);
+    println!("\nSkills needing attention (not farm integrity):");
+    for s in &stuck {
+        println!("  {} [{}] {}", s.name, s.state.word(), s.path.display());
     }
+    println!(
+        "  These were edited after install, so yaks leaves them alone. \
+         Run `yaks skills status` to compare, or `yaks skills install --force` to replace."
+    );
 }
 
 fn render_stats(s: &Stats) {
@@ -1424,19 +1471,94 @@ fn run_skills(action: &SkillsAction) -> Result<()> {
             };
             let installed = skills::install(&base, *force)?;
             for i in &installed {
-                if i.skipped {
+                if i.wrote {
+                    let verb = match &i.before {
+                        skills::SkillState::Upgradable { from } => {
+                            format!("upgraded (from {from})")
+                        }
+                        skills::SkillState::Absent => "installed".to_string(),
+                        _ => "rewrote".to_string(),
+                    };
+                    println!("{verb} {} -> {}", i.name, i.path.display());
+                } else if i.blocked() {
+                    let why = match &i.before {
+                        skills::SkillState::SourceLinked => "it resolves into yaks' own \
+                             skills/ source (a symlink?) \u{2014} the installed skill IS the \
+                             source, so there is nothing to install"
+                            .to_string(),
+                        skills::SkillState::Held { installed } => format!(
+                            "it was installed by yaks {installed}, which is not older \
+                             than this one \u{2014} refusing to downgrade"
+                        ),
+                        skills::SkillState::Unmanaged => {
+                            "it has no yaks stamp (hand-written, or another tool's)".to_string()
+                        }
+                        _ => "it was edited since it was installed".to_string(),
+                    };
+                    // Only offer --force where it would actually help; it can
+                    // never override a source-linked target.
+                    let hint = if matches!(i.before, skills::SkillState::SourceLinked) {
+                        ""
+                    } else {
+                        " (use --force to overwrite)"
+                    };
                     println!(
-                        "skip {}: {} exists (use --force to overwrite)",
+                        "skip {} [{}]: {}\n       {why}{hint}",
                         i.name,
-                        i.path.display()
+                        i.before.word(),
+                        i.path.display(),
                     );
                 } else {
-                    println!("installed {} -> {}", i.name, i.path.display());
+                    println!("ok {} is already current", i.name);
                 }
             }
             println!(
                 "\nThe skill activates when a .yaks/ directory is present. For another agent, re-run with --dir pointing at its skills directory (e.g. --dir ~/.claude/skills)."
             );
+            Ok(())
+        }
+        SkillsAction::Status { dir } => {
+            let base = match dir {
+                Some(d) => skills::expand_tilde(d),
+                None => skills::default_dir(),
+            };
+            println!("{}", base.display());
+            let mut stale = 0;
+            let mut blocked = 0;
+            for s in skills::status(&base) {
+                let detail = match &s.state {
+                    skills::SkillState::Upgradable { from } => {
+                        stale += 1;
+                        format!("  (installed {from}, this yaks is {})", skills::version())
+                    }
+                    skills::SkillState::Held { installed } => {
+                        format!("  (installed {installed} is not older than this yaks)")
+                    }
+                    skills::SkillState::Modified { installed } => {
+                        blocked += 1;
+                        format!("  (edited since install of {installed})")
+                    }
+                    skills::SkillState::Unmanaged => {
+                        blocked += 1;
+                        "  (no yaks stamp \u{2014} hand-written or another tool's)".to_string()
+                    }
+                    skills::SkillState::SourceLinked => {
+                        "  (resolves onto yaks' own skills/ source \u{2014} nothing to install)"
+                            .to_string()
+                    }
+                    _ => String::new(),
+                };
+                println!("  {:<9} {}{}", s.state.word(), s.name, detail);
+            }
+            if stale > 0 {
+                println!("\n{stale} stale; run `yaks skills install` to upgrade.");
+            }
+            if blocked > 0 {
+                println!(
+                    "{blocked} left alone because overwriting would lose local edits; \
+                     re-run with --force to replace them."
+                );
+            }
             Ok(())
         }
     }

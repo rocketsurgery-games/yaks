@@ -11,6 +11,11 @@ fn run(args: &[&str]) -> String {
     let out = Command::cargo_bin("yaks")
         .unwrap()
         .current_dir(farm)
+        // Ordinary commands top up the user's skills on startup. A test run
+        // must never touch the developer's real ~/.agents/skills (it did:
+        // `cargo test` was silently re-stamping them, and through a symlink,
+        // the repo's own skills/ source).
+        .env("YAKS_SKILLS_AUTOSYNC", "0")
         .args(args)
         .output()
         .unwrap();
@@ -38,6 +43,7 @@ fn run_headless(args: &[&str], stdin: &str) -> String {
         .current_dir(farm)
         .env("XDG_CONFIG_HOME", &xdg)
         .env("XDG_CACHE_HOME", &xdg)
+        .env("YAKS_SKILLS_AUTOSYNC", "0")
         .args(args)
         .write_stdin(stdin)
         .output()

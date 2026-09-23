@@ -94,7 +94,8 @@ A lever is the pass/fail **gate** for its label — what `doctor --strict` enfor
 | Command | What it does |
 |---|---|
 | `init` | Create a `.yaks/` farm in the current directory. |
-| `skills install` | Install the bundled agent skills (`yaks`, `yaks-tracker`) into a skills dir (default `~/.agents/skills`). |
+| `skills install` | Install the bundled agent skills (`yaks`, `yaks-tracker`) into a skills dir (default `~/.agents/skills`). Upgrades a cleanly-outdated copy; leaves a locally-edited one alone unless `--force`. Refuses to write onto yaks' own `skills/` source (even via a symlink, even with `--force`). |
+| `skills status` | Per-skill verdict — `current` / `stale` / `adoptable` / `held` / `modified` / `unmanaged` / `source` — from the provenance stamp. `--dir` to inspect another skills dir. See [skills.md](skills.md). |
 | `doctor` | Read-only integrity check: duplicate-status ids, dangling parent/deps. Exits non-zero on any issue (CI-usable). `--strict` also flags shorn yaks with no recorded note, and shorn yaks whose `verify:` command did not last PASS (evidence-before-shear). |
 | `tui` | Open the interactive terminal UI (see [tui.md](tui.md)). |
 
