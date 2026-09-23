@@ -4,7 +4,7 @@ title: '`yaks merge` fails to update config for new herd'
 type: bug
 priority: 3
 created: '2026-09-23T01:53:59Z'
-updated: '2026-09-23T02:01:14Z'
+updated: '2026-09-23T02:29:27Z'
 ---
 
 When it copies yaks into the target farm, it should also update the config to include the new herd.
@@ -22,3 +22,7 @@ Fixed: merge now registers incoming herds. store::declare_herds(root, herds) add
 ---
 ▸ 2026-09-23T02:01:10Z [agent]
 verify: `cargo test --workspace` -> PASS (exit 0)
+
+---
+▸ 2026-09-23T02:29:27Z [agent]
+Follow-up: re-applied the merge-row doc line in skills/yaks/SKILL.md. It had been sitting uncommitted on top of an unrelated silent revert of that file (the yaks-dd85 Evidence section), which I diagnosed as a 'yaks skills install --force' clobber from a stale binary and restored; see yaks-d8e9 for the footgun itself.
