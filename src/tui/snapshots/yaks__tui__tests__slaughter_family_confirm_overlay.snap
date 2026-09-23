@@ -1,0 +1,18 @@
+---
+source: src/tui/tests.rs
+expression: "draw(&app, 72, 14)"
+---
+ 🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starr
+
+ a0   p2 task     🦬  Root A
+   a1 p3 task     🦬  Child A1
+
+
+
+
+
+
+
+
+
+Slaughter a0 (Root A) AND its 2 live descendants? (y/N):

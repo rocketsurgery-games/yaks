@@ -125,6 +125,51 @@ pub enum AttachOutcome {
     NotFound,
 }
 
+/// Result of [`Farm::slaughter`] (yaks-05da).
+#[derive(Debug, PartialEq, Eq)]
+pub enum SlaughterOutcome {
+    NotFound,
+    /// Already dead, and no live descendants left to take with it.
+    AlreadyDead,
+    /// Refused: slaughtering would orphan these live (non-dead) descendants.
+    /// Pass `family = true` to slaughter them along with the yak.
+    HasLiveDescendants(Vec<String>),
+    /// Moved to dead: the live descendants (deepest first), then the yak itself
+    /// (omitted if it was already dead).
+    Slaughtered(Vec<String>),
+}
+
+/// Every live (non-dead) descendant of `id` in `tasks`, found transitively via
+/// the `parent:` field and ordered deepest-first (children before their
+/// parents), so slaughtering in order never leaves a live yak under a dead one
+/// mid-sweep. Cycle-safe. Shared by the CLI and the TUI (yaks-05da).
+pub fn live_descendants(tasks: &[Task], id: &str) -> Vec<String> {
+    let mut seen: Vec<String> = vec![id.to_string()];
+    let mut out: Vec<String> = Vec::new();
+    let mut frontier: Vec<String> = vec![id.to_string()];
+    while !frontier.is_empty() {
+        let mut next = Vec::new();
+        for p in &frontier {
+            let mut kids: Vec<&Task> = tasks
+                .iter()
+                .filter(|t| t.parent.as_deref() == Some(p.as_str()))
+                .filter(|t| !seen.contains(&t.id))
+                .collect();
+            kids.sort_by(|a, b| a.id.cmp(&b.id));
+            for k in kids {
+                seen.push(k.id.clone());
+                next.push(k.id.clone());
+                if k.status != Status::Dead {
+                    out.push(k.id.clone());
+                }
+            }
+        }
+        frontier = next;
+    }
+    out.reverse();
+    out
+}
+
 pub struct Stats {
     pub total: usize,
     pub hairy: usize,
@@ -964,6 +1009,31 @@ impl Farm {
         store::move_task(&self.root, id, dest)
     }
 
+    /// Slaughter `id` (move to dead). Refuses with
+    /// [`SlaughterOutcome::HasLiveDescendants`] when that would orphan live
+    /// descendants, unless `family` is set, in which case the whole family
+    /// (every live descendant, deepest first, then `id`) goes (yaks-05da).
+    pub fn slaughter(&self, id: &str, family: bool) -> Result<SlaughterOutcome> {
+        let all = store::load(&self.root, &EVERY)?;
+        let Some(me) = all.iter().find(|t| t.id == id) else {
+            return Ok(SlaughterOutcome::NotFound);
+        };
+        let doomed = live_descendants(&all, id);
+        if !doomed.is_empty() && !family {
+            return Ok(SlaughterOutcome::HasLiveDescendants(doomed));
+        }
+        if me.status == Status::Dead && doomed.is_empty() {
+            return Ok(SlaughterOutcome::AlreadyDead);
+        }
+        let mut moved = Vec::new();
+        for d in doomed.iter().map(String::as_str).chain(std::iter::once(id)) {
+            if store::move_task(&self.root, d, Status::Dead)? == MoveOutcome::Moved {
+                moved.push(d.to_string());
+            }
+        }
+        Ok(SlaughterOutcome::Slaughtered(moved))
+    }
+
     pub fn dep_add(&self, id: &str, dep: &str) -> Result<DepOutcome> {
         store::add_dep(&self.root, id, dep)
     }
@@ -1612,6 +1682,62 @@ mod tests {
         assert!(!plan.applied);
         assert!(!root.join("config.yaml").exists());
         assert!(root.join("hairy/yaksrs-0001.md").is_file());
+    }
+
+    /// Slaughtering a parent with live descendants is refused (listing them)
+    /// unless `family` is set, which takes the whole live family, deepest
+    /// first; already-dead descendants are left alone (yaks-05da).
+    #[test]
+    fn slaughter_guards_and_family_sweeps() {
+        let (root, farm) = temp_farm();
+        let kid = |id: &str, parent: &str, st: Status| {
+            let mut t = task(id, st);
+            t.parent = Some(parent.into());
+            t
+        };
+        store::write::save(&root, &task("yak-0001", Status::Hairy)).unwrap();
+        store::write::save(&root, &kid("yak-0002", "yak-0001", Status::Shaving)).unwrap();
+        store::write::save(&root, &kid("yak-0003", "yak-0002", Status::Shorn)).unwrap();
+        store::write::save(&root, &kid("yak-0004", "yak-0001", Status::Dead)).unwrap();
+        store::write::save(&root, &task("yak-0005", Status::Hairy)).unwrap();
+
+        assert_eq!(
+            farm.slaughter("yak-0001", false).unwrap(),
+            SlaughterOutcome::HasLiveDescendants(vec!["yak-0003".into(), "yak-0002".into()])
+        );
+        assert!(
+            root.join("hairy/yak-0001.md").is_file(),
+            "guard must not move"
+        );
+
+        assert_eq!(
+            farm.slaughter("yak-0001", true).unwrap(),
+            SlaughterOutcome::Slaughtered(vec![
+                "yak-0003".into(),
+                "yak-0002".into(),
+                "yak-0001".into()
+            ])
+        );
+        for id in ["yak-0001", "yak-0002", "yak-0003", "yak-0004"] {
+            assert!(root.join(format!("dead/{id}.md")).is_file(), "{id} dead");
+        }
+        assert!(
+            root.join("hairy/yak-0005.md").is_file(),
+            "non-family untouched"
+        );
+
+        assert_eq!(
+            farm.slaughter("yak-0001", true).unwrap(),
+            SlaughterOutcome::AlreadyDead
+        );
+        assert_eq!(
+            farm.slaughter("yak-0005", false).unwrap(),
+            SlaughterOutcome::Slaughtered(vec!["yak-0005".into()])
+        );
+        assert_eq!(
+            farm.slaughter("yak-nope", true).unwrap(),
+            SlaughterOutcome::NotFound
+        );
     }
 
     /// The multi-id transition path (`yaks shorn a b c`) drives the CLI batch by

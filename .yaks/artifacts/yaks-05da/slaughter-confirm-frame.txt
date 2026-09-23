@@ -1,0 +1,24 @@
+=== frame 0 · 80x10 · focus=list · view=🦬 Hairy · cursor=0 · rows=4 · sel=yak-2808 · blocked=- · collapsed=0 · filter=(all) · overlay=none ===
+ 🦬  Hairy (3)   🪒  Shaving (1)   🐑  Shorn (0)   🕒  Recent (4)   ⭐  Starred (0)
+
+ yak-2808     p3 task     🦬  Retire legacy importer
+   yak-c6f1   p3 task     🪒  Port CSV path
+     yak-a9bf p3 task     🦬  CSV fixtures
+ yak-8799     p3 task     🦬  Unrelated
+
+
+
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:edit  X:del  S:state
+=== end ===
+=== frame 1 · 80x10 · focus=list · view=🦬 Hairy · cursor=0 · rows=4 · sel=yak-2808 · blocked=- · collapsed=0 · filter=(all) · overlay=confirm ===
+ 🦬  Hairy (3)   🪒  Shaving (1)   🐑  Shorn (0)   🕒  Recent (4)   ⭐  Starred (0)
+
+ yak-2808     p3 task     🦬  Retire legacy importer
+   yak-c6f1   p3 task     🪒  Port CSV path
+     yak-a9bf p3 task     🦬  CSV fixtures
+ yak-8799     p3 task     🦬  Unrelated
+
+
+
+Slaughter yak-2808 (Retire legacy importer) AND its 2 live descendants? (y/N):
+=== end ===

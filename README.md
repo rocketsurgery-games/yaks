@@ -102,7 +102,7 @@ when all of them are shorn (or dead), and *tangled* otherwise.
 | `yaks shave <id>` | hairy → shaving (alias: `work`) |
 | `yaks shorn <id>` | shaving → shorn (alias: `close`) |
 | `yaks regrow <id>` | shorn → hairy (alias: `reopen`) |
-| `yaks slaughter <id>` / `revive <id>` | move to / from the hidden `dead/` |
+| `yaks slaughter <id>` / `revive <id>` | move to / from the hidden `dead/` (`slaughter --family` also takes live descendants) |
 | `yaks next` / `tangled` | ready tasks / dependency-blocked tasks |
 | `yaks search <q>` | substring search over id/title/description |
 | `yaks log` | timestamped notes across a filtered set, oldest first (an activity log); `--since`/`--by` narrow it |

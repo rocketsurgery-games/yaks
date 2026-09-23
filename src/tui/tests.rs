@@ -179,12 +179,19 @@ fn slaughter_confirm_overlay() {
 }
 
 #[test]
-fn slaughter_refused_with_children() {
-    // Root A has a non-dead child (A1), so X should refuse and not open.
+fn slaughter_family_confirm_overlay() {
+    // Root A has a live child (A1; A2 is shorn, also live), so X offers to
+    // slaughter the whole family, naming the count (yaks-05da).
     let mut app = sample();
     handle_key(&mut app, key('X'));
-    assert!(matches!(app.overlay, Overlay::None));
-    insta::assert_snapshot!(app.notification.clone().unwrap());
+    assert!(matches!(
+        app.overlay,
+        Overlay::Confirm {
+            action: ConfirmAction::SlaughterFamily(_),
+            ..
+        }
+    ));
+    insta::assert_snapshot!(draw(&app, 72, 14));
 }
 
 fn open_body_editor(app: &mut App) {
@@ -1771,6 +1778,47 @@ mod live {
             _ => panic!("picker closed"),
         };
         assert_eq!(sel2, sel0, "k moves it back up");
+    }
+
+    #[test]
+    fn slaughter_family_confirm_moves_family_to_dead() {
+        // A parent with a live child and grandchild: X raises the family
+        // confirm; `y` slaughters all three, deepest first (yaks-05da).
+        let (_dir, farm) = temp_farm(&[
+            task("t0", "parent", Status::Hairy, 3, None),
+            task("t1", "child", Status::Shaving, 3, Some("t0")),
+            task("t2", "grandchild", Status::Hairy, 3, Some("t1")),
+            task("t3", "bystander", Status::Hairy, 3, None),
+        ]);
+        let mut app = App::with_farm(farm).unwrap();
+        press(&mut app, "X");
+        match &app.overlay {
+            Overlay::Confirm { prompt, .. } => {
+                assert!(prompt.contains("AND its 2 live descendants"), "{prompt}")
+            }
+            _ => panic!("expected the family confirm"),
+        }
+        press(&mut app, "y");
+        for id in ["t0", "t1", "t2"] {
+            assert_eq!(app.task(id).unwrap().status, Status::Dead, "{id}");
+        }
+        assert_eq!(app.task("t3").unwrap().status, Status::Hairy);
+        assert_eq!(
+            app.notification.as_deref(),
+            Some("slaughtered t0 + family (3 yaks)")
+        );
+    }
+
+    #[test]
+    fn slaughter_family_declined_keeps_family() {
+        let (_dir, farm) = temp_farm(&[
+            task("t0", "parent", Status::Hairy, 3, None),
+            task("t1", "child", Status::Hairy, 3, Some("t0")),
+        ]);
+        let mut app = App::with_farm(farm).unwrap();
+        press(&mut app, "Xn");
+        assert_eq!(app.task("t0").unwrap().status, Status::Hairy);
+        assert_eq!(app.task("t1").unwrap().status, Status::Hairy);
     }
 
     #[test]

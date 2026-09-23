@@ -23,7 +23,7 @@ use std::env;
 use farm::{
     AttachOutcome, Commits, CreateOutcome, DepOutcome, Farm, Issue, IssueKind, LogEntry,
     MergeOutcome, MoveOutcome, NewTask, OpenError, RefKind, RenameOutcome, RenamePlan, Reparent,
-    Show, Stats, TaskEdit, TaskRefs, UpdateOutcome,
+    Show, SlaughterOutcome, Stats, TaskEdit, TaskRefs, UpdateOutcome,
 };
 use filter::FilterSpec;
 use model::{Status, Task};
@@ -309,9 +309,16 @@ enum Command {
         ids: Vec<String>,
     },
     /// Slaughter one or more yaks (move to dead).
+    ///
+    /// Refuses a yak that still has live (non-dead) descendants, since that
+    /// would orphan them; pass --family to slaughter the whole family instead.
     Slaughter {
         #[arg(required = true, num_args = 1..)]
         ids: Vec<String>,
+        /// Also slaughter every live descendant (children, grandchildren, ...)
+        /// of each id, instead of refusing.
+        #[arg(long)]
+        family: bool,
     },
     /// Revive one or more dead yaks (move back to hairy).
     Revive {
@@ -899,9 +906,7 @@ fn main() -> Result<()> {
         Command::Regrow { ids } => {
             transition_many(&farm, &ids, Status::Hairy, "already hairy", "Regrown:")?
         }
-        Command::Slaughter { ids } => {
-            transition_many(&farm, &ids, Status::Dead, "already dead", "Slaughtered:")?
-        }
+        Command::Slaughter { ids, family } => slaughter_many(&farm, &ids, family)?,
         Command::Revive { ids } => {
             transition_many(&farm, &ids, Status::Hairy, "already hairy", "Revived:")?
         }
@@ -1178,6 +1183,41 @@ fn transition_many(
     for id in ids {
         if !transition(farm, id, dest, already, done)? {
             any_failed = true;
+        }
+    }
+    if any_failed {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// Slaughter every id in `ids` (see [`Farm::slaughter`]). Like
+/// [`transition_many`], the whole batch is processed; a missing id or a yak
+/// refused for having live descendants exits non-zero afterwards (yaks-05da).
+fn slaughter_many(farm: &Farm, ids: &[String], family: bool) -> Result<()> {
+    let mut any_failed = false;
+    for id in ids {
+        match farm.slaughter(id, family)? {
+            SlaughterOutcome::NotFound => {
+                eprintln!("error: task {id} not found");
+                any_failed = true;
+            }
+            SlaughterOutcome::AlreadyDead => println!("{id} is already dead"),
+            SlaughterOutcome::HasLiveDescendants(kids) => {
+                let n = kids.len();
+                let noun = if n == 1 { "descendant" } else { "descendants" };
+                eprintln!(
+                    "error: {id} has {n} live {noun} ({}); slaughter them first, \
+                     or use --family to slaughter the whole family",
+                    kids.join(", ")
+                );
+                any_failed = true;
+            }
+            SlaughterOutcome::Slaughtered(moved) => {
+                for m in moved {
+                    println!("Slaughtered: {m}");
+                }
+            }
         }
     }
     if any_failed {

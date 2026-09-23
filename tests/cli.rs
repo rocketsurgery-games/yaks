@@ -554,3 +554,69 @@ fn bulk_dry_run_commit_and_refusals() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `yaks slaughter` refuses a parent with live descendants (naming them and
+/// pointing at --family), and `--family` slaughters the whole live family
+/// (yaks-05da). Throwaway farm built via the CLI so it never touches the
+/// shared fixture.
+#[test]
+fn slaughter_guard_and_family() {
+    let dir = std::env::temp_dir().join(format!("yaks-slaughter-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let raw = |args: &[&str]| -> (bool, String, String) {
+        let out = Command::cargo_bin("yaks")
+            .unwrap()
+            .current_dir(&dir)
+            .env("YAKS_SKILLS_AUTOSYNC", "0")
+            .args(args)
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            String::from_utf8(out.stdout).unwrap(),
+            String::from_utf8(out.stderr).unwrap(),
+        )
+    };
+    let cli = |args: &[&str]| -> String {
+        let (ok, stdout, stderr) = raw(args);
+        assert!(ok, "command {args:?} failed: {stderr:?}");
+        stdout
+    };
+    let created_id = |out: &str| -> String {
+        out.lines()
+            .find_map(|l| l.strip_prefix("Created "))
+            .and_then(|rest| rest.split(':').next())
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+
+    cli(&["init"]);
+    let p = created_id(&cli(&["create", "--title", "parent"]));
+    let c = created_id(&cli(&["create", "--title", "child", "--parent", &p]));
+    let g = created_id(&cli(&["create", "--title", "grandchild", "--parent", &c]));
+
+    // Guard: refused, non-zero, names the descendants and the flag; nothing moves.
+    let (ok, stdout, stderr) = raw(&["slaughter", &p]);
+    assert!(!ok, "guarded slaughter should exit non-zero: {stdout}");
+    assert!(stderr.contains("2 live descendants"), "{stderr}");
+    assert!(stderr.contains(&c) && stderr.contains(&g), "{stderr}");
+    assert!(
+        stderr.contains("--family"),
+        "guard must point at --family: {stderr}"
+    );
+    assert!(cli(&["show", &p]).contains("Hairy"), "guard must not move");
+
+    // --family: grandchild, child, then parent.
+    let out = cli(&["slaughter", &p, "--family"]);
+    assert_eq!(
+        out,
+        format!("Slaughtered: {g}\nSlaughtered: {c}\nSlaughtered: {p}\n")
+    );
+    for id in [&p, &c, &g] {
+        assert!(cli(&["show", id]).contains("Dead"), "{id} not dead");
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

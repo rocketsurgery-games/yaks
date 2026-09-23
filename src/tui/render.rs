@@ -233,7 +233,7 @@ pub(crate) fn help_content() -> Vec<Line<'static>> {
             "Save / cancel / save+close (editor Normal)",
         ),
         entry("A / O", "Attach artifact / open it"),
-        entry("X", "Slaughter (delete, confirm)"),
+        entry("X", "Slaughter (confirm; offers whole family)"),
         blank(),
         section("Search & filter"),
         entry("/", "Inline search"),

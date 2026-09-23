@@ -138,6 +138,8 @@ pub(crate) enum PickAction {
 /// What a confirmed y/N prompt should do.
 pub(crate) enum ConfirmAction {
     Slaughter(String),
+    /// Slaughter a yak and every live descendant (yaks-05da).
+    SlaughterFamily(String),
     /// Discard a dirty edit/create form or comment (stashed in `App.dirty_cancel`).
     DiscardEdit,
 }

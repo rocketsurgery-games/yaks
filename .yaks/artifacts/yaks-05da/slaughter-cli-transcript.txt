@@ -1,0 +1,12 @@
+$ yaks slaughter yak-2808
+error: yak-2808 has 2 live descendants (yak-a9bf, yak-c6f1); slaughter them first, or use --family to slaughter the whole family
+(exit 1)
+$ yaks slaughter yak-2808 --family
+Slaughtered: yak-a9bf
+Slaughtered: yak-c6f1
+Slaughtered: yak-2808
+(exit 0)
+$ yaks list --status dead
+  [X] yak-2808  p3 task     Retire legacy importer
+  [X] yak-a9bf  p3 task     CSV fixtures
+  [X] yak-c6f1  p3 task     Port CSV path

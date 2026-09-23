@@ -323,9 +323,10 @@ impl App {
         };
     }
 
-    /// Count a yak's live (non-dead) children. Slaughter refuses to orphan
-    /// children, so both the single path (`open_slaughter_confirm`) and the
-    /// bulk path (`PickAction::BulkState` with `x`) gate on this (yaks-5c51).
+    /// Count a yak's live (non-dead) children. Bulk slaughter
+    /// (`PickAction::BulkState` with `x`) refuses to orphan children, so it
+    /// skips any yak with live children (yaks-5c51); the single path
+    /// (`open_slaughter_confirm`) instead offers to take the family (yaks-05da).
     pub(crate) fn live_child_count(&self, id: &str) -> usize {
         self.all
             .iter()
@@ -335,16 +336,25 @@ impl App {
 
     pub(crate) fn open_slaughter_confirm(&mut self) {
         let Some(id) = self.selected_id() else { return };
-        let kids = self.live_child_count(&id);
-        if kids > 0 {
-            let noun = if kids == 1 { "child" } else { "children" };
-            self.notification = Some(format!("{id} has {kids} {noun}; slaughter them first"));
-            return;
-        }
         let title: String = self
             .task(&id)
             .map(|t| t.title.chars().take(40).collect())
             .unwrap_or_default();
+        // Slaughtering alone would orphan live descendants, so offer the whole
+        // family instead, naming how many go with it (yaks-05da).
+        let kin = crate::farm::live_descendants(&self.all, &id).len();
+        if kin > 0 {
+            let noun = if kin == 1 {
+                "descendant"
+            } else {
+                "descendants"
+            };
+            self.overlay = Overlay::Confirm {
+                prompt: format!("Slaughter {id} ({title}) AND its {kin} live {noun}? (y/N): "),
+                action: ConfirmAction::SlaughterFamily(id),
+            };
+            return;
+        }
         self.overlay = Overlay::Confirm {
             prompt: format!("Slaughter {id} ({title})? (y/N): "),
             action: ConfirmAction::Slaughter(id),

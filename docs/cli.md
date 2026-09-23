@@ -81,6 +81,11 @@ A lever is the pass/fail **gate** for its label — what `doctor --strict` enfor
 | `slaughter` | → dead (abandon) |
 | `revive` | dead → hairy |
 
+`slaughter` refuses a yak that still has live (non-dead) descendants, since that
+would orphan them (it names them and exits non-zero). `slaughter <id> --family`
+takes the whole family instead: every live descendant, deepest first, then the
+yak itself.
+
 ## Human-in-the-loop
 
 | Command | What it does |

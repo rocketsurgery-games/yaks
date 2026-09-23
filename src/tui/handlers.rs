@@ -1278,9 +1278,9 @@ impl App {
                     'x' => Status::Dead,
                     _ => return,
                 };
-                // Slaughter must not orphan children: mirror the single-path
-                // guard (open_slaughter_confirm) by skipping any marked id with
-                // live children and reporting the count. Non-slaughter bulk
+                // Slaughter must not orphan children: skip any marked id with
+                // live children and report the count (the single path,
+                // open_slaughter_confirm, offers a family slaughter instead). Non-slaughter bulk
                 // transitions are unaffected (yaks-5c51).
                 let mut skipped = 0usize;
                 let targets: Vec<&String> = if dest == Status::Dead {
@@ -1461,6 +1461,18 @@ impl App {
                     Ok(MoveOutcome::Moved) => {
                         self.reload();
                         self.notification = Some(format!("slaughtered {id}"));
+                    }
+                    Ok(_) => self.notification = Some(format!("{id} not slaughtered")),
+                    Err(e) => self.notification = Some(format!("error: {e}")),
+                }
+            }
+            ConfirmAction::SlaughterFamily(id) => {
+                let Some(h) = &self.farm else { return };
+                match h.slaughter(&id, true) {
+                    Ok(crate::farm::SlaughterOutcome::Slaughtered(moved)) => {
+                        self.reload();
+                        let n = moved.len();
+                        self.notification = Some(format!("slaughtered {id} + family ({n} yaks)"));
                     }
                     Ok(_) => self.notification = Some(format!("{id} not slaughtered")),
                     Err(e) => self.notification = Some(format!("error: {e}")),

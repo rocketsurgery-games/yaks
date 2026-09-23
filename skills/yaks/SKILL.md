@@ -156,7 +156,7 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks shave` | Start shaving a yak (hairy → shaving) [alias: `work`] |
 | `yaks shorn` | Mark a yak shorn (shaving → shorn) [alias: `close`] |
 | `yaks regrow` | Regrow a shorn yak (shorn → hairy) [alias: `reopen`] |
-| `yaks slaughter` | Slaughter a yak (move to hidden `dead/`) — for ideas you won't pursue or tasks that got obviated |
+| `yaks slaughter` | Slaughter a yak (move to hidden `dead/`) — for ideas you won't pursue or tasks that got obviated. Refuses a yak with live descendants; `--family` slaughters the whole family |
 | `yaks revive` | Revive a dead yak back to hairy |
 | `yaks next` | Hairy tasks whose deps are all resolved [alias: `ready`] |
 | `yaks tangled` | Hairy tasks with at least one unresolved dep [alias: `blocked`] |

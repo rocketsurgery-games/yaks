@@ -75,7 +75,7 @@ the pre-find scroll and cursor).
 | `M` | Add a comment (note) |
 | `a` | Ask / answer (raise or clear a `needs` block) |
 | `A` / `O` | Attach artifact / open it |
-| `X` | Slaughter (delete, with confirm) |
+| `X` | Slaughter (delete, with confirm); on a yak with live descendants the confirm offers the whole family, naming how many go |
 | `:w` / `:q` / `:wq` | Save / cancel / save+close (editor Normal mode) |
 
 **Search & filter** — `/` inline search; `#` go to any yak (list or detail pane:
