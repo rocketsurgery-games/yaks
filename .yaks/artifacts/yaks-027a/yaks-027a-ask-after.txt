@@ -1,0 +1,10 @@
+ 🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starred (0)              family: ~remaining
+
+ a0   p2 task     🦬  Root A
+   a1 p3 task     🦬  Child A1
+
+
+
+
+
+Ask a0 — blocks on a human (Enter save · Ctrl-C cancel): Which glyph should mark a blocked row?         INSERT

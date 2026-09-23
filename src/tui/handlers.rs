@@ -511,7 +511,7 @@ impl App {
             self.overlay = Overlay::Edit(Editor::new(
                 self.editor_vim,
                 true,
-                format!("Ask {id} (blocks on a human) — Enter save · Ctrl-C cancel"),
+                format!("Ask {id} — blocks on a human (Enter save · Ctrl-C cancel): "),
                 "",
                 EditAction::Ask(id),
             ));
@@ -523,7 +523,7 @@ impl App {
             self.overlay = Overlay::Edit(Editor::new(
                 self.editor_vim,
                 true,
-                format!("Answer {id} (clears the block) — Enter save · Ctrl-C cancel"),
+                format!("Answer {id} — clears the block (Enter save · Ctrl-C cancel): "),
                 "",
                 EditAction::Answer(id),
             ));

@@ -881,7 +881,10 @@ pub(crate) fn render_dline<'a>(
         return Line::from(String::new());
     }
     // Base per-char style: dim label prefix on plain fields; section headers cyan.
-    let label_end = if dl.links.is_empty() && dl.kind == detail::Kind::Field && n > 13 {
+    // Only a field's first row carries the label: a soft-wrapped continuation
+    // row (`cont`) is all value, so it must not inherit the label colour in the
+    // columns where the label sat (yaks-2d17).
+    let label_end = if dl.links.is_empty() && dl.kind == detail::Kind::Field && !dl.cont && n > 13 {
         13
     } else {
         0

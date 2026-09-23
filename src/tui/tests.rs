@@ -2674,3 +2674,71 @@ fn modal_detail_shows_back_affordance_only_when_covering_the_list() {
     let col = row.chars().position(|c| c == '\u{2502}').unwrap();
     assert_eq!(col as u16, 220 - DETAIL_MAX_WIDTH, "divider column:\n{huge}");
 }
+
+/// yaks-027a: the single-line ask/answer prompts end in a `: ` separator, so
+/// the typed text doesn't butt straight up against the key hints
+/// (`…Ctrl-C cancelStrong agreement…`).
+#[test]
+fn ask_and_answer_prompts_separate_label_from_typed_text() {
+    let mut app = sample();
+    app.open_ask();
+    press(&mut app, "hello");
+    let out = draw(&app, 120, 14);
+    assert!(
+        out.contains("Ask a0 — blocks on a human (Enter save · Ctrl-C cancel): hello"),
+        "ask prompt should separate label from text\n{out}"
+    );
+    let mut app = sample();
+    app.open_answer();
+    press(&mut app, "hello");
+    let out = draw(&app, 120, 14);
+    assert!(
+        out.contains("Answer a0 — clears the block (Enter save · Ctrl-C cancel): hello"),
+        "answer prompt should separate label from text\n{out}"
+    );
+}
+
+/// yaks-2d17: a header field that soft-wraps in the detail pane must style its
+/// continuation row as value text, not with the field-label colour in the
+/// columns where the label sat on the first row.
+#[test]
+fn wrapped_detail_field_continuation_is_not_label_coloured() {
+    let long = "E1: Jev-as-grouper probe per-candidate role Choice composition evaluate \
+                on Burrito drops standalone Stage-A kind Gemini deferred";
+    let mut app = App::new(vec![task("t0", long, Status::Hairy, 3, None)]);
+    enter_key(&mut app); // focus the detail pane
+    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 20)).unwrap();
+    // Draw twice: the first frame records the pane width the wrap uses.
+    term.draw(|f| render(&app, f)).unwrap();
+    term.draw(|f| render(&app, f)).unwrap();
+    let buf = term.backend().buffer();
+    let text = buffer_to_string(buf);
+    // Locate "Title:" by cell position (emoji rows make string offsets lie).
+    let (title_x, title_y) = (0..buf.area.height)
+        .flat_map(|y| (0..buf.area.width.saturating_sub(6)).map(move |x| (x, y)))
+        .find(|&(x, y)| {
+            (0..6u16)
+                .map(|i| buf[(x + i, y)].symbol().to_string())
+                .collect::<String>()
+                == "Title:"
+        })
+        .unwrap_or_else(|| panic!("title row\n{text}"));
+    // Sanity: the label on the first row is the dim label colour.
+    assert_eq!(buf[(title_x, title_y)].fg, Color::DarkGray);
+    // The continuation row: same column range, all value text (default fg).
+    let cont_y = title_y + 1;
+    let cont: String = (title_x..title_x + 13)
+        .map(|x| buf[(x, cont_y)].symbol().to_string())
+        .collect();
+    assert!(
+        !cont.trim().is_empty() && !cont.contains("Status:"),
+        "expected the title to wrap onto the next row\n{text}"
+    );
+    for x in title_x..title_x + 13 {
+        assert_ne!(
+            buf[(x, cont_y)].fg,
+            Color::DarkGray,
+            "continuation cell {x} took the label colour\n{text}"
+        );
+    }
+}
