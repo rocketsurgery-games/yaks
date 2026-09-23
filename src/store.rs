@@ -674,6 +674,107 @@ pub fn set_config_prefix(root: &Path, new: &str) -> Result<()> {
     Ok(())
 }
 
+/// Declare `new_herds` in `config.yaml`'s `herds:` map, so merged-in herds join
+/// the *known-herd set* the UI pickers offer (yaks-095a). Returns the herds
+/// actually added (sorted); already-declared ones are skipped, so this is
+/// idempotent.
+///
+/// Only ever **adds** bare `  <herd>:` entries — existing entries, their
+/// per-herd overrides, comments, and key order are left byte-for-byte alone. If
+/// the farm has no `herds:` block yet it is appended, seeded with the farm's
+/// *current* known herds as well: materializing the block makes it
+/// authoritative, so omitting them would drop the destination's own herds from
+/// the picker.
+pub fn declare_herds(root: &Path, new_herds: &[String]) -> Result<Vec<String>> {
+    let cfg = read_config(root);
+    // Skip herds already declared, and de-duplicate the request.
+    let mut adding: Vec<String> = Vec::new();
+    for h in new_herds {
+        if !cfg.herds.contains_key(h) && !adding.contains(h) {
+            adding.push(h.clone());
+        }
+    }
+    if adding.is_empty() {
+        return Ok(Vec::new());
+    }
+    adding.sort();
+
+    let path = root.join("config.yaml");
+    let existing = fs::read_to_string(&path).unwrap_or_default();
+    let had_block = !cfg.herds.is_empty();
+    let mut out: Vec<String> = Vec::new();
+
+    if had_block {
+        // Insert after the last line of the existing `herds:` block, so the new
+        // entries land inside it rather than after an unrelated trailing key.
+        let lines: Vec<&str> = existing.lines().collect();
+        let start = lines.iter().position(|l| {
+            l.split_once(':')
+                .is_some_and(|(k, v)| k.trim() == "herds" && v.trim().is_empty())
+        });
+        // The block ends at the first later non-blank, non-comment line that
+        // isn't indented (a new top-level key).
+        let end = start.map(|s| {
+            lines
+                .iter()
+                .enumerate()
+                .skip(s + 1)
+                .find(|(_, l)| {
+                    let t = l.trim();
+                    !t.is_empty()
+                        && !t.starts_with('#')
+                        && !l.starts_with(' ')
+                        && !l.starts_with('\t')
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(lines.len())
+        });
+        match end {
+            Some(e) => {
+                out.extend(lines[..e].iter().map(|s| s.to_string()));
+                out.extend(adding.iter().map(|h| format!("  {h}:")));
+                out.extend(lines[e..].iter().map(|s| s.to_string()));
+            }
+            // `herds` parsed non-empty but no block line found (shouldn't
+            // happen); fall back to appending a fresh block.
+            None => {
+                out.extend(lines.iter().map(|s| s.to_string()));
+                out.push("herds:".to_string());
+                out.extend(adding.iter().map(|h| format!("  {h}:")));
+            }
+        }
+    } else {
+        out.extend(existing.lines().map(|s| s.to_string()));
+        if out.last().is_some_and(|l| !l.trim().is_empty()) {
+            out.push(String::new());
+        }
+        out.push("herds:".to_string());
+        // Seed with the farm's current known herds (its configured default
+        // herd + any prefix already present on disk) so materializing the block
+        // doesn't shrink the known-herd set.
+        let mut all: Vec<String> = adding.clone();
+        for h in cfg.known_herds() {
+            if !all.contains(&h) {
+                all.push(h);
+            }
+        }
+        for id in all_ids(root) {
+            if let Some((p, _)) = id.split_once('-') {
+                if !all.iter().any(|h| h == p) {
+                    all.push(p.to_string());
+                }
+            }
+        }
+        all.sort();
+        out.extend(all.iter().map(|h| format!("  {h}:")));
+    }
+
+    let mut text = out.join("\n");
+    text.push('\n');
+    fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+    Ok(adding)
+}
+
 /// The values [`init`] seeds a new farm's `config.yaml` with. The `Default`
 /// impl mirrors the built-in fallbacks in [`read_config`] (prefix "yak",
 /// type "task", priority 3, vim keybindings).
@@ -1328,6 +1429,82 @@ mod move_tests {
         assert_eq!(
             c.verify.get("default").map(String::as_str),
             Some("cargo test --workspace")
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn declare_herds_inserts_in_block_and_preserves_overrides() {
+        // yaks-095a: adding a herd to an existing `herds:` block must land
+        // INSIDE the block and leave comments + per-herd overrides intact.
+        let root = temp_root();
+        fs::write(
+            root.join("config.yaml"),
+            "herd: core\nverify:\n  default: cargo test\n\n# declared herds\nherds:\n  core:\n    default_priority: 1\n    verify:\n      default: make check\nvim_mode: true\n",
+        )
+        .unwrap();
+        let added = declare_herds(&root, &["web".to_string(), "core".to_string()]).unwrap();
+        assert_eq!(added, vec!["web".to_string()], "only the new herd is added");
+        let text = fs::read_to_string(root.join("config.yaml")).unwrap();
+        // Landed inside the block: before the next top-level key.
+        let web_i = text.lines().position(|l| l.trim() == "web:").unwrap();
+        let vim_i = text
+            .lines()
+            .position(|l| l.starts_with("vim_mode"))
+            .unwrap();
+        assert!(web_i < vim_i, "herd entry inside the block:\n{text}");
+        // Comments and the per-herd override survive, and both herds resolve.
+        assert!(text.contains("# declared herds"));
+        let c = read_config(&root);
+        assert_eq!(c.known_herds(), vec!["core".to_string(), "web".to_string()]);
+        assert_eq!(c.default_priority_for("core"), 1);
+        assert_eq!(
+            c.resolve_verify(&[], Some("core")),
+            Some("make check".to_string())
+        );
+        // Still the global lever for the new herd (cascade intact).
+        assert_eq!(
+            c.resolve_verify(&[], Some("web")),
+            Some("cargo test".to_string())
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn declare_herds_seeds_a_new_block_with_existing_herds() {
+        // With no `herds:` block, materializing one must also list the farm's
+        // current herds (its default herd + prefixes on disk), or the pickers
+        // would suddenly see only the merged-in herd.
+        let root = temp_root();
+        fs::write(root.join("config.yaml"), "herd: core\nvim_mode: true\n").unwrap();
+        write::save(
+            &root,
+            &crate::model::Task {
+                id: "ops-0001".into(),
+                title: "t".into(),
+                kind: "task".into(),
+                priority: 3,
+                status: Status::Hairy,
+                created: None,
+                updated: None,
+                parent: None,
+                labels: vec![],
+                depends_on: vec![],
+                source: None,
+                needs: None,
+                verify: None,
+                extra: Vec::new(),
+                body: String::new(),
+            },
+        )
+        .unwrap();
+        let added = declare_herds(&root, &["web".to_string()]).unwrap();
+        assert_eq!(added, vec!["web".to_string()]);
+        let known = read_config(&root).known_herds();
+        assert_eq!(
+            known,
+            vec!["core".to_string(), "ops".to_string(), "web".to_string()],
+            "new block keeps the config herd and on-disk prefixes"
         );
         let _ = fs::remove_dir_all(&root);
     }

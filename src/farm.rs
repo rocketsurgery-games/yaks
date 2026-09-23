@@ -105,6 +105,11 @@ pub struct MergePlan {
     pub yaks: Vec<(String, Status)>,
     /// Ids whose `artifacts/<id>/` directory was also copied.
     pub artifacts: Vec<String>,
+    /// Incoming herds (id prefixes) newly declared in this farm's `herds:`
+    /// config, sorted — so merged yaks' herds join the known-herd set the UI
+    /// pickers offer (yaks-095a). For a dry run, the herds that *would* be
+    /// declared.
+    pub herds: Vec<String>,
 }
 
 pub enum UpdateOutcome {
@@ -1025,6 +1030,20 @@ impl Farm {
             .map(|(id, _, _)| id.clone())
             .collect();
         artifacts.sort();
+        // The incoming yaks' herds (id prefixes) that this farm doesn't already
+        // declare. Merging yaks without registering their herd leaves them
+        // invisible to the create/TUI herd pickers (yaks-095a).
+        let cfg = store::read_config(&self.root);
+        let mut incoming: Vec<String> = Vec::new();
+        for (id, _, _) in &found {
+            if let Some((prefix, _)) = id.split_once('-') {
+                if !cfg.herds.contains_key(prefix) && !incoming.iter().any(|h| h == prefix) {
+                    incoming.push(prefix.to_string());
+                }
+            }
+        }
+        incoming.sort();
+        let mut herds = incoming;
         if !dry_run {
             for (_id, st, path) in &found {
                 let dest_dir = self.root.join(st.dir());
@@ -1039,12 +1058,16 @@ impl Farm {
                     &self.root.join("artifacts").join(id),
                 )?;
             }
+            // Declare the incoming herds, so the merged yaks' herds are
+            // offered by the pickers. Report what was actually added.
+            herds = store::declare_herds(&self.root, &herds)?;
         }
         Ok(MergeOutcome::Done(MergePlan {
             applied: !dry_run,
             source: src_root,
             yaks,
             artifacts,
+            herds,
         }))
     }
 }
@@ -1358,6 +1381,50 @@ mod tests {
             _ => panic!("expected Done"),
         }
         assert!(!store::all_ids(&dest_root).contains(&id));
+    }
+
+    #[test]
+    fn merge_declares_the_incoming_herd_in_config() {
+        // Regression (yaks-095a): merging yaks from another herd must also
+        // register that herd in the destination's `herds:` config, or the
+        // merged yaks' herd is missing from the known-herd set the pickers use.
+        let (dest_root, dest) = temp_farm();
+        let (src_root, src) = temp_farm();
+        let id = created_id(src.create(new_task("s", Some("web"))).unwrap());
+        assert!(id.starts_with("web-"));
+        let plan = match dest.merge(&src_root, false).unwrap() {
+            MergeOutcome::Done(p) => p,
+            _ => panic!("expected Done"),
+        };
+        assert_eq!(plan.herds, vec!["web".to_string()]);
+        // The incoming herd is now declared — and so is the destination's own
+        // herd, which materializing the block must not drop.
+        let known = store::read_config(&dest_root).known_herds();
+        assert!(known.contains(&"web".to_string()), "incoming herd declared");
+        let own = store::read_config(&dest_root).prefix;
+        assert!(
+            known.contains(&own),
+            "destination's own herd kept: {known:?}"
+        );
+    }
+
+    #[test]
+    fn merge_herd_declaration_is_idempotent_and_dry_run_writes_nothing() {
+        let (dest_root, dest) = temp_farm();
+        let (src_root, src) = temp_farm();
+        created_id(src.create(new_task("s", Some("web"))).unwrap());
+        // Dry run: reports the herd it *would* declare, writes no config.
+        let before = std::fs::read_to_string(dest_root.join("config.yaml")).unwrap_or_default();
+        match dest.merge(&src_root, true).unwrap() {
+            MergeOutcome::Done(p) => assert_eq!(p.herds, vec!["web".to_string()]),
+            _ => panic!("expected Done"),
+        }
+        let after = std::fs::read_to_string(dest_root.join("config.yaml")).unwrap_or_default();
+        assert_eq!(before, after, "dry run left config.yaml untouched");
+        // Apply, then declaring the same herd again adds nothing.
+        dest.merge(&src_root, false).unwrap();
+        let added = store::declare_herds(&dest_root, &["web".to_string()]).unwrap();
+        assert!(added.is_empty(), "already-declared herd is skipped");
     }
 
     fn temp_dir_named(tag: &str) -> PathBuf {

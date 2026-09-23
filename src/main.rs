@@ -383,8 +383,9 @@ enum Command {
         dry_run: bool,
     },
     /// Merge another farm's yaks into this one (consolidation). Copies every yak
-    /// (all statuses) and its artifacts, preserving ids and status; refuses on
-    /// id collisions. Non-destructive — the source is left intact.
+    /// (all statuses) and its artifacts, preserving ids and status, and declares
+    /// any incoming herd in this farm's config; refuses on id collisions.
+    /// Non-destructive — the source is left intact.
     Merge {
         /// Path to the source farm: a `.yaks/` directory or a dir containing one.
         source: String,
@@ -575,6 +576,14 @@ fn main() -> Result<()> {
                     if !plan.artifacts.is_empty() {
                         let a = if plan.applied { "copied" } else { "to copy" };
                         println!("{} artifact set(s) {a}", plan.artifacts.len());
+                    }
+                    if !plan.herds.is_empty() {
+                        let h = if plan.applied {
+                            "declared herd(s)"
+                        } else {
+                            "would declare herd(s)"
+                        };
+                        println!("{h}: {}", plan.herds.join(", "));
                     }
                     if plan.applied {
                         println!("source left intact at {}", plan.source.display());

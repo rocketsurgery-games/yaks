@@ -1,0 +1,27 @@
+$ cat .yaks/config.yaml   # BEFORE
+herd: core
+default_type: task
+default_priority: 3
+vim_mode: true
+
+$ yaks merge ../src
+merged 1 yak(s) from ../src/.yaks
+  web-2b91 [hairy]
+declared herd(s): web
+source left intact at ../src/.yaks
+
+$ cat .yaks/config.yaml   # AFTER
+herd: core
+default_type: task
+default_priority: 3
+vim_mode: true
+
+herds:
+  core:
+  web:
+
+$ yaks list --herd web
+  [H] web-2b91  p3 task     web work
+
+$ yaks doctor
+All clear: no farm-integrity issues found.
