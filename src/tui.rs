@@ -19,6 +19,7 @@ mod fuzzy;
 mod handlers;
 mod headless;
 mod markdown;
+mod mouse;
 mod render;
 mod runtime;
 #[cfg(test)]
@@ -305,6 +306,9 @@ pub struct App {
     /// A bulk state transition (`S` with a non-empty set) loops these ids
     /// through `farm.transition`, then clears the set. See [`App::toggle_selected`].
     selected: HashSet<String>,
+    /// Pane/tab rects recorded by the last render, for mouse hit-testing
+    /// (reset each frame). See [`mouse::HitMap`].
+    hits: RefCell<mouse::HitMap>,
     quit: bool,
 }
 
@@ -345,6 +349,7 @@ impl App {
             dirty_cancel: None,
             cmdline: None,
             selected: HashSet::new(),
+            hits: RefCell::default(),
             quit: false,
         }
     }

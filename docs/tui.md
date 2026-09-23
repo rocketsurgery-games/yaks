@@ -86,6 +86,17 @@ active view.
 
 **General** — `y` copy yak id; `?` toggle help; `q` / `Ctrl-C` quit.
 
+**Mouse** — the wheel scrolls the pane under the pointer (over the list it moves
+the selection; over the detail it scrolls, or with the detail open, the list
+wheel steps tasks like `J`/`K`). Left-click a row to select it (click it again to
+open the detail), click a detail line to put the cursor there (click it again to
+follow its link), and click a tab to switch view. The mouse is ignored while an
+overlay (editor, picker, drawer, help) is open. Mouse back/forward buttons aren't
+supported — the terminal library (crossterm) drops those buttons — so use `o`/`i`.
+Capturing the mouse turns off the terminal's own click-drag text selection; hold
+**Shift** while dragging (**Option/⌥** in some macOS terminals, e.g. iTerm2) to
+select text natively.
+
 **List pane** — the tree of a view (here the *Shaving* tab): ids, priorities,
 types, status glyphs, titles, and dim labels. The `*` gutter marks a
 dependency-blocked yak; the `⏳` marks one awaiting a human.

@@ -1,0 +1,82 @@
+
+running 6 tests
+test tui::mouse::tests::click_list_row_respects_scroll_offset ... ok
+test tui::mouse::tests::click_selects_list_row_then_opens_detail ... --- before click (x=3,y=3) ---
+focus=list · view=🦬 Hairy · cursor=0 · rows=2 · sel=a0 · blocked=- · collapsed=0 · filter=(all) · overlay=none
+ 🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4
+
+ a0   p2 task     🦬  Root A
+   a1 p3 task     🦬  Child A1
+
+
+
+
+
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:
+--- after ---
+focus=list · view=🦬 Hairy · cursor=1 · rows=2 · sel=a1 · blocked=- · collapsed=0 · filter=(all) · overlay=none
+ 🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4
+
+ a0   p2 task     🦬  Root A
+   a1 p3 task     🦬  Child A1
+
+
+
+
+
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:
+
+ok
+test tui::mouse::tests::click_tab_switches_view ... ok
+test tui::mouse::tests::mouse_ignored_while_overlay_open ... ok
+test tui::mouse::tests::wheel_moves_list_selection ... --- before 12x wheel-down ---
+ 🦬  Hairy (30)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (
+
+ t00  p3 task     🦬  Task 0
+ t01  p3 task     🦬  Task 1
+ t02  p3 task     🦬  Task 2
+ t03  p3 task     🦬  Task 3
+ t04  p3 task     🦬  Task 4
+ t05  p3 task     🦬  Task 5
+ t06  p3 task     🦬  Task 6
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:
+--- after ---
+ 🦬  Hairy (30)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (
+
+ t06  p3 task     🦬  Task 6
+ t07  p3 task     🦬  Task 7
+ t08  p3 task     🦬  Task 8
+ t09  p3 task     🦬  Task 9
+ t10  p3 task     🦬  Task 10
+ t11  p3 task     🦬  Task 11
+ t12  p3 task     🦬  Task 12
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:
+
+ok
+test tui::mouse::tests::wheel_scrolls_detail_and_click_moves_line_cursor ... --- detail before 2x wheel-down ---
+ 🦬  Hairy (1)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (1
+
+ d0   p3 task       │ Task: d0
+                    │
+                    │ Title:       Long
+                    │ Status:      hairy
+                    │ Type:        task
+                    │ Priority:    p3
+                    │ Created:     -
+h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:ed
+--- after ---
+ 🦬  Hairy (1)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (1
+
+ d0   p3 task       │  🦬  d0  task     p3  Long
+                    │ Created:     -
+                    │ Updated:     -
+                    │ Labels:      -
+                    │
+                    │ line 0
+                    │ line 1
+h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:ed
+
+ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 280 filtered out; finished in 0.03s
+

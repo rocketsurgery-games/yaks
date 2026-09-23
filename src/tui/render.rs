@@ -32,6 +32,8 @@ pub(crate) fn render(app: &App, frame: &mut Frame) {
         Constraint::Length(1),
     ])
     .areas(frame.area());
+    // Fresh hit map each frame: only panes drawn below get recorded (yaks-97a2).
+    app.hits.replace(Default::default());
     render_tabs(app, frame, top);
     // The list is full-width until the detail pane or a right-pane overlay is
     // shown. We intentionally keep the filter drawer / fuzzy picker / view
@@ -245,6 +247,13 @@ pub(crate) fn help_content() -> Vec<Line<'static>> {
         entry("y", "Copy yak id to clipboard"),
         entry("?", "Toggle this help"),
         entry("q / Ctrl-C", "Quit"),
+        blank(),
+        section("Mouse"),
+        entry("Wheel", "Scroll the pane under the pointer"),
+        entry("Click row", "Select (again: open detail)"),
+        entry("Click detail", "Move line cursor (again: follow link)"),
+        entry("Click tab", "Switch view"),
+        entry("Shift-drag", "Native text selection (terminal)"),
     ]
 }
 
@@ -432,6 +441,7 @@ pub(crate) fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
     // ` {emoji name}{*} ({count}) ` per pinned view, active black-on-white bold,
     // others dim; a trailing filter indicator when the live filter is forked.
     let mut spans: Vec<Span> = Vec::new();
+    let mut tab_x = area.x;
     for &i in &app.pinned_indices() {
         let v = &app.views[i];
         let mark = if i == app.view && app.is_view_modified() {
@@ -448,6 +458,18 @@ pub(crate) fn render_tabs(app: &App, frame: &mut Frame, area: Rect) {
         } else {
             Style::new().add_modifier(Modifier::DIM)
         };
+        // Record the tab's on-screen rect for mouse clicks (clipped to the row).
+        let w = (disp_width(&text) as u16).min((area.x + area.width).saturating_sub(tab_x));
+        if w > 0 {
+            let r = Rect {
+                x: tab_x,
+                y: area.y,
+                width: w,
+                height: 1,
+            };
+            app.hits.borrow_mut().tabs.push((r, i));
+        }
+        tab_x = tab_x.saturating_add(w + 1);
         spans.push(Span::styled(text, style));
         spans.push(Span::raw(" "));
     }
@@ -577,6 +599,9 @@ pub(crate) fn render_list(app: &App, frame: &mut Frame, area: Rect) {
     };
     frame.render_stateful_widget(List::new(items).highlight_style(hl), area, &mut state);
     app.list_offset.set(state.offset());
+    let mut hits = app.hits.borrow_mut();
+    hits.list = Some(area);
+    hits.list_offset = state.offset();
 }
 
 /// Truncate `s` to a maximum display width (emoji counted as 2).
@@ -819,6 +844,7 @@ pub(crate) fn render_detail(app: &App, frame: &mut Frame, area: Rect) {
     } else {
         area
     };
+    app.hits.borrow_mut().detail = Some(content_area);
     let lines = app.detail_dlines();
     let jumps = detail::jumplist(&lines);
     // The "current" link is whichever link sits on the line cursor.

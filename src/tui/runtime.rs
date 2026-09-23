@@ -4,6 +4,7 @@
 //! scope (App, handle_key, render, the crossterm/notify imports, …).
 
 use super::*;
+use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 pub fn run(mut app: App) -> Result<()> {
     let (mut term, kitty) = setup()?;
     let res = event_loop(&mut term, &mut app);
@@ -32,10 +33,10 @@ fn event_loop(term: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> R
         app.detail_page = h.saturating_sub(3).max(1);
         // Block for input, but wake periodically to service filesystem events.
         if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(k) = event::read()? {
-                if k.kind == KeyEventKind::Press {
-                    handle_key(app, k);
-                }
+            match event::read()? {
+                Event::Key(k) if k.kind == KeyEventKind::Press => handle_key(app, k),
+                Event::Mouse(m) => app.handle_mouse(m),
+                _ => {}
             }
         }
         // Coalesce any pending fs notifications into one deferred refresh.
@@ -90,6 +91,9 @@ fn setup() -> Result<(Terminal<CrosstermBackend<Stdout>>, bool)> {
     enable_raw_mode()?;
     let mut out = io::stdout();
     execute!(out, EnterAlternateScreen)?;
+    // Mouse capture (yaks-97a2): wheel + clicks. Most terminals still do native
+    // text selection with Shift held while capture is on.
+    let _ = execute!(out, EnableMouseCapture);
     let kitty = supports_keyboard_enhancement().unwrap_or(false);
     if kitty {
         let _ = execute!(
@@ -111,6 +115,7 @@ fn restore(kitty: bool) -> Result<()> {
     if kitty {
         let _ = execute!(out, PopKeyboardEnhancementFlags);
     }
+    let _ = execute!(out, DisableMouseCapture);
     execute!(out, LeaveAlternateScreen)?;
     disable_raw_mode()?;
     Ok(())

@@ -138,7 +138,8 @@ those). Example: `yaks bulk --label auth --set-priority 1 --commit`.
 pane, inline create/edit, dependency and reparent pickers, search, and an
 embedded modal editor (vim or emacs keybindings, per `.yaks/config.yaml`). It
 auto-refreshes when the files change underneath it, so it stays in sync if you
-(or an agent) edit yaks from elsewhere. Mark rows with `m` for a bulk state
+(or an agent) edit yaks from elsewhere. It takes the mouse too (wheel scroll,
+click to select / open / switch view). Mark rows with `m` for a bulk state
 change over the selection; `a` raises or clears a `needs` block (ask / answer);
 and an **Inbox** view lists every yak awaiting a human, each flagged inline with
 a ⏳ badge and a warning accent.
