@@ -690,3 +690,70 @@ fn attach_name_and_rename_attachment() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Labels are normalized at every CLI entry point (yaks-7cb3): commas and
+/// whitespace separate labels, empties drop, duplicates collapse in order. A
+/// legacy comma label on disk is flagged by `doctor` and re-split on the next
+/// label edit. Throwaway farm built via the CLI.
+#[test]
+fn labels_normalized_on_create_update_bulk_and_doctor() {
+    let dir = std::env::temp_dir().join(format!("yaks-labelnorm-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let raw = |args: &[&str]| -> (bool, String) {
+        let out = Command::cargo_bin("yaks")
+            .unwrap()
+            .current_dir(&dir)
+            .args(args)
+            .output()
+            .unwrap();
+        (out.status.success(), String::from_utf8(out.stdout).unwrap())
+    };
+    let cli = |args: &[&str]| -> String {
+        let (ok, stdout) = raw(args);
+        assert!(ok, "command {args:?} failed: {stdout}");
+        stdout
+    };
+    let labels = |id: &str| -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_str(&cli(&["show", id, "--json"])).unwrap();
+        v["labels"]
+            .as_array()
+            .map(|a| a.iter().map(|l| l.as_str().unwrap().to_string()).collect())
+            .unwrap_or_default()
+    };
+
+    cli(&["init"]);
+    let created: serde_json::Value = serde_json::from_str(&cli(&[
+        "create", "alpha", "--labels", "foo, bar", "baz,foo", "--json",
+    ]))
+    .unwrap();
+    let a = created["id"].as_str().unwrap().to_string();
+    assert_eq!(labels(&a), ["foo", "bar", "baz"]);
+
+    cli(&[
+        "update",
+        &a,
+        "--add-label",
+        "x y",
+        "--remove-label",
+        "foo,baz",
+    ]);
+    assert_eq!(labels(&a), ["bar", "x", "y"]);
+
+    // Bulk: the dry-run preview shows the normalized labels.
+    let dry = cli(&["bulk", "--label", "bar,nope", "--add-label", "p,q"]);
+    assert!(dry.contains("add labels [p, q]"), "{dry}");
+
+    // A legacy on-disk comma label: doctor flags it (non-zero exit)...
+    let path = dir.join(format!(".yaks/hairy/{a}.md"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replacen("- bar\n", "- ui,docs\n", 1)).unwrap();
+    let (ok, out) = raw(&["doctor"]);
+    assert!(!ok, "doctor should fail on a malformed label: {out}");
+    assert!(out.contains("\"ui,docs\""), "{out}");
+    // ...and any label edit re-splits it canonically.
+    cli(&["update", &a, "--add-label", "ui"]);
+    assert_eq!(labels(&a), ["ui", "docs", "x", "y"]);
+    assert!(raw(&["doctor"]).0, "doctor clean after re-edit");
+    let _ = std::fs::remove_dir_all(&dir);
+}

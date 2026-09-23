@@ -26,7 +26,7 @@ use farm::{
     RenamePlan, Reparent, Show, SlaughterOutcome, Stats, TaskEdit, TaskRefs, UpdateOutcome,
 };
 use filter::FilterSpec;
-use model::{Status, Task};
+use model::{Status, Task, normalize_labels};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -49,6 +49,8 @@ struct FilterFlags {
     kind: Vec<String>,
     #[arg(long)]
     priority: Vec<u8>,
+    /// Keep only yaks with any of these labels. Repeatable; ORs. Comma- or
+    /// space-separated lists are split (`--label ui,docs`).
     #[arg(long)]
     label: Vec<String>,
     /// Keep only yaks in these herds (id prefixes). Repeatable; ORs.
@@ -228,6 +230,9 @@ enum Command {
         /// configured herd. Lets one farm hold several herds.
         #[arg(long = "herd")]
         prefix: Option<String>,
+        /// Labels for the new yak. Commas and spaces separate labels (a label
+        /// may contain neither): `--labels ui,docs`, `--labels 'ui docs'`, and
+        /// `--labels ui docs` are equivalent. Duplicates are dropped.
         #[arg(long, num_args = 1..)]
         labels: Vec<String>,
         #[arg(long = "depends-on", num_args = 1..)]
@@ -256,8 +261,10 @@ enum Command {
         priority: Option<u8>,
         #[arg(long)]
         description: Option<String>,
+        /// Labels to add. Commas and spaces separate labels (`ui,docs`).
         #[arg(long = "add-label", num_args = 1..)]
         add_label: Vec<String>,
+        /// Labels to remove. Commas and spaces separate labels (`ui,docs`).
         #[arg(long = "remove-label", num_args = 1..)]
         remove_label: Vec<String>,
         /// Set (or clear, with an empty string) this yak's `source:` URL.
@@ -362,10 +369,11 @@ enum Command {
     Bulk {
         #[command(flatten)]
         filter: FilterFlags,
-        /// Labels to add to every matched yak.
+        /// Labels to add to every matched yak. Commas and spaces separate labels.
         #[arg(long = "add-label", num_args = 1..)]
         add_label: Vec<String>,
-        /// Labels to remove from every matched yak.
+        /// Labels to remove from every matched yak. Commas and spaces separate
+        /// labels.
         #[arg(long = "remove-label", num_args = 1..)]
         remove_label: Vec<String>,
         /// Set the priority of every matched yak.
@@ -1022,6 +1030,10 @@ fn main() -> Result<()> {
                 eprintln!("error: specify either --reparent ID or --unparent, not both");
                 std::process::exit(1);
             }
+            // Normalize up front so the dry-run preview shows the labels that
+            // will actually be written (yaks-7cb3).
+            let add_label = normalize_labels(&add_label);
+            let remove_label = normalize_labels(&remove_label);
             let does_field_edit = !add_label.is_empty()
                 || !remove_label.is_empty()
                 || set_priority.is_some()
@@ -1178,7 +1190,7 @@ fn build_spec(f: FilterFlags) -> FilterSpec {
         statuses: f.status.iter().filter_map(|s| parse_status(s)).collect(),
         types: f.kind,
         priorities: f.priority,
-        labels: f.label,
+        labels: normalize_labels(&f.label),
         herds: f.herd,
         search: f.search,
         ready_only: f.ready,

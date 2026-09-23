@@ -240,17 +240,10 @@ impl App {
         if source != cur.source.clone().unwrap_or_default() {
             edit.source = Some(source);
         }
-        edit.add_labels = new_labels
-            .iter()
-            .filter(|l| !cur.labels.contains(l))
-            .cloned()
-            .collect();
-        edit.remove_labels = cur
-            .labels
-            .iter()
-            .filter(|l| !new_labels.contains(l))
-            .cloned()
-            .collect();
+        if let Some((add, remove)) = crate::model::label_edit(&cur.labels, &new_labels) {
+            edit.add_labels = add;
+            edit.remove_labels = remove;
+        }
         // A herd change from the edit form's chip row is an id-prefix rename
         // (tail preserved), folded into this same commit (yaks-71d1). Detect it
         // against the yak's current prefix.
@@ -801,7 +794,7 @@ impl App {
             Some(id) => match self.task(id) {
                 Some(cur) => {
                     let mut a = f.labels_vec();
-                    let mut b = cur.labels.clone();
+                    let mut b = crate::model::normalize_labels(&cur.labels);
                     a.sort();
                     b.sort();
                     f.title_text() != cur.title
@@ -1173,20 +1166,12 @@ impl App {
         let text = ed.text();
         match ed.action {
             EditAction::Labels(id) => {
-                let new: Vec<String> = text
-                    .split(',')
-                    .map(|s| s.trim())
-                    .filter(|s| !s.is_empty())
-                    .map(String::from)
-                    .collect();
+                let new = crate::model::normalize_labels([&text]);
                 let cur = self.task(&id).map(|t| t.labels.clone()).unwrap_or_default();
-                if new == cur {
+                let Some((add, remove)) = crate::model::label_edit(&cur, &new) else {
                     self.notification = Some(format!("{id} labels unchanged"));
                     return;
-                }
-                let add: Vec<String> = new.iter().filter(|l| !cur.contains(l)).cloned().collect();
-                let remove: Vec<String> =
-                    cur.iter().filter(|l| !new.contains(l)).cloned().collect();
+                };
                 let shown = if new.is_empty() {
                     "(none)".to_string()
                 } else {

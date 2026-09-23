@@ -192,16 +192,9 @@ impl CreateForm {
         self.source.borrow().lines.to_string().trim().to_string()
     }
 
+    /// The labels field, normalized (commas/whitespace separate; yaks-7cb3).
     pub(crate) fn labels_vec(&self) -> Vec<String> {
-        self.labels
-            .borrow()
-            .lines
-            .to_string()
-            .split(',')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect()
+        crate::model::normalize_labels([self.labels.borrow().lines.to_string()])
     }
 
     /// Reassemble the full body from the description + comment blocks (emptied

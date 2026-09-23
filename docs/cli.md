@@ -30,7 +30,7 @@ Run `yaks <command> --help` for full flags. Most read commands accept the shared
 
 | Command | What it does |
 |---|---|
-| `create '<title>'` | New hairy yak. Title is positional or `--title`; `--type`/`--priority`/`--parent`/`--herd`/`--labels`/`--depends-on`/`--source`/`--description`/`--verify`; `--json` prints id + file path. `--herd` sets the new yak's herd (id prefix; default: the config herd), so one `.yaks/` can hold several herds. |
+| `create '<title>'` | New hairy yak. Title is positional or `--title`; `--type`/`--priority`/`--parent`/`--herd`/`--labels`/`--depends-on`/`--source`/`--description`/`--verify`; `--json` prints id + file path. `--labels` (like `--add-label`/`--remove-label`/`--label` everywhere) splits on commas and whitespace — a label may contain neither, so `--labels ui,docs`, `--labels 'ui, docs'`, and `--labels ui docs` all give `[ui, docs]` (duplicates dropped). `--herd` sets the new yak's herd (id prefix; default: the config herd), so one `.yaks/` can hold several herds. |
 | `update <ids…>` | Update fields/labels or append a `--note`; the same edit applies to every id. `--as <actor>` attributes the note. `--verify '<cmd>'` sets (or, empty, clears) the yak's verification command; `--source <url>` likewise sets (or, empty, clears) its external `source:`. |
 | `dep add\|remove <id> <dep>` | Add / remove a dependency. |
 | `reparent <ids…> --parent <id>` | Move yaks under a new parent (or `--unparent` to top-level). |
@@ -102,7 +102,7 @@ yak itself.
 | `init` | Create a `.yaks/` farm in the current directory. |
 | `skills install` | Install the bundled agent skills (`yaks`, `yaks-tracker`) into a skills dir (default `~/.agents/skills`). Upgrades a cleanly-outdated copy; leaves a locally-edited one alone unless `--force`. Refuses to write onto yaks' own `skills/` source (even via a symlink, even with `--force`). |
 | `skills status` | Per-skill verdict — `current` / `stale` / `adoptable` / `held` / `modified` / `unmanaged` / `source` — from the provenance stamp. `--dir` to inspect another skills dir. See [skills.md](skills.md). |
-| `doctor` | Read-only integrity check: duplicate-status ids, dangling parent/deps. Exits non-zero on any issue (CI-usable). `--strict` also flags shorn yaks with no recorded note, and shorn yaks whose `verify:` command did not last PASS (evidence-before-shear). |
+| `doctor` | Read-only integrity check: duplicate-status ids, dangling parent/deps, malformed labels (a legacy label containing a comma or space, e.g. `ui,docs` — any label edit on that yak re-splits it). Exits non-zero on any issue (CI-usable). `--strict` also flags shorn yaks with no recorded note, and shorn yaks whose `verify:` command did not last PASS (evidence-before-shear). |
 | `tui` | Open the interactive terminal UI (see [tui.md](tui.md)). |
 
 ## Attribution

@@ -91,7 +91,7 @@ when all of them are shorn (or dead), and *tangled* otherwise.
 
 | Command | What it does |
 |---------|--------------|
-| `yaks create` | Create a task; the title is positional (`yaks create "Fix login"`). Flags: `--type`, `--priority`, `--parent`, `--labels`, `--depends-on`, `--source`, `--description`, `--json` (emit the new id + file path) |
+| `yaks create` | Create a task; the title is positional (`yaks create "Fix login"`). Flags: `--type`, `--priority`, `--parent`, `--labels` (comma- or space-separated), `--depends-on`, `--source`, `--description`, `--json` (emit the new id + file path) |
 | `yaks list` | List tasks; filter by `--status/--type/--priority/--label/--search`, `--ready`, `--tangled`, `--parent-of`, `--all` |
 | `yaks show <id>` | Full detail for one task, with parent + children |
 | `yaks refs <id>` | List what a task points at (parent, deps, id mentions in its text), flagging any that dangle |

@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 
 use crate::filter::{self, FilterSpec};
-use crate::model::{Status, Task};
+use crate::model::{Status, Task, is_canonical_label, normalize_labels};
 use crate::refs;
 use crate::rollup;
 use crate::store::{self, SchemaStatus};
@@ -374,6 +374,10 @@ pub enum IssueKind {
     /// run was not a PASS (or was never run). Setting `verify:` is a commitment
     /// that strict mode then enforces at shear. Only reported in strict mode.
     UnverifiedShear,
+    /// A label containing a comma or whitespace (e.g. a legacy `ui,docs` from
+    /// before labels were normalized; yaks-7cb3). Any label edit on the yak
+    /// re-splits it.
+    MalformedLabel,
 }
 
 impl IssueKind {
@@ -386,6 +390,7 @@ impl IssueKind {
             IssueKind::DanglingDependsOn => "dangling-depends-on",
             IssueKind::MissingEvidence => "missing-evidence",
             IssueKind::UnverifiedShear => "unverified-shear",
+            IssueKind::MalformedLabel => "malformed-label",
         }
     }
 
@@ -400,6 +405,7 @@ impl IssueKind {
             IssueKind::UnverifiedShear => {
                 "Unverified shear (shorn yak whose verify: command did not last PASS)"
             }
+            IssueKind::MalformedLabel => "Malformed label (contains a comma or whitespace)",
         }
     }
 }
@@ -735,6 +741,25 @@ impl Farm {
             }
         }
 
+        // Malformed labels: a comma or whitespace inside one label (legacy data
+        // from before normalization). Fix by re-editing the yak's labels.
+        for t in &tasks {
+            for l in t.labels.iter().filter(|l| !is_canonical_label(l)) {
+                let fixed = normalize_labels([l]);
+                issues.push(Issue {
+                    kind: IssueKind::MalformedLabel,
+                    message: format!(
+                        "{} has label {:?}; labels may not contain commas or spaces \
+                         (would be [{}] — re-edit its labels to fix)",
+                        t.id,
+                        l,
+                        fixed.join(", ")
+                    ),
+                    ids: vec![t.id.clone()],
+                });
+            }
+        }
+
         // Strict: a shorn yak with no recorded note is a completion without
         // evidence (the yaks-working evidence-before-shear rule). Dead
         // (abandoned) yaks are exempt — abandonment needs no completion note.
@@ -981,7 +1006,7 @@ impl Farm {
             created: Some(now.clone()),
             updated: Some(now),
             parent: new.parent,
-            labels: new.labels,
+            labels: normalize_labels(&new.labels),
             depends_on: new.depends_on,
             source: new.source,
             needs: None,
@@ -1014,16 +1039,13 @@ impl Farm {
             task.body = d;
             changed = true;
         }
-        if !edit.add_labels.is_empty() {
-            for l in edit.add_labels {
-                if !task.labels.contains(&l) {
-                    task.labels.push(l);
-                }
-            }
-            changed = true;
-        }
-        if !edit.remove_labels.is_empty() {
-            task.labels.retain(|l| !edit.remove_labels.contains(l));
+        // Labels are normalized on the way in (split on commas/whitespace,
+        // deduped; yaks-7cb3). Any label edit also re-splits the yak's existing
+        // labels, so a legacy `ui,docs` label is canonicalized on first touch.
+        if !edit.add_labels.is_empty() || !edit.remove_labels.is_empty() {
+            let remove = normalize_labels(&edit.remove_labels);
+            task.labels = normalize_labels(task.labels.iter().chain(&edit.add_labels));
+            task.labels.retain(|l| !remove.contains(l));
             changed = true;
         }
         if let Some(s) = edit.source {
@@ -1329,6 +1351,7 @@ fn issue_rank(k: IssueKind) -> u8 {
         IssueKind::DanglingDependsOn => 3,
         IssueKind::MissingEvidence => 4,
         IssueKind::UnverifiedShear => 5,
+        IssueKind::MalformedLabel => 6,
     }
 }
 

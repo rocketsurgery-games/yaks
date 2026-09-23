@@ -2072,6 +2072,34 @@ mod live {
         );
     }
 
+    /// Label input is normalized (yaks-7cb3): commas and/or spaces separate
+    /// labels, duplicates collapse, and a legacy `ui,docs` label is re-split.
+    #[test]
+    fn labels_edit_normalizes_commas_and_spaces() {
+        let mut legacy = task("t0", "legacy", Status::Hairy, 3, None);
+        legacy.labels = vec!["ui,docs".into()];
+        let (_dir, farm) = temp_farm(&[legacy, task("t1", "plain", Status::Hairy, 3, None)]);
+        let mut app = App::with_farm(farm).unwrap();
+        press(&mut app, "L"); // seeded "ui,docs"; accepting it re-splits
+        enter(&mut app);
+        assert_eq!(app.task("t0").unwrap().labels, ["ui", "docs"]);
+        press(&mut app, "j"); // -> t1 (no labels)
+        press(&mut app, "L");
+        press(&mut app, "rust tui, rust,,cli");
+        enter(&mut app);
+        assert_eq!(app.task("t1").unwrap().labels, ["rust", "tui", "cli"]);
+        // The create form's labels field splits on spaces too.
+        press(&mut app, "c");
+        press(&mut app, "fresh");
+        tab(&mut app); // -> type
+        tab(&mut app); // -> priority
+        tab(&mut app); // -> labels
+        press(&mut app, "a b, c");
+        ctrl_s(&mut app);
+        let created = app.all.iter().find(|t| t.title == "fresh").unwrap();
+        assert_eq!(created.labels, ["a", "b", "c"]);
+    }
+
     #[test]
     fn edit_form_updates_description() {
         let (_dir, farm) = temp_farm(&[task("t0", "solo", Status::Hairy, 3, None)]);

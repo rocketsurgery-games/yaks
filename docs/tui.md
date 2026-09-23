@@ -134,6 +134,10 @@ a `herd` chip row to scope to one or more herds. It composes into any view.
 
 ![yaks TUI filter drawer](assets/tui-drawer.svg)
 
+Label fields (the `L` editor, the create/edit form's `labels`, the drawer's
+label filter) take labels separated by commas and/or spaces — `ui, docs`,
+`ui docs`, and `ui,docs` all mean `[ui, docs]`; a label can contain neither.
+
 **Edit form** (`E`) — the shared create/edit form: `title`, `type`, `priority`,
 `labels`, and `source` (the external-issue URL; empty = none, so clearing it
 removes `source:`) rows above the description and comments. `E` on the detail

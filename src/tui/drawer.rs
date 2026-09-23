@@ -158,12 +158,7 @@ impl Drawer {
     }
 
     pub(crate) fn build_spec(&self) -> FilterSpec {
-        let labels: Vec<String> = Self::text_of(&self.labels)
-            .split(',')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect();
+        let labels = crate::model::normalize_labels([Self::text_of(&self.labels)]);
         let non_empty = |cell: &RefCell<EditorState>| {
             let s = Self::text_of(cell).trim().to_string();
             if s.is_empty() { None } else { Some(s) }

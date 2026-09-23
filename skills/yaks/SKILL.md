@@ -133,6 +133,7 @@ Labels are for slicing the farm later (`yaks list --label ui`), not for elaborat
 - **Reuse before inventing.** Check what already exists (`yaks list`, `yaks stats`) and prefer an existing label over a near-synonym (`ui` vs `interface` vs `frontend` — pick one).
 - **Prefer broad, durable areas** (`ui`, `search`, `docs`, `skills`, `rust`) over hyper-specific one-offs. A label earns its keep only if you'd plausibly filter on it.
 - **A few is plenty.** Zero labels is fine; more than ~2–3 on one yak is usually a smell.
+- **One word each.** A label can't contain a comma or space: `--labels ui,docs` (or `ui docs`) means two labels, `ui` and `docs`.
 - **Tracker labels:** when a yak maps to an external issue, a label named for the tracker (`jira`, `github`, `linear`) makes the upstreamed yaks easy to find. The **yaks-tracker** skill covers this.
 
 ## Commands
@@ -170,7 +171,7 @@ Run these directly from the shell (see **Running yaks** above for the exact invo
 | `yaks merge` | Merge another farm into this one — copies every yak (all statuses) + artifacts, preserving ids and status, and declares any incoming herd in this farm's `herds:` config (so it appears in the pickers); **refuses on id collisions** (reconcile the source's herd with `rename-herd` first). Non-destructive: the source is left intact. `--dry-run` previews |
 | `yaks stats` | Show task statistics |
 | `yaks rollup` | Group yaks by the external issue they roll up to (`--keys` for just the keys) |
-| `yaks doctor` | Read-only farm-integrity check (duplicate-status ids, dangling parent/dep refs); exits non-zero on issues, so it's CI-usable. `--json` emits issues as JSON |
+| `yaks doctor` | Read-only farm-integrity check (duplicate-status ids, dangling parent/dep refs, malformed labels containing a comma or space); exits non-zero on issues, so it's CI-usable. `--json` emits issues as JSON |
 | `yaks doctor --strict` | Also flags shorn yaks with no recorded note, and shorn yaks whose `verify:` command did not last PASS — a shear without evidence (the evidence-before-shear rule) |
 | `yaks skills status` | Report whether the installed copies of these skills are current, stale, or locally edited (from a provenance stamp in their frontmatter). Ordinary `yaks` commands already upgrade a cleanly-stale skill, so this is for when one is flagged as edited |
 | `yaks scan-ids` | Scan a file and/or stdin for tokens that are real yak-ids in this farm — a private-mode leak check; exits non-zero if any are found |

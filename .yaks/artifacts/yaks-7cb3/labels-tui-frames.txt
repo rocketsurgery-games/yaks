@@ -1,0 +1,112 @@
+=== frame 0 · 90x14 · focus=list · view=🦬 Hairy · cursor=0 · rows=2 · sel=yak-6b4e · blocked=- · collapsed=0 · filter=(all) · overlay=none ===
+ 🦬  Hairy (2)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (2)   ⭐  Starred (0)
+
+ yak-6b4e p3 task     🦬  legacy labels                                           [ui,docs]
+ yak-7dde p3 task     🦬  plain yak
+
+
+
+
+
+
+
+
+
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:edit  X:del  S:state  D:dep  f
+=== end ===
+=== frame 1 · 90x14 · focus=list · view=🦬 Hairy · cursor=0 · rows=2 · sel=yak-6b4e · blocked=- · collapsed=0 · filter=(all) · overlay=edit ===
+ 🦬  Hairy (2)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (2)   ⭐  Starred (0)
+
+ yak-6b4e p3 task     🦬  legacy labels                                           [ui,docs]
+ yak-7dde p3 task     🦬  plain yak
+
+
+
+
+
+
+
+
+
+Labels for yak-6b4e: ui,docs                                                        INSERT
+=== end ===
+=== frame 2 · 90x14 · focus=list · view=🦬 Hairy · cursor=0 · rows=2 · sel=yak-6b4e · blocked=- · collapsed=0 · filter=(all) · overlay=none ===
+ 🦬  Hairy (2)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (2)   ⭐  Starred (0)
+yak-6b4e labels: ui, docs
+ yak-6b4e p3 task     🦬  legacy labels                                          [ui, docs]
+ yak-7dde p3 task     🦬  plain yak
+
+
+
+
+
+
+
+
+
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:edit  X:del  S:state  D:dep  f
+=== end ===
+=== frame 3 · 90x14 · focus=list · view=🦬 Hairy · cursor=1 · rows=2 · sel=yak-7dde · blocked=- · collapsed=0 · filter=(all) · overlay=none ===
+ 🦬  Hairy (2)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (2)   ⭐  Starred (0)
+yak-6b4e labels: ui, docs
+ yak-6b4e p3 task     🦬  legacy labels                                          [ui, docs]
+ yak-7dde p3 task     🦬  plain yak
+
+
+
+
+
+
+
+
+
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:edit  X:del  S:state  D:dep  f
+=== end ===
+=== frame 4 · 90x14 · focus=list · view=🦬 Hairy · cursor=1 · rows=2 · sel=yak-7dde · blocked=- · collapsed=0 · filter=(all) · overlay=edit ===
+ 🦬  Hairy (2)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (2)   ⭐  Starred (0)
+yak-6b4e labels: ui, docs
+ yak-6b4e p3 task     🦬  legacy labels                                          [ui, docs]
+ yak-7dde p3 task     🦬  plain yak
+
+
+
+
+
+
+
+
+
+Labels for yak-7dde:                                                                INSERT
+=== end ===
+=== frame 5 · 90x14 · focus=list · view=🦬 Hairy · cursor=1 · rows=2 · sel=yak-7dde · blocked=- · collapsed=0 · filter=(all) · overlay=edit ===
+ 🦬  Hairy (2)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (2)   ⭐  Starred (0)
+yak-6b4e labels: ui, docs
+ yak-6b4e p3 task     🦬  legacy labels                                          [ui, docs]
+ yak-7dde p3 task     🦬  plain yak
+
+
+
+
+
+
+
+
+
+Labels for yak-7dde: rust tui, rust,,cli                                            INSERT
+=== end ===
+=== frame 6 · 90x14 · focus=list · view=🦬 Hairy · cursor=1 · rows=2 · sel=yak-7dde · blocked=- · collapsed=0 · filter=(all) · overlay=none ===
+ 🦬  Hairy (2)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (2)   ⭐  Starred (0)
+yak-7dde labels: rust, tui, cli
+ yak-6b4e p3 task     🦬  legacy labels                                          [ui, docs]
+ yak-7dde p3 task     🦬  plain yak                                        [rust, tui, cli]
+
+
+
+
+
+
+
+
+
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:edit  X:del  S:state  D:dep  f
+=== end ===

@@ -1,0 +1,85 @@
+$ yaks init
+Initialized empty yaks farm in /private/tmp/labels-demo/.yaks
+  herd yak  ·  default type task  ·  default priority 3
+Create your first yak with: yaks create --title "…"
+[exit 0]
+
+$ yaks create alpha --labels 'foo, bar' baz,foo --json
+{
+  "status": "hairy",
+  "id": "yak-2213",
+  "title": "alpha",
+  "type": "task",
+  "priority": 3,
+  "created": "2026-09-23T21:44:15Z",
+  "updated": "2026-09-23T21:44:15Z",
+  "labels": [
+    "foo",
+    "bar",
+    "baz"
+  ],
+  "path": "/private/tmp/labels-demo/.yaks/hairy/yak-2213.md"
+}
+[exit 0]
+
+$ yaks show yak-2213
+id:       yak-2213
+title:    alpha
+status:   Hairy
+type:     task
+priority: 3
+created:  2026-09-23T21:44:15Z
+updated:  2026-09-23T21:44:15Z
+labels:   foo, bar, baz
+[exit 0]
+
+$ yaks update yak-2213 --add-label 'x y' --remove-label foo,baz
+Updated yak-2213
+[exit 0]
+
+$ yaks show yak-2213
+id:       yak-2213
+title:    alpha
+status:   Hairy
+type:     task
+priority: 3
+created:  2026-09-23T21:44:15Z
+updated:  2026-09-23T21:44:16Z
+labels:   bar, x, y
+[exit 0]
+
+$ yaks bulk --label bar,nope --add-label p,q
+would update 1 yaks:
+  yak-2213  alpha
+mutation: add labels [p, q]
+(dry run — pass --commit to apply)
+[exit 0]
+
+# hand-edit on disk: label 'bar' -> legacy 'ui,docs'
+
+$ yaks doctor
+Found 1 farm-integrity issue:
+
+Malformed label (contains a comma or whitespace):
+  yak-2213 has label "ui,docs"; labels may not contain commas or spaces (would be [ui, docs] — re-edit its labels to fix)
+[exit 1]
+
+$ yaks update yak-2213 --add-label ui
+Updated yak-2213
+[exit 0]
+
+$ yaks show yak-2213
+id:       yak-2213
+title:    alpha
+status:   Hairy
+type:     task
+priority: 3
+created:  2026-09-23T21:44:15Z
+updated:  2026-09-23T21:44:17Z
+labels:   ui, docs, x, y
+[exit 0]
+
+$ yaks doctor
+All clear: no farm-integrity issues found.
+[exit 0]
+
