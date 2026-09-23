@@ -620,3 +620,73 @@ fn slaughter_guard_and_family() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `attach --name` stores under a chosen (sanitized, extension-kept) name, and
+/// `rename-attachment` moves the file + rewrites the body link, refusing to
+/// clobber another attachment (yaks-fe19).
+#[test]
+fn attach_name_and_rename_attachment() {
+    let dir = std::env::temp_dir().join(format!("yaks-attach-rename-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let cli = |args: &[&str]| {
+        Command::cargo_bin("yaks")
+            .unwrap()
+            .current_dir(&dir)
+            .env("YAKS_SKILLS_AUTOSYNC", "0")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let ok = |args: &[&str]| -> String {
+        let out = cli(args);
+        assert!(
+            out.status.success(),
+            "command {args:?} failed: {:?}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    };
+    ok(&["init"]);
+    let out = ok(&["create", "shots", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let id = v["id"].as_str().unwrap().to_string();
+    let src = dir.join("paste-20260921-234927.png");
+    std::fs::write(&src, b"png").unwrap();
+    let src = src.to_str().unwrap();
+
+    ok(&["attach", &id, src]);
+    let out = ok(&["attach", &id, src, "--name", "login page"]);
+    assert!(out.contains("attached login-page.png"), "{out}");
+
+    let out = ok(&[
+        "rename-attachment",
+        &id,
+        "paste-20260921-234927.png",
+        "dashboard",
+    ]);
+    assert!(out.contains("-> dashboard.png"), "{out}");
+    let arts = dir.join(".yaks/artifacts").join(&id);
+    assert!(arts.join("dashboard.png").is_file());
+    assert!(!arts.join("paste-20260921-234927.png").exists());
+    let show = ok(&["show", &id]);
+    assert!(
+        show.contains(&format!("![dashboard](artifacts/{id}/dashboard.png)")),
+        "{show}"
+    );
+    assert!(
+        show.contains(&format!("![login-page](artifacts/{id}/login-page.png)")),
+        "{show}"
+    );
+
+    // Collision is refused, non-zero, and nothing moves.
+    let out = cli(&["rename-attachment", &id, "dashboard.png", "login-page"]);
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("already has an attachment named login-page.png")
+    );
+    assert!(arts.join("dashboard.png").is_file());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

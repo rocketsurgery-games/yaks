@@ -70,9 +70,9 @@ use create::*;
 use drawer::*;
 use editor::*;
 use fuzzy::*;
-use handlers::{handle_key, pump_events};
 #[cfg(test)]
 use handlers::{handle_event, handle_paste};
+use handlers::{handle_key, pump_events};
 use render::*;
 pub use runtime::run;
 

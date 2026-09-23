@@ -2157,6 +2157,57 @@ mod live {
         );
     }
 
+    /// r on an attachment's image link (detail pane) renames the file and
+    /// rewrites the link; the extension is kept when the new name omits it.
+    #[test]
+    fn rename_attachment_from_detail_link() {
+        let (proj, farm) = temp_farm(&[task("t0", "solo", Status::Hairy, 3, None)]);
+        let _ = farm
+            .attach("t0", "paste-20260921-234927.png", b"png")
+            .unwrap();
+        let mut app = App::with_farm(farm).unwrap();
+        press(&mut app, "l"); // detail pane
+        press(&mut app, "r"); // cursor not on the link yet
+        assert!(
+            matches!(app.overlay, Overlay::None),
+            "no link under cursor -> no prompt"
+        );
+        tab(&mut app); // cursor -> the image link
+        press(&mut app, "r");
+        assert!(draw(&app, 100, 20).contains("Rename paste-20260921-234927.png to"));
+        press(&mut app, "login page");
+        enter(&mut app);
+        let body = &app.task("t0").unwrap().body;
+        assert!(
+            body.contains("![login-page](artifacts/t0/login-page.png)"),
+            "link rewritten: {body}"
+        );
+        let dir = proj.join(".yaks/artifacts/t0");
+        assert!(dir.join("login-page.png").is_file());
+        assert!(!dir.join("paste-20260921-234927.png").exists());
+        assert_eq!(
+            app.notification.as_deref(),
+            Some("renamed paste-20260921-234927.png → login-page.png")
+        );
+    }
+
+    /// The clipboard-PNG attach asks for a name (empty keeps paste-<ts>.png).
+    #[test]
+    fn paste_attach_prompts_for_a_name() {
+        let (proj, farm) = temp_farm(&[task("t0", "solo", Status::Hairy, 3, None)]);
+        let mut app = App::with_farm(farm).unwrap();
+        app.open_paste_name("t0".into(), b"png".to_vec());
+        assert!(draw(&app, 100, 20).contains("Name pasted PNG (empty = paste-"));
+        press(&mut app, "dashboard");
+        enter(&mut app);
+        let body = &app.task("t0").unwrap().body;
+        assert!(
+            body.contains("![dashboard](artifacts/t0/dashboard.png)"),
+            "{body}"
+        );
+        assert!(proj.join(".yaks/artifacts/t0/dashboard.png").is_file());
+    }
+
     #[test]
     fn edit_form_changes_type_and_priority() {
         let (_dir, farm) = temp_farm(&[task("t0", "solo", Status::Hairy, 3, None)]);
@@ -2708,7 +2759,10 @@ fn modal_detail_shows_back_affordance_only_when_covering_the_list() {
     handle_key(&mut app, key('l'));
     assert_eq!(app.focus, Focus::Detail);
     let wide = draw(&app, 80, 12);
-    assert!(!wide.contains('\u{25c2}'), "split view has no chevron:\n{wide}");
+    assert!(
+        !wide.contains('\u{25c2}'),
+        "split view has no chevron:\n{wide}"
+    );
     let narrow = draw(&app, 60, 12);
     let row = narrow.lines().nth(2).unwrap();
     assert!(
@@ -2720,7 +2774,11 @@ fn modal_detail_shows_back_affordance_only_when_covering_the_list() {
     let huge = draw(&app, 220, 12);
     let row = huge.lines().nth(3).unwrap();
     let col = row.chars().position(|c| c == '\u{2502}').unwrap();
-    assert_eq!(col as u16, 220 - DETAIL_MAX_WIDTH, "divider column:\n{huge}");
+    assert_eq!(
+        col as u16,
+        220 - DETAIL_MAX_WIDTH,
+        "divider column:\n{huge}"
+    );
 }
 
 /// yaks-027a: the single-line ask/answer prompts end in a `: ` separator, so

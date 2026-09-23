@@ -61,7 +61,11 @@ pub(crate) fn render(app: &App, frame: &mut Frame) {
             // back-chevron — the list is behind it, `h`/`Esc` returns to it.
             frame.render_widget(
                 Span::styled("\u{25c2}", Style::new().fg(Color::Cyan)),
-                Rect { width: 1, height: 1, ..right },
+                Rect {
+                    width: 1,
+                    height: 1,
+                    ..right
+                },
             );
         }
         match &app.overlay {
@@ -113,8 +117,15 @@ pub(crate) fn main_split(mid: Rect) -> (Rect, Rect) {
     }
     let list_w = w - detail;
     (
-        Rect { width: list_w, ..mid },
-        Rect { x: mid.x + list_w, width: detail, ..mid },
+        Rect {
+            width: list_w,
+            ..mid
+        },
+        Rect {
+            x: mid.x + list_w,
+            width: detail,
+            ..mid
+        },
     )
 }
 
@@ -235,6 +246,7 @@ pub(crate) fn help_content() -> Vec<Line<'static>> {
             "Save / cancel / save+close (editor Normal)",
         ),
         entry("A / O", "Attach artifact / open it"),
+        entry("r", "Rename attachment at cursor (detail)"),
         entry("X", "Slaughter (confirm; offers whole family)"),
         blank(),
         section("Search & filter"),

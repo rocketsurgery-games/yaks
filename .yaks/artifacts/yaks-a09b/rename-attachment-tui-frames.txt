@@ -1,0 +1,48 @@
+=== frame 3 · 90x14 · focus=detail · view=🦬 Hairy · cursor=0 · rows=1 · sel=yak-e6a8 · blocked=- · collapsed=0 · filter=(all) · overlay=edit · detail_scroll=0 · pinned=no ===
+ 🦬  Hairy (1)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (1)   ⭐  Starred (0)
+
+ yak-e6a8 p3 task     🦬  login │ Task: yak-e6a8
+                               │
+                               │ Title:       login screenshots
+                               │ Status:      hairy
+                               │ Type:        task
+                               │ Priority:    p3
+                               │ Created:     Sep 23, 2026 21:44
+                               │ Updated:     Sep 23, 2026 21:44
+                               │ Labels:      -
+                               │
+                               │ ![dashboard](artifacts/yak-e6a8/dashboard.png)
+Rename dashboard.png to (ext kept if omitted):                                      INSERT
+=== end ===
+=== frame 4 · 90x14 · focus=detail · view=🦬 Hairy · cursor=0 · rows=1 · sel=yak-e6a8 · blocked=- · collapsed=0 · filter=(all) · overlay=edit · detail_scroll=0 · pinned=no ===
+ 🦬  Hairy (1)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (1)   ⭐  Starred (0)
+
+ yak-e6a8 p3 task     🦬  login │ Task: yak-e6a8
+                               │
+                               │ Title:       login screenshots
+                               │ Status:      hairy
+                               │ Type:        task
+                               │ Priority:    p3
+                               │ Created:     Sep 23, 2026 21:44
+                               │ Updated:     Sep 23, 2026 21:44
+                               │ Labels:      -
+                               │
+                               │ ![dashboard](artifacts/yak-e6a8/dashboard.png)
+Rename dashboard.png to (ext kept if omitted): signin                               INSERT
+=== end ===
+=== frame 5 · 90x14 · focus=detail · view=🦬 Hairy · cursor=0 · rows=1 · sel=yak-e6a8 · blocked=- · collapsed=0 · filter=(all) · overlay=none · detail_scroll=0 · pinned=no ===
+ 🦬  Hairy (1)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (1)   ⭐  Starred (0)
+renamed dashboard.png → signin.png
+ yak-e6a8 p3 task     🦬  login │ Task: yak-e6a8
+                               │
+                               │ Title:       login screenshots
+                               │ Status:      hairy
+                               │ Type:        task
+                               │ Priority:    p3
+                               │ Created:     Sep 23, 2026 21:44
+                               │ Updated:     Sep 23, 2026 21:44
+                               │ Labels:      -
+                               │
+                               │ ![signin](artifacts/yak-e6a8/signin.png)
+h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S:state  f:filter
+=== end ===

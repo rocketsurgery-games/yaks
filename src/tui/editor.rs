@@ -36,6 +36,18 @@ pub(crate) enum EditAction {
     Labels(String),
     Comment(String),
     Attach(String),
+    /// Name a clipboard PNG before attaching it to `id` (empty input keeps
+    /// the `default` `paste-<ts>.png` name).
+    AttachPaste {
+        id: String,
+        default: String,
+        data: Vec<u8>,
+    },
+    /// Rename attachment `old` under `.yaks/artifacts/<id>/`.
+    RenameAttachment {
+        id: String,
+        old: String,
+    },
     SaveView,
     RenameView {
         index: usize,

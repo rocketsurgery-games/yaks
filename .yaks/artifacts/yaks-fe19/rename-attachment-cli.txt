@@ -1,0 +1,16 @@
+$ yaks attach yak-e6a8 paste-20260921-234927.png
+attached paste-20260921-234927.png to yak-e6a8 (.yaks/artifacts/yak-e6a8/paste-20260921-234927.png)
+$ yaks attach yak-e6a8 paste-20260921-234927.png --name 'login page (v2)'
+attached login-page-v2.png to yak-e6a8 (.yaks/artifacts/yak-e6a8/login-page-v2.png)
+$ yaks rename-attachment yak-e6a8 paste-20260921-234927.png dashboard
+renamed paste-20260921-234927.png -> dashboard.png on yak-e6a8 (.yaks/artifacts/yak-e6a8/dashboard.png); links rewritten in 1 yak(s)
+$ yaks rename-attachment yak-e6a8 dashboard.png login-page-v2
+error: yak-e6a8 already has an attachment named login-page-v2.png
+(exit 1)
+$ ls .yaks/artifacts/yak-e6a8
+dashboard.png
+login-page-v2.png
+$ yaks show yak-e6a8 | tail -3
+![dashboard](artifacts/yak-e6a8/dashboard.png)
+
+![login-page-v2](artifacts/yak-e6a8/login-page-v2.png)

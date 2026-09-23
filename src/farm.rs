@@ -170,6 +170,81 @@ pub fn live_descendants(tasks: &[Task], id: &str) -> Vec<String> {
     out
 }
 
+/// Result of renaming an attachment in `.yaks/artifacts/<id>/`.
+#[derive(Debug, PartialEq)]
+pub enum RenameAttachmentOutcome {
+    /// Renamed to `name`; `rewritten` yak files had links to it updated.
+    Renamed { name: String, rewritten: usize },
+    /// No yak with that id.
+    TaskNotFound,
+    /// No such file under the yak's artifacts directory.
+    NoSuchAttachment(String),
+    /// The requested name sanitizes to nothing usable.
+    Invalid(String),
+    /// A different attachment already has the target name.
+    Collision(String),
+    /// The sanitized name equals the current one.
+    Unchanged,
+}
+
+/// Sanitize a user-supplied attachment filename: keep only the final path
+/// component, turn anything but letters, digits, `.`, `_`, `-`, `+` into `-`
+/// (so the name is safe on disk and inside a markdown `![](...)` link),
+/// collapse `-` runs, and strip leading/trailing `.`/`-`. When the result has
+/// no extension, `keep_ext_of`'s extension (if any) is appended, so renaming
+/// `paste-….png` to `login` yields `login.png`. `None` when nothing usable is
+/// left.
+pub fn attachment_name(raw: &str, keep_ext_of: &str) -> Option<String> {
+    let base = raw.trim().rsplit(['/', '\\']).next().unwrap_or("");
+    let mut out = String::new();
+    for c in base.chars() {
+        let c = if c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '+') {
+            c
+        } else {
+            '-'
+        };
+        if c == '-' && out.ends_with('-') {
+            continue;
+        }
+        out.push(c);
+    }
+    let out = out.trim_matches(|c| c == '.' || c == '-').to_string();
+    if out.is_empty() {
+        return None;
+    }
+    if Path::new(&out).extension().is_none() {
+        if let Some(ext) = Path::new(keep_ext_of).extension().and_then(|e| e.to_str()) {
+            return Some(format!("{out}.{ext}"));
+        }
+    }
+    Some(out)
+}
+
+/// Replace every whole-path occurrence of `old` in `text` with `new`. A match
+/// must not be glued to a longer path/name on either side (so renaming
+/// `a.png` never touches `a.png.bak` or `xartifacts/...`).
+fn replace_path_token(text: &str, old: &str, new: &str) -> String {
+    let name_char = |c: char| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '+');
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(old) {
+        let before = rest[..i].chars().last().or_else(|| out.chars().last());
+        let after = rest[i + old.len()..].chars().next();
+        out.push_str(&rest[..i]);
+        let glued = before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            || after.is_some_and(|c| name_char(c) && c != '.')
+            || (after == Some('.')
+                && rest[i + old.len() + 1..]
+                    .chars()
+                    .next()
+                    .is_some_and(name_char));
+        out.push_str(if glued { old } else { new });
+        rest = &rest[i + old.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
 pub struct Stats {
     pub total: usize,
     pub hairy: usize,
@@ -1003,6 +1078,67 @@ impl Farm {
         task.updated = Some(store::now_iso());
         store::write::save(&self.root, &task)?;
         Ok(AttachOutcome::Attached(name.to_string()))
+    }
+
+    /// Rename `.yaks/artifacts/{id}/{old}` to a sanitized `new` (see
+    /// [`attachment_name`]; the old extension is kept when `new` omits one)
+    /// and rewrite every link to it across the farm — `artifacts/{id}/{old}`
+    /// path mentions in any yak's body, plus the `![alt]` text of a link whose
+    /// alt was the old file stem (what `attach` writes). Refuses to clobber an
+    /// existing attachment.
+    pub fn rename_attachment(
+        &self,
+        id: &str,
+        old: &str,
+        new: &str,
+    ) -> Result<RenameAttachmentOutcome> {
+        use RenameAttachmentOutcome as R;
+        if store::load_task_by_id(&self.root, id)?.is_none() {
+            return Ok(R::TaskNotFound);
+        }
+        let dir = self.root.join("artifacts").join(id);
+        let src = dir.join(old);
+        if old.contains(['/', '\\']) || old.is_empty() || !src.is_file() {
+            return Ok(R::NoSuchAttachment(old.to_string()));
+        }
+        let Some(name) = attachment_name(new, old) else {
+            return Ok(R::Invalid(new.to_string()));
+        };
+        if name == old {
+            return Ok(R::Unchanged);
+        }
+        // A case-only rename on a case-insensitive filesystem "exists" already.
+        if dir.join(&name).exists() && !name.eq_ignore_ascii_case(old) {
+            return Ok(R::Collision(name));
+        }
+        std::fs::rename(&src, dir.join(&name))?;
+
+        let old_path = format!("artifacts/{id}/{old}");
+        let new_path = format!("artifacts/{id}/{name}");
+        let stem = |n: &str| {
+            Path::new(n)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(n)
+                .to_string()
+        };
+        let old_alt = format!("![{}]({new_path})", stem(old));
+        let new_alt = format!("![{}]({new_path})", stem(&name));
+        let mut rewritten = 0;
+        for mut t in store::load(&self.root, &EVERY)? {
+            if !t.body.contains(&old_path) {
+                continue;
+            }
+            let body =
+                replace_path_token(&t.body, &old_path, &new_path).replace(&old_alt, &new_alt);
+            if body != t.body {
+                t.body = body;
+                t.updated = Some(store::now_iso());
+                store::write::save(&self.root, &t)?;
+                rewritten += 1;
+            }
+        }
+        Ok(R::Renamed { name, rewritten })
     }
 
     pub fn transition(&self, id: &str, dest: Status) -> Result<MoveOutcome> {
@@ -1936,5 +2072,98 @@ mod tests {
             .collect();
         flagged.sort();
         assert_eq!(flagged, vec!["yak-0002", "yak-0003"]);
+    }
+
+    #[test]
+    fn attachment_name_sanitizes_and_keeps_extension() {
+        assert_eq!(
+            attachment_name("login", "paste-1.png").as_deref(),
+            Some("login.png")
+        );
+        assert_eq!(
+            attachment_name("login.jpg", "paste-1.png").as_deref(),
+            Some("login.jpg")
+        );
+        assert_eq!(
+            attachment_name(" ../my shot (v2)", "a.png").as_deref(),
+            Some("my-shot-v2.png")
+        );
+        assert_eq!(attachment_name("../", "a.png"), None);
+        assert_eq!(attachment_name("notes", "README").as_deref(), Some("notes"));
+    }
+
+    /// Renaming moves the file and rewrites links in the owner's body (alt text
+    /// included) and in any other yak that references the artifact path, without
+    /// touching lookalike paths.
+    #[test]
+    fn rename_attachment_moves_file_and_rewrites_links() {
+        let (root, farm) = temp_farm();
+        store::write::save(&root, &task("yak-0001", Status::Hairy)).unwrap();
+        let mut other = task("yak-0002", Status::Shorn);
+        other.body =
+            "see .yaks/artifacts/yak-0001/paste-1.png and artifacts/yak-0001/paste-1.png.bak"
+                .into();
+        store::write::save(&root, &other).unwrap();
+        let _ = farm.attach("yak-0001", "paste-1.png", b"png").unwrap();
+
+        let out = farm
+            .rename_attachment("yak-0001", "paste-1.png", "login screen")
+            .unwrap();
+        assert_eq!(
+            out,
+            RenameAttachmentOutcome::Renamed {
+                name: "login-screen.png".into(),
+                rewritten: 2
+            }
+        );
+        let dir = root.join("artifacts/yak-0001");
+        assert!(!dir.join("paste-1.png").exists());
+        assert_eq!(std::fs::read(dir.join("login-screen.png")).unwrap(), b"png");
+        let owner = store::load_task_by_id(&root, "yak-0001").unwrap().unwrap();
+        assert!(
+            owner
+                .body
+                .contains("![login-screen](artifacts/yak-0001/login-screen.png)"),
+            "{}",
+            owner.body
+        );
+        let other = store::load_task_by_id(&root, "yak-0002").unwrap().unwrap();
+        assert_eq!(
+            other.body,
+            "see .yaks/artifacts/yak-0001/login-screen.png and artifacts/yak-0001/paste-1.png.bak"
+        );
+    }
+
+    #[test]
+    fn rename_attachment_refuses_collision_and_missing() {
+        let (root, farm) = temp_farm();
+        store::write::save(&root, &task("yak-0001", Status::Hairy)).unwrap();
+        let _ = farm.attach("yak-0001", "a.png", b"a").unwrap();
+        let _ = farm.attach("yak-0001", "b.png", b"b").unwrap();
+        use RenameAttachmentOutcome as R;
+        assert_eq!(
+            farm.rename_attachment("yak-0001", "a.png", "b").unwrap(),
+            R::Collision("b.png".into())
+        );
+        assert_eq!(
+            std::fs::read(root.join("artifacts/yak-0001/b.png")).unwrap(),
+            b"b"
+        );
+        assert_eq!(
+            farm.rename_attachment("yak-0001", "a.png", "a").unwrap(),
+            R::Unchanged
+        );
+        assert_eq!(
+            farm.rename_attachment("yak-0001", "nope.png", "c").unwrap(),
+            R::NoSuchAttachment("nope.png".into())
+        );
+        assert_eq!(
+            farm.rename_attachment("yak-0001", "a.png", "//").unwrap(),
+            R::Invalid("//".into())
+        );
+        assert_eq!(
+            farm.rename_attachment("yak-0009", "a.png", "c").unwrap(),
+            R::TaskNotFound
+        );
     }
 }

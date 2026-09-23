@@ -74,7 +74,8 @@ the pre-find scroll and cursor).
 | `H` | Move to another herd (multi-herd farms) |
 | `M` | Add a comment (note) |
 | `a` | Ask / answer (raise or clear a `needs` block) |
-| `A` / `O` | Attach artifact / open it |
+| `A` / `O` | Attach artifact / open it. An empty path pastes the clipboard PNG, then prompts for its name (empty keeps `paste-<timestamp>.png`) |
+| `r` | (detail) Rename the attachment whose image link the cursor is on (`Tab` to it); the file moves and every link is rewritten. The extension is kept if you omit it |
 | `X` | Slaughter (delete, with confirm); on a yak with live descendants the confirm offers the whole family, naming how many go |
 | `:w` / `:q` / `:wq` | Save / cancel / save+close (editor Normal mode) |
 

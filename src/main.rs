@@ -22,8 +22,8 @@ use std::env;
 
 use farm::{
     AttachOutcome, Commits, CreateOutcome, DepOutcome, Farm, Issue, IssueKind, LogEntry,
-    MergeOutcome, MoveOutcome, NewTask, OpenError, RefKind, RenameOutcome, RenamePlan, Reparent,
-    Show, SlaughterOutcome, Stats, TaskEdit, TaskRefs, UpdateOutcome,
+    MergeOutcome, MoveOutcome, NewTask, OpenError, RefKind, RenameAttachmentOutcome, RenameOutcome,
+    RenamePlan, Reparent, Show, SlaughterOutcome, Stats, TaskEdit, TaskRefs, UpdateOutcome,
 };
 use filter::FilterSpec;
 use model::{Status, Task};
@@ -136,11 +136,25 @@ enum Command {
         id: String,
         /// Path to the local file to attach.
         path: PathBuf,
+        /// Store the attachment under this filename instead of the source's
+        /// (sanitized; the source's extension is kept if NAME omits one).
+        #[arg(long)]
+        name: Option<String>,
         /// An optional attributed note to record alongside the attachment.
         #[arg(long)]
         note: Option<String>,
         #[arg(long = "as")]
         as_actor: Option<String>,
+    },
+    /// Rename a yak's attachment in `.yaks/artifacts/<id>/` and rewrite every
+    /// link to it across the farm. NEW is sanitized and keeps OLD's extension
+    /// if it omits one; refuses to overwrite an existing attachment.
+    RenameAttachment {
+        id: String,
+        /// Current filename under `.yaks/artifacts/<id>/`.
+        old: String,
+        /// New filename (e.g. `login-page`, becomes `login-page.png`).
+        new: String,
     },
     /// Scan text for tokens that are real yak-ids in this farm — a leak check
     /// for private-mode farms (pre-commit / PR hook). Reads a FILE and/or
@@ -685,6 +699,7 @@ fn main() -> Result<()> {
         Command::Attach {
             id,
             path,
+            name,
             note,
             as_actor,
         } => {
@@ -695,11 +710,21 @@ fn main() -> Result<()> {
                     std::process::exit(1);
                 }
             };
-            let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            let Some(src_name) = path.file_name().and_then(|s| s.to_str()) else {
                 eprintln!("error: attachment path has no filename: {}", path.display());
                 std::process::exit(1);
             };
-            match farm.attach(&id, name, &data)? {
+            let name = match name {
+                None => src_name.to_string(),
+                Some(raw) => match farm::attachment_name(&raw, src_name) {
+                    Some(n) => n,
+                    None => {
+                        eprintln!("error: invalid attachment name: {raw:?}");
+                        std::process::exit(1);
+                    }
+                },
+            };
+            match farm.attach(&id, &name, &data)? {
                 AttachOutcome::NotFound => {
                     eprintln!("no such task: {id}");
                     std::process::exit(1);
@@ -717,6 +742,32 @@ fn main() -> Result<()> {
                             },
                         )?;
                     }
+                }
+            }
+        }
+        Command::RenameAttachment { id, old, new } => {
+            match farm.rename_attachment(&id, &old, &new)? {
+                RenameAttachmentOutcome::Renamed { name, rewritten } => println!(
+                    "renamed {old} -> {name} on {id} (.yaks/artifacts/{id}/{name}); \
+                     links rewritten in {rewritten} yak(s)"
+                ),
+                RenameAttachmentOutcome::Unchanged => println!("{old}: name unchanged"),
+                refused => {
+                    let why = match refused {
+                        RenameAttachmentOutcome::TaskNotFound => format!("no such task: {id}"),
+                        RenameAttachmentOutcome::NoSuchAttachment(n) => {
+                            format!("no attachment {n} on {id} (.yaks/artifacts/{id}/)")
+                        }
+                        RenameAttachmentOutcome::Invalid(n) => {
+                            format!("invalid attachment name: {n:?}")
+                        }
+                        RenameAttachmentOutcome::Collision(n) => {
+                            format!("{id} already has an attachment named {n}")
+                        }
+                        _ => unreachable!("handled above"),
+                    };
+                    eprintln!("error: {why}");
+                    std::process::exit(1);
                 }
             }
         }

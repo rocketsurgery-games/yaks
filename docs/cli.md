@@ -44,7 +44,8 @@ Run `yaks <command> --help` for full flags. Most read commands accept the shared
 | Command | What it does |
 |---|---|
 | `verify <ids…>` | Run each yak's verification command with live output, and record `verify: <cmd> -> PASS/FAIL (exit N)` as an attributed note. Exits non-zero if any fails. Explicit only — never auto-run. The command is the yak's own `verify:` field if set, else the config default resolved by the yak's labels (see below). The scriptable form of a yak's evidence contract: a check anyone (or CI) can re-run. |
-| `attach <id> <path>` | Copy a local file under `.yaks/artifacts/<id>/` and link it in the yak's body — artifact evidence (screenshots, TUI frames) a human or coordinator can view. `--note`/`--as` record an attributed note. The non-scriptable, look-at-it form of evidence: an **external file** (committed in team mode — the farm un-ignores `.yaks/artifacts/`), never inlined. |
+| `attach <id> <path>` | Copy a local file under `.yaks/artifacts/<id>/` and link it in the yak's body — artifact evidence (screenshots, TUI frames) a human or coordinator can view. `--name <name>` stores it under a different filename (sanitized; the source's extension is kept if omitted). `--note`/`--as` record an attributed note. The non-scriptable, look-at-it form of evidence: an **external file** (committed in team mode — the farm un-ignores `.yaks/artifacts/`), never inlined. |
+| `rename-attachment <id> <old> <new>` | Rename `.yaks/artifacts/<id>/<old>` (e.g. an ugly `paste-….png`) and rewrite every link to it across the farm. `<new>` is sanitized and keeps `<old>`'s extension if it omits one; refuses to overwrite an existing attachment. |
 
 Default verify commands live in `.yaks/config.yaml` under a nested `verify:` map (label → command, plus an optional `default`); a yak with no explicit `verify:` field resolves its command from the first of its labels with an entry, else `default`. Name the project's levers once:
 

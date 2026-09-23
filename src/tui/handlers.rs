@@ -412,32 +412,43 @@ impl App {
 
     pub(crate) fn commit_attach(&mut self, id: String, path_input: String) {
         let path_input = path_input.trim();
-        let (name, data) = if path_input.is_empty() {
+        if path_input.is_empty() {
             match crate::clipboard::read_png() {
-                Some(bytes) => (
-                    format!("paste-{}.png", chrono::Utc::now().format("%Y%m%d-%H%M%S")),
-                    bytes,
-                ),
-                None => {
-                    self.notification = Some("no PNG image on clipboard".into());
-                    return;
-                }
+                Some(bytes) => self.open_paste_name(id, bytes),
+                None => self.notification = Some("no PNG image on clipboard".into()),
             }
-        } else {
-            let p = std::path::Path::new(path_input);
-            let Ok(bytes) = std::fs::read(p) else {
-                self.notification = Some(format!("not a file: {path_input}"));
-                return;
-            };
-            let name = p
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("attachment")
-                .to_string();
-            (name, bytes)
+            return;
+        }
+        let p = std::path::Path::new(path_input);
+        let Ok(bytes) = std::fs::read(p) else {
+            self.notification = Some(format!("not a file: {path_input}"));
+            return;
         };
+        let name = p
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("attachment")
+            .to_string();
+        self.attach_bytes(&id, &name, &bytes);
+    }
+
+    /// Second step of a clipboard-PNG attach: prompt for a filename (empty
+    /// keeps the timestamped `paste-….png` default) so the pasted image doesn't
+    /// land with an ugly name (yaks-fe19).
+    pub(crate) fn open_paste_name(&mut self, id: String, data: Vec<u8>) {
+        let default = format!("paste-{}.png", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+        self.overlay = Overlay::Edit(Editor::new(
+            self.editor_vim,
+            true,
+            format!("Name pasted PNG (empty = {default}): "),
+            "",
+            EditAction::AttachPaste { id, default, data },
+        ));
+    }
+
+    fn attach_bytes(&mut self, id: &str, name: &str, data: &[u8]) {
         let Some(h) = &self.farm else { return };
-        match h.attach(&id, &name, &data) {
+        match h.attach(id, name, data) {
             Ok(AttachOutcome::Attached(n)) => {
                 self.reload();
                 self.notification = Some(format!("attached {n}"));
@@ -445,6 +456,59 @@ impl App {
             Ok(AttachOutcome::NotFound) => self.notification = Some(format!("{id} not found")),
             Err(e) => self.notification = Some(format!("attach failed: {e}")),
         }
+    }
+
+    /// r (detail pane) — rename the attachment whose image link the detail
+    /// cursor sits on (Tab/[ ] cycle to one). Opens a one-line prompt; the
+    /// rename moves the file and rewrites its links farm-wide (yaks-a09b).
+    pub(crate) fn open_rename_attachment(&mut self) {
+        let target = self
+            .detail_jumps()
+            .into_iter()
+            .find_map(|j| match j.target {
+                detail::Target::Artifact(p) if j.line == self.detail_line => Some(p),
+                _ => None,
+            });
+        let parsed = target.as_deref().and_then(|p| {
+            let rest = p
+                .strip_prefix(".yaks/")
+                .unwrap_or(p)
+                .strip_prefix("artifacts/")?;
+            let (id, name) = rest.split_once('/')?;
+            (!name.contains('/')).then(|| (id.to_string(), name.to_string()))
+        });
+        let Some((id, old)) = parsed else {
+            self.notification = Some("no attachment on this line (Tab to an image link)".into());
+            return;
+        };
+        self.overlay = Overlay::Edit(Editor::new(
+            self.editor_vim,
+            true,
+            format!("Rename {old} to (ext kept if omitted): "),
+            "",
+            EditAction::RenameAttachment { id, old },
+        ));
+    }
+
+    pub(crate) fn commit_rename_attachment(&mut self, id: String, old: String, new: String) {
+        use crate::farm::RenameAttachmentOutcome as R;
+        if new.trim().is_empty() {
+            self.notification = Some("rename cancelled".into());
+            return;
+        }
+        let Some(h) = &self.farm else { return };
+        self.notification = Some(match h.rename_attachment(&id, &old, &new) {
+            Ok(R::Renamed { name, .. }) => {
+                self.reload();
+                format!("renamed {old} → {name}")
+            }
+            Ok(R::Unchanged) => format!("{old}: name unchanged"),
+            Ok(R::Collision(n)) => format!("{id} already has {n}"),
+            Ok(R::Invalid(n)) => format!("invalid name: {n}"),
+            Ok(R::NoSuchAttachment(n)) => format!("no attachment {n} on {id}"),
+            Ok(R::TaskNotFound) => format!("{id} not found"),
+            Err(e) => format!("rename failed: {e}"),
+        });
     }
 
     /// Open a URL or artifact path in the OS default application (best-effort).
@@ -1157,6 +1221,28 @@ impl App {
                 );
             }
             EditAction::Attach(id) => self.commit_attach(id, text),
+            EditAction::AttachPaste { id, default, data } => {
+                let name = if text.trim().is_empty() {
+                    Some(default)
+                } else {
+                    crate::farm::attachment_name(&text, "paste.png")
+                };
+                let taken = |n: &str| {
+                    self.farm
+                        .as_ref()
+                        .is_some_and(|h| h.root().join("artifacts").join(&id).join(n).exists())
+                };
+                match name {
+                    Some(n) if taken(&n) => {
+                        self.notification = Some(format!("{id} already has {n}"))
+                    }
+                    Some(n) => self.attach_bytes(&id, &n, &data),
+                    None => self.notification = Some(format!("invalid name: {}", text.trim())),
+                }
+            }
+            EditAction::RenameAttachment { id, old } => {
+                self.commit_rename_attachment(id, old, text)
+            }
             EditAction::Ask(id) => {
                 let note = text.trim();
                 let note = (!note.is_empty()).then_some(note);
@@ -1715,6 +1801,7 @@ pub(crate) fn handle_key(app: &mut App, k: KeyEvent) {
                 }
                 KeyCode::Char('M') => app.open_comment(),
                 KeyCode::Char('A') => app.open_attach(),
+                KeyCode::Char('r') => app.open_rename_attachment(),
                 KeyCode::Char('a') => app.open_ask_or_answer(),
                 KeyCode::Char('O') => app.open_current_external(),
                 // Move between tasks without leaving the detail pane.
