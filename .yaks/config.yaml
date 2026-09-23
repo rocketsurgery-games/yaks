@@ -11,13 +11,3 @@ verify:
   cli: cargo test -p yaks
   skills: cargo test -p yaks skills
   default: cargo test --workspace
-
-# Declared herds (id prefixes) in this farm. The real work is the `yaks` herd;
-# `test` is a demo herd showing per-herd config (its own default_type + verify
-# lever) and the multi-herd TUI (id colouring + the create-form herd picker).
-herds:
-  yaks:
-  test:
-    default_type: chore
-    verify:
-      default: echo test-herd-lever
