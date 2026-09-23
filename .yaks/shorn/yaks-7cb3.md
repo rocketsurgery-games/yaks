@@ -4,11 +4,12 @@ title: Parse label edits with/without commas
 type: bug
 priority: 3
 created: '2026-08-26T13:23:02Z'
-updated: '2026-09-23T21:45:01Z'
+updated: '2026-09-23T21:46:48Z'
 parent: yaks-f04d
 labels:
 - ui
 - labels
+needs: human
 ---
 
 At present, it's possible to create labels with spaces in them. We should disallow this.
@@ -43,3 +44,7 @@ Headless TUI (toque) frames: L on a legacy 'ui,docs' yak + Enter re-splits to [u
 ---
 ▸ 2026-09-23T21:45:01Z [lane-labels]
 Done. One normalizer: model::normalize_labels (split on commas+whitespace, trim, drop empties, dedupe in order) + is_canonical_label + label_edit (TUI diff vs normalized current). Applied at Farm::create/update (choke point for CLI+TUI), CLI bulk (so dry-run shows normalized) and --label filters, TUI L editor / create-edit form labels_vec / drawer label filter. Any label edit re-splits a yak's legacy labels (canonicalize-on-touch); TUI L+Enter on a legacy yak re-asserts to canonicalize. doctor: new non-strict MalformedLabel ('malformed-label') issue. Existing farm NOT rewritten: doctor flags 13 yaks (139b 1a96 52eb 64c4 79a9 7d49 b716 c3b1 d4d2 d954 dce6 f433 f814) -- so plain 'yaks doctor' on this farm now exits non-zero until fixed; fix per yak with e.g. 'yaks update <id> --add-label <any-existing-piece>'. No migration command built. Docs: docs/cli.md, docs/tui.md, README.md, skills/yaks/SKILL.md, clap help on --labels/--add-label/--remove-label/--label. Tests: unit (model::label_tests), CLI labels_normalized_on_create_update_bulk_and_doctor, TUI labels_edit_normalizes_commas_and_spaces; cargo test --workspace green (284+26+7+1). NOTE: shared CARGO_TARGET_DIR is unsafe for tests/cli.rs across lanes (deps/cli-HASH and target/debug/yaks collide; cargo even reports fresh against another worktree's sources) -- I ran tests under a lane-private profile in the shared dir: --config 'profile.lanelabels.inherits="dev"' --profile lanelabels (target/lanelabels, ~400M).
+
+---
+▸ 2026-09-23T21:46:48Z [coordinator]
+Merged. One decision: 13 yaks in this farm carry comma/space labels (e.g. yaks-1a96 'ui,docs', yaks-f433 'bug ui'), and the new 'malformed-label' doctor check runs without --strict, so plain 'yaks doctor' now exits non-zero here. Options: (a) I clean up the 13 in one commit (each is 'yaks update <id> --add-label <existing>'; re-splits in place) and keep the check always-on [my lean]; (b) move the check under --strict; (c) both.
