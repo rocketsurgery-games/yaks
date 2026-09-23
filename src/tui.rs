@@ -263,6 +263,11 @@ pub struct App {
     /// Detail-pane content width captured at render, used to soft-wrap the
     /// detail lines so the row-indexed model matches what's on screen.
     detail_width: Cell<u16>,
+    /// The list/tree viewport's scroll offset (first visible row), carried
+    /// across frames so moving the cursor scrolls only as far as needed to keep
+    /// it visible, rather than re-deriving it from 0 each frame (which pinned
+    /// the selection to the bottom edge when scrolling up — yaks-9009).
+    list_offset: Cell<usize>,
     overlay: Overlay,
     /// Transient one-line status message shown until the next mutation.
     notification: Option<String>,
@@ -317,6 +322,7 @@ impl App {
             page: 10,
             detail_page: 10,
             detail_width: Cell::new(0),
+            list_offset: Cell::new(0),
             overlay: Overlay::None,
             notification: None,
             editor_vim: true,

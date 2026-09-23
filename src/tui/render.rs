@@ -504,8 +504,13 @@ pub(crate) fn render_list(app: &App, frame: &mut Frame, area: Rect) {
             )
         })
         .collect();
-    let mut state = ListState::default();
-    state.select(Some(app.cursor.min(rows.len() - 1)));
+    // Carry the viewport offset across frames (yaks-9009): ratatui's List only
+    // scrolls as far as needed to keep the selection visible *relative to the
+    // offset it's given*, so a fresh offset of 0 would pin the cursor to the
+    // bottom edge whenever it moved up from below the first screenful.
+    let mut state = ListState::default()
+        .with_offset(app.list_offset.get().min(rows.len() - 1))
+        .with_selected(Some(app.cursor.min(rows.len() - 1)));
     // Subtle selection (Python's C_SELECTED): a dark-gray background with the
     // foreground reset to the terminal default, rather than an obtrusive
     // black-on-cyan reverse. Resetting fg keeps the row legible on the dark bg
@@ -517,6 +522,7 @@ pub(crate) fn render_list(app: &App, frame: &mut Frame, area: Rect) {
         Style::new().fg(Color::Reset).bg(Color::Indexed(236))
     };
     frame.render_stateful_widget(List::new(items).highlight_style(hl), area, &mut state);
+    app.list_offset.set(state.offset());
 }
 
 /// Truncate `s` to a maximum display width (emoji counted as 2).

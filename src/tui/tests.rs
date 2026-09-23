@@ -2356,3 +2356,47 @@ fn status_notification_drops_below_tabs_when_it_would_overlap() {
     );
     insta::assert_snapshot!("status_notification_inline_wide", wide);
 }
+
+#[test]
+fn list_scroll_up_moves_viewport_minimally() {
+    // yaks-9009: scrolling up from the bottom must not re-pin the cursor to
+    // the bottom edge each frame; the viewport stays put until the cursor
+    // reaches its top edge, then scrolls one row at a time.
+    let tasks: Vec<Task> = (0..30)
+        .map(|i| {
+            task(
+                &format!("t{i:02}"),
+                &format!("task {i:02}"),
+                Status::Hairy,
+                3,
+                None,
+            )
+        })
+        .collect();
+    let mut app = App::new(tasks);
+    let (w, h) = (60, 16);
+    // Like the live loop, render after every key so the offset carries over.
+    handle_key(&mut app, key('G'));
+    let bottom = draw(&app, w, h);
+    assert!(bottom.contains("task 29"));
+    let top_of_viewport = app.list_offset.get();
+    handle_key(&mut app, key('k'));
+    draw(&app, w, h);
+    handle_key(&mut app, key('k'));
+    let after = draw(&app, w, h);
+    // Moving up within the viewport doesn't scroll it at all.
+    assert_eq!(app.list_offset.get(), top_of_viewport);
+    assert!(
+        after.contains("task 29"),
+        "bottom row still visible:\n{after}"
+    );
+    insta::assert_snapshot!(after);
+    // Walk up past the viewport's top edge: it scrolls by exactly one row per
+    // step, keeping the cursor on the top row (not the bottom).
+    for _ in 0..(app.cursor - top_of_viewport + 1) {
+        handle_key(&mut app, key('k'));
+        draw(&app, w, h);
+    }
+    assert_eq!(app.list_offset.get(), top_of_viewport - 1);
+    assert_eq!(app.cursor, app.list_offset.get());
+}

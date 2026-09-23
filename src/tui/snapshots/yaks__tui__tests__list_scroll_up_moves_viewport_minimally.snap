@@ -1,0 +1,20 @@
+---
+source: src/tui/tests.rs
+expression: after
+---
+ 🦬  Hairy (30)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (
+
+ t17  p3 task     🦬  task 17
+ t18  p3 task     🦬  task 18
+ t19  p3 task     🦬  task 19
+ t20  p3 task     🦬  task 20
+ t21  p3 task     🦬  task 21
+ t22  p3 task     🦬  task 22
+ t23  p3 task     🦬  task 23
+ t24  p3 task     🦬  task 24
+ t25  p3 task     🦬  task 25
+ t26  p3 task     🦬  task 26
+ t27  p3 task     🦬  task 27
+ t28  p3 task     🦬  task 28
+ t29  p3 task     🦬  task 29
+Tab:view  j/k:move  l:detail  h:family  v:views  c/C:new  E:
