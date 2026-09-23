@@ -119,6 +119,26 @@ pub(crate) fn insert_into(handler: &mut EditorEventHandler, state: &RefCell<Edit
     }
 }
 
+/// Bulk-insert pasted `text` at the cursor as literal text (yaks-f2aa). Unlike
+/// a keystroke replay this never runs keymap commands (a vim Normal-mode paste
+/// inserts, it doesn't execute `dd`…), never triggers Tab ref-completion, and —
+/// being one call — costs one redraw instead of one per char. Enters Insert via
+/// `SwitchMode` so a paste from Normal is one undo step. CRLF/CR normalize to
+/// `\n`; a single-line field flattens newlines to spaces.
+pub(crate) fn paste_into(state: &RefCell<EditorState>, text: &str) {
+    use edtui::actions::{InsertChar, SwitchMode};
+    let mut st = state.borrow_mut();
+    if st.mode != EditorMode::Insert {
+        st.execute(SwitchMode(EditorMode::Insert));
+    }
+    let single = st.is_single_line();
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    for c in text.chars() {
+        let c = if single && c == '\n' { ' ' } else { c };
+        st.execute(InsertChar(c));
+    }
+}
+
 /// Delete the `n` chars before the cursor by replaying Backspace. Used to drop
 /// the typed `<prefix>-` before an autocompleted id is inserted in its place.
 pub(crate) fn delete_into(

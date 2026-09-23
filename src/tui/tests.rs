@@ -2790,3 +2790,190 @@ fn wrapped_detail_field_continuation_is_not_label_coloured() {
         );
     }
 }
+
+// -- paste (yaks-f2aa) ----------------------------------------------------
+
+/// Open the edit form on `app`'s cursor yak and focus its description block.
+fn focus_description(app: &mut App) {
+    app.open_edit();
+    for _ in 0..5 {
+        tab(app); // title -> type -> priority -> labels -> source -> description
+    }
+    assert!(matches!(&app.overlay, Overlay::Create(f) if f.content_index() == Some(0)));
+}
+
+fn description_text(app: &App) -> String {
+    match &app.overlay {
+        Overlay::Create(f) => f.blocks[0].editor.borrow().lines.to_string(),
+        _ => panic!("expected the edit form"),
+    }
+}
+
+#[test]
+fn bracketed_paste_bulk_inserts_into_the_description() {
+    let mut app = App::new(vec![task("t0", "t", Status::Hairy, 3, None)]);
+    focus_description(&mut app);
+    // CRLF normalizes; a `yaks-` + Tab doesn't pop the ref picker mid-paste.
+    handle_event(
+        &mut app,
+        Event::Paste("line one\r\nsee yaks-\tthen **two**".into()),
+    );
+    assert!(
+        matches!(app.overlay, Overlay::Create(_)),
+        "no picker opened"
+    );
+    assert_eq!(description_text(&app), "line one\nsee yaks-\tthen **two**");
+}
+
+#[test]
+fn vim_normal_mode_paste_inserts_literally_not_as_commands() {
+    // Seeded content opens in Normal; pasting `dd` must insert text, not
+    // delete a line (it would, replayed as keys).
+    let mut app = editable();
+    focus_description(&mut app);
+    handle_paste(&mut app, "dd");
+    let text = description_text(&app);
+    assert!(text.contains("dd"), "pasted literally: {text:?}");
+    assert!(text.contains("First line.") && text.contains("Second line."));
+}
+
+#[test]
+fn paste_into_a_single_line_field_flattens_newlines() {
+    let mut app = App::new(vec![task("t0", "t", Status::Hairy, 3, None)]);
+    app.open_edit(); // focus starts on the title row
+    handle_paste(&mut app, "a\nb");
+    match &app.overlay {
+        Overlay::Create(f) => assert_eq!(f.title_text(), "a bt"), // at the cursor (col 0)
+        _ => panic!("expected the edit form"),
+    }
+}
+
+#[test]
+fn paste_into_search_updates_the_live_filter() {
+    let mut app = sample();
+    handle_key(&mut app, key('/'));
+    handle_paste(&mut app, "child\n");
+    assert_eq!(app.filter.search.as_deref(), Some("child "));
+}
+
+#[test]
+fn paste_outside_a_text_field_is_not_a_command_stream() {
+    let mut app = sample();
+    handle_paste(&mut app, "qXc");
+    assert!(!app.quit);
+    assert!(matches!(app.overlay, Overlay::None));
+}
+
+#[test]
+fn pump_drains_a_keystroke_burst_before_the_next_redraw() {
+    // A terminal without bracketed paste sends a paste as keys; the loop must
+    // handle the whole queued burst in one pump (one frame), not one per key.
+    let mut app = App::new(vec![task("t0", "t", Status::Hairy, 3, None)]);
+    focus_description(&mut app);
+    let text = "hello world ".repeat(40);
+    let mut queue = text
+        .chars()
+        .map(|c| Event::Key(key(c)))
+        .collect::<std::collections::VecDeque<_>>();
+    let first = queue.pop_front().unwrap();
+    let n = pump_events(&mut app, first, Duration::from_secs(5), || {
+        Ok(queue.pop_front())
+    })
+    .unwrap();
+    assert_eq!(n, text.chars().count());
+    assert_eq!(description_text(&app), text);
+}
+
+#[test]
+fn pump_stops_draining_once_the_app_quits() {
+    let mut app = sample();
+    let mut queue: std::collections::VecDeque<_> =
+        [Event::Key(key('j')), Event::Key(key('j'))].into();
+    let n = pump_events(
+        &mut app,
+        Event::Key(key('q')),
+        Duration::from_secs(5),
+        || Ok(queue.pop_front()),
+    )
+    .unwrap();
+    assert_eq!(n, 1);
+    assert!(app.quit);
+}
+
+/// Timing evidence for yaks-f2aa: the old loop redrew after every key, so a
+/// keystroke-stream paste cost one full frame per char; now a burst (or a
+/// bracketed paste) costs one frame. `cargo test -p yaks --release paste_bench
+/// -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn paste_bench() {
+    use std::time::Instant;
+    let tasks: Vec<_> = (0..300)
+        .map(|i| {
+            task(
+                &format!("t{i}"),
+                &format!("task number {i}"),
+                Status::Hairy,
+                3,
+                None,
+            )
+        })
+        .collect();
+    let text = "The quick brown fox jumps over the lazy dog, **bold** and `code`.\n".repeat(30);
+    let n = text.chars().count();
+    let keys = || {
+        text.chars().map(|c| {
+            Event::Key(if c == '\n' {
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+            } else {
+                key(c)
+            })
+        })
+    };
+    let mut term = Terminal::new(ratatui::backend::TestBackend::new(160, 50)).unwrap();
+    // Before: one full redraw per key event.
+    let mut app = App::new(tasks.clone());
+    focus_description(&mut app);
+    let t0 = Instant::now();
+    for ev in keys() {
+        handle_event(&mut app, ev);
+        term.draw(|f| render(&app, f)).unwrap();
+    }
+    let before = t0.elapsed();
+    // After (no bracketed paste): the burst drains in one pump, one redraw.
+    let mut app = App::new(tasks.clone());
+    focus_description(&mut app);
+    let t0 = Instant::now();
+    let mut q: std::collections::VecDeque<_> = keys().collect();
+    let first = q.pop_front().unwrap();
+    pump_events(&mut app, first, Duration::from_millis(50), || {
+        Ok(q.pop_front())
+    })
+    .unwrap();
+    term.draw(|f| render(&app, f)).unwrap();
+    let drained = t0.elapsed();
+    // After (bracketed paste): one Paste event, one redraw.
+    let mut app = App::new(tasks);
+    focus_description(&mut app);
+    let t0 = Instant::now();
+    handle_event(&mut app, Event::Paste(text.clone()));
+    term.draw(|f| render(&app, f)).unwrap();
+    let pasted = t0.elapsed();
+    eprintln!("PASTE_BENCH {n} chars @160x50, 300 yaks");
+    eprintln!(
+        "PASTE_BENCH before  (redraw per key):      {before:?} ({:?}/char)",
+        before / n as u32
+    );
+    eprintln!("PASTE_BENCH after   (drained key burst):   {drained:?}");
+    eprintln!("PASTE_BENCH after   (bracketed Paste):     {pasted:?}");
+    // The resulting frame, for eyeballing: a markdown paste into a fresh form.
+    let mut app = App::new(vec![task("t0", "paste target", Status::Hairy, 3, None)]);
+    focus_description(&mut app);
+    handle_event(
+        &mut app,
+        Event::Paste(
+            "# Pasted\r\n\r\nA **bold** line and `code`, see yaks-\tx.\r\n- one\r\n- two".into(),
+        ),
+    );
+    eprintln!("PASTE_FRAME\n{}", draw(&app, 90, 18));
+}

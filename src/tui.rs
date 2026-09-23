@@ -49,8 +49,9 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -69,7 +70,9 @@ use create::*;
 use drawer::*;
 use editor::*;
 use fuzzy::*;
-use handlers::handle_key;
+use handlers::{handle_key, pump_events};
+#[cfg(test)]
+use handlers::{handle_event, handle_paste};
 use render::*;
 pub use runtime::run;
 

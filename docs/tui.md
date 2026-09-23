@@ -78,6 +78,11 @@ the pre-find scroll and cursor).
 | `X` | Slaughter (delete, with confirm); on a yak with live descendants the confirm offers the whole family, naming how many go |
 | `:w` / `:q` / `:wq` | Save / cancel / save+close (editor Normal mode) |
 
+**Pasting** — the TUI enables bracketed paste, so a terminal paste (`Cmd-V` /
+`Ctrl-Shift-V`) lands in the focused text field as one literal insert: fast,
+never interpreted as vim Normal-mode commands, newlines flattened to spaces in
+single-line fields. A paste with no text field focused is ignored.
+
 **Search & filter** — `/` inline search; `#` go to any yak (list or detail pane:
 a picker over every yak — type an id fragment like `a1b2`, the full id, or
 title words, then `Enter` opens its detail, switching to its view and recording

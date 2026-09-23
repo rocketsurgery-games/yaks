@@ -32,12 +32,18 @@ fn event_loop(term: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> R
         app.page = h.saturating_sub(2).max(1);
         app.detail_page = h.saturating_sub(3).max(1);
         // Block for input, but wake periodically to service filesystem events.
+        // Then drain whatever else is already queued before redrawing: one
+        // frame per burst, not per key, so a paste arriving as a keystroke
+        // stream isn't echoed at one char per full redraw (yaks-f2aa).
         if event::poll(Duration::from_millis(250))? {
-            match event::read()? {
-                Event::Key(k) if k.kind == KeyEventKind::Press => handle_key(app, k),
-                Event::Mouse(m) => app.handle_mouse(m),
-                _ => {}
-            }
+            let first = event::read()?;
+            pump_events(app, first, Duration::from_millis(50), || {
+                if event::poll(Duration::ZERO)? {
+                    event::read().map(Some)
+                } else {
+                    Ok(None)
+                }
+            })?;
         }
         // Coalesce any pending fs notifications into one deferred refresh.
         if let Some(rx) = &rx {
@@ -94,6 +100,9 @@ fn setup() -> Result<(Terminal<CrosstermBackend<Stdout>>, bool)> {
     // Mouse capture (yaks-97a2): wheel + clicks. Most terminals still do native
     // text selection with Shift held while capture is on.
     let _ = execute!(out, EnableMouseCapture);
+    // Bracketed paste: a terminal paste arrives as one `Event::Paste` we insert
+    // in bulk, instead of a keystroke per char (yaks-f2aa).
+    let _ = execute!(out, EnableBracketedPaste);
     let kitty = supports_keyboard_enhancement().unwrap_or(false);
     if kitty {
         let _ = execute!(
@@ -116,6 +125,7 @@ fn restore(kitty: bool) -> Result<()> {
         let _ = execute!(out, PopKeyboardEnhancementFlags);
     }
     let _ = execute!(out, DisableMouseCapture);
+    let _ = execute!(out, DisableBracketedPaste);
     execute!(out, LeaveAlternateScreen)?;
     disable_raw_mode()?;
     Ok(())

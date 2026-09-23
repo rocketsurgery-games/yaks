@@ -1,0 +1,25 @@
+PASTE_BENCH 1980 chars @160x50, 300 yaks
+PASTE_BENCH before  (redraw per key):      1.999098542s (1.009645ms/char)
+PASTE_BENCH after   (drained key burst):   1.075959ms
+PASTE_BENCH after   (bracketed Paste):     1.030708ms
+PASTE_FRAME
+ 🦬  Hairy (1)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (1)   ⭐  Starred (0)
+
+ t0   p3 task     🦬  paste tar │ Edit t0
+                               │   title       paste target
+                               │   type         task bug feature idea
+                               │   priority     p1 p2 p3 p4 p5
+                               │   labels
+                               │ ▸ description ──────────────────────────────────────────
+                               │ # Pasted
+                               │
+                               │ A **bold** line and `code`, see yaks-  x.
+                               │ - one
+                               │ - two
+                               │
+                               │
+                               │
+                               │
+Tab/↑↓ rows · ←→ chips · Ctrl-S save · EscEsc/Ctrl-C cancel
+
+test tui::tests::paste_bench ... ok

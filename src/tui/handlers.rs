@@ -1482,6 +1482,86 @@ impl App {
     }
 }
 
+/// Route one terminal event: key presses to [`handle_key`], a bracketed paste
+/// to [`handle_paste`], mouse to `handle_mouse`. Everything else (resize, focus, releases) is a no-op
+/// here — the next frame picks up a resize on its own.
+pub(crate) fn handle_event(app: &mut App, ev: Event) {
+    match ev {
+        Event::Key(k) if k.kind == KeyEventKind::Press => handle_key(app, k),
+        Event::Paste(text) => handle_paste(app, &text),
+        Event::Mouse(m) => app.handle_mouse(m),
+        _ => {}
+    }
+}
+
+/// Handle `first`, then keep draining already-queued events (`next` returns
+/// `None` when the queue is empty) until the queue empties, the app quits, or
+/// `budget` elapses — so a burst (a terminal that sends a paste as a keystroke
+/// stream) costs one redraw, not one per char (yaks-f2aa), while a flood still
+/// can't starve the screen. Returns how many events were handled.
+pub(crate) fn pump_events(
+    app: &mut App,
+    first: Event,
+    budget: Duration,
+    mut next: impl FnMut() -> io::Result<Option<Event>>,
+) -> io::Result<usize> {
+    let start = std::time::Instant::now();
+    handle_event(app, first);
+    let mut n = 1;
+    while !app.quit && start.elapsed() < budget {
+        let Some(ev) = next()? else { break };
+        handle_event(app, ev);
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// A bracketed paste (yaks-f2aa): insert the whole text into the focused text
+/// field in one go. Content editors (the comment/body `Edit` overlay, the
+/// create/edit form's rows) bulk-insert it literally; the live-filter fields
+/// (search, detail find, fuzzy query, drawer text rows) replay it as typed chars
+/// in Insert so their per-key preview sync runs, newlines flattened. Anywhere
+/// else — the list, pickers, confirms — a paste is dropped: pasted text is
+/// never a command stream.
+pub(crate) fn handle_paste(app: &mut App, text: &str) {
+    if let Some(cmd) = &mut app.cmdline {
+        cmd.extend(text.chars().map(|c| if c.is_control() { ' ' } else { c }));
+        return;
+    }
+    let field = match &app.overlay {
+        Overlay::Edit(ed) => {
+            paste_into(&ed.state, text);
+            return;
+        }
+        Overlay::Create(f) => {
+            if let Some(i) = f.content_index() {
+                paste_into(&f.blocks[i].editor, text);
+            } else if let Some(e) = f.line_editor() {
+                paste_into(e, text);
+            }
+            return;
+        }
+        Overlay::Search(sb) | Overlay::DetailFind(sb) => &sb.query,
+        Overlay::Fuzzy(fp) => &fp.query,
+        Overlay::Drawer(d) => match d.text_editor() {
+            Some(e) => e,
+            None => return,
+        },
+        _ => return,
+    };
+    field.borrow_mut().mode = EditorMode::Insert;
+    for c in text.chars() {
+        let c = if matches!(c, '\n' | '\r' | '\t') {
+            ' '
+        } else {
+            c
+        };
+        if !c.is_control() {
+            app.handle_overlay_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+    }
+}
+
 pub(crate) fn handle_key(app: &mut App, k: KeyEvent) {
     let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
     // A modal prompt swallows all other input until resolved (including Ctrl-C,
