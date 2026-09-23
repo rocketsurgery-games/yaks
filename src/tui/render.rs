@@ -48,10 +48,20 @@ pub(crate) fn render(app: &App, frame: &mut Frame) {
                 | Overlay::Help(_)
         );
     if app.focus == Focus::Detail || right_overlay {
-        let [left, right] =
-            Layout::horizontal([Constraint::Percentage(34), Constraint::Percentage(66)]).areas(mid);
-        render_list(app, frame, left);
+        let (left, right) = main_split(mid);
+        let modal = left.width == 0;
+        if !modal {
+            render_list(app, frame, left);
+        }
         let inner = right_divider(frame, right, true);
+        if modal {
+            // Affordance: the pane covers the list, so tip its divider with a
+            // back-chevron — the list is behind it, `h`/`Esc` returns to it.
+            frame.render_widget(
+                Span::styled("\u{25c2}", Style::new().fg(Color::Cyan)),
+                Rect { width: 1, height: 1, ..right },
+            );
+        }
         match &app.overlay {
             Overlay::Edit(ed) if !ed.single_line => render_editor_panel(ed, frame, inner),
             Overlay::Fuzzy(fp) => render_fuzzy_results(app, fp, frame, inner),
@@ -65,6 +75,45 @@ pub(crate) fn render(app: &App, frame: &mut Frame) {
         render_list(app, frame, mid);
     }
     render_status(app, frame, bot);
+}
+
+/// Right-pane (detail / overlay) share of the main area before clamping —
+/// the historical 34/66 split.
+pub(crate) const DETAIL_PCT: u16 = 66;
+/// Narrowest the right pane may get: the field rows (label column + chips),
+/// a note header (`▸ <RFC3339> [author]` ≈ 36 cols) and a ~45-col prose line
+/// all still fit without awkward wrapping.
+pub(crate) const DETAIL_MIN_WIDTH: u16 = 48;
+/// Widest the right pane may get: past ~100 cols (divider + padding + ~95
+/// cols of text) body prose is uncomfortably long to read, so extra terminal
+/// width goes to the list instead.
+pub(crate) const DETAIL_MAX_WIDTH: u16 = 100;
+/// Narrowest useful list beside the pane (an id plus a few title words). If
+/// the clamped pane would leave less than this, the pane covers the whole
+/// main area instead (effectively modal).
+pub(crate) const LIST_MIN_WIDTH: u16 = 24;
+
+/// Split the main area into (list, right pane) when a right pane is shown.
+/// The pane takes `DETAIL_PCT` of the width clamped to
+/// `[DETAIL_MIN_WIDTH, DETAIL_MAX_WIDTH]`; the list gets the rest. When that
+/// would leave the list narrower than `LIST_MIN_WIDTH`, the pane takes the
+/// full width and the returned list rect is zero-width (modal). The single
+/// source of the split, so hit-testing can reuse it.
+pub(crate) fn main_split(mid: Rect) -> (Rect, Rect) {
+    let w = mid.width;
+    // Round the list's 34% share like the old Percentage layout did, so the
+    // unclamped range is column-for-column unchanged.
+    let list_pct = 100 - DETAIL_PCT;
+    let list_share = ((w as u32 * list_pct as u32 + 50) / 100) as u16;
+    let detail = (w - list_share).clamp(DETAIL_MIN_WIDTH, DETAIL_MAX_WIDTH);
+    if w < detail.saturating_add(LIST_MIN_WIDTH) {
+        return (Rect { width: 0, ..mid }, mid);
+    }
+    let list_w = w - detail;
+    (
+        Rect { width: list_w, ..mid },
+        Rect { x: mid.x + list_w, width: detail, ..mid },
+    )
 }
 
 /// Draw the shared left-divider rule (as the detail pane has) on a right-pane

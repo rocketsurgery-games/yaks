@@ -1,0 +1,45 @@
+===== 60 cols =====
+ 🦬  Hairy (3)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (3
+
+◂ Task: a0
+│
+│ Title:       Root A
+│ Status:      hairy
+│ Type:        task
+│ Priority:    p2
+│ Created:     -
+│ Updated:     -
+│ Labels:      -
+│
+│ Children:
+h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:ed
+===== 100 cols =====
+ 🦬  Hairy (3)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (3)   ⭐  Starred (0)    family: ~remaining
+
+ b0   p1 task     🦬  Root B hairy │ Task: a0
+ a0   p2 task     🦬  Root A       │
+   a1 p3 task     🦬  Child A1     │ Title:       Root A
+                                  │ Status:      hairy
+                                  │ Type:        task
+                                  │ Priority:    p2
+                                  │ Created:     -
+                                  │ Updated:     -
+                                  │ Labels:      -
+                                  │
+                                  │ Children:
+h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S:state  f:filter  /:search
+===== 220 cols =====
+ 🦬  Hairy (3)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (3)   ⭐  Starred (0)                                                                                                                            family: ~remaining
+
+ b0   p1 task     🦬  Root B hairy sibling                                                                               │ Task: a0
+ a0   p2 task     🦬  Root A                                                                                             │
+   a1 p3 task     🦬  Child A1                                                                                           │ Title:       Root A
+                                                                                                                        │ Status:      hairy
+                                                                                                                        │ Type:        task
+                                                                                                                        │ Priority:    p2
+                                                                                                                        │ Created:     -
+                                                                                                                        │ Updated:     -
+                                                                                                                        │ Labels:      -
+                                                                                                                        │
+                                                                                                                        │ Children:
+h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S:state  f:filter  /:search  q:quit

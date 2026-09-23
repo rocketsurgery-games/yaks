@@ -2444,3 +2444,44 @@ fn goto_lands_even_when_an_ad_hoc_search_hides_the_target() {
     assert_eq!(app.focus, Focus::Detail);
     assert_eq!(app.selected_id().as_deref(), Some("a1"));
 }
+
+#[test]
+fn main_split_clamps_detail_width_and_goes_modal_when_narrow() {
+    let at = |w: u16| {
+        let (l, r) = main_split(ratatui::layout::Rect::new(0, 2, w, 10));
+        assert_eq!(l.width + r.width, w, "split must cover the area at {w}");
+        assert_eq!(r.x, l.width, "pane starts where the list ends at {w}");
+        (l.width, r.width)
+    };
+    // Unclamped: the historical 34/66 split, column-for-column.
+    assert_eq!(at(80), (27, 53));
+    assert_eq!(at(140), (48, 92));
+    // Clamped at the max: extra width goes to the list.
+    assert_eq!(at(220), (220 - DETAIL_MAX_WIDTH, DETAIL_MAX_WIDTH));
+    // Clamped at the min, list still usable.
+    assert_eq!(at(72), (24, 48));
+    // Min pane would starve the list: the pane covers everything (modal).
+    assert_eq!(at(71), (0, 71));
+    assert_eq!(at(40), (0, 40));
+}
+
+#[test]
+fn modal_detail_shows_back_affordance_only_when_covering_the_list() {
+    let mut app = sample();
+    handle_key(&mut app, key('l'));
+    assert_eq!(app.focus, Focus::Detail);
+    let wide = draw(&app, 80, 12);
+    assert!(!wide.contains('\u{25c2}'), "split view has no chevron:\n{wide}");
+    let narrow = draw(&app, 60, 12);
+    let row = narrow.lines().nth(2).unwrap();
+    assert!(
+        row.starts_with('\u{25c2}'),
+        "modal pane tips its divider with a chevron:\n{narrow}"
+    );
+    // At 220 cols the pane stops at DETAIL_MAX_WIDTH; its divider sits at the
+    // list/pane boundary.
+    let huge = draw(&app, 220, 12);
+    let row = huge.lines().nth(3).unwrap();
+    let col = row.chars().position(|c| c == '\u{2502}').unwrap();
+    assert_eq!(col as u16, 220 - DETAIL_MAX_WIDTH, "divider column:\n{huge}");
+}

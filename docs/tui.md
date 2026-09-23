@@ -12,7 +12,11 @@ interchangeable.
   **Starred**; you can save the current filter as a named view.
 - **Detail pane** — the selected yak: fields, parent/deps/children, source, a
   `Needs:` line when blocked, and the body + timestamped notes. Task-id
-  references and URLs in the body are followable links.
+  references and URLs in the body are followable links. It (and every
+  right-side overlay) takes ~⅔ of the width, clamped to 48–100 columns; the
+  list gets the rest. When that would leave the list under 24 columns, the
+  pane covers the whole main area and its divider is tipped with `◂` — the
+  list is behind it; `h`/`Esc` returns to it.
 - **Filter drawer** (`f`) — toggle status / type / priority chips, a label and
   search box, a parent scope, and `ready` / `tangled` / `inbox` predicates. On a
   multi-herd farm it also grows a `herd` chip row to scope the list to one or
