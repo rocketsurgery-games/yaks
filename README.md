@@ -156,13 +156,22 @@ yaks skills install                          # -> ~/.agents/skills  (yaks + yaks
 yaks skills install --dir ~/.claude/skills   # any agent's skills dir; --force to overwrite
 ```
 
+`~/.agents/skills` is the default because it's the **cross-client convention**:
+the [Agent Skills](https://agentskills.io) client-implementation guide tells
+agents to scan it in addition to their own native directory, so one install
+reaches every compliant client. (The spec defines the `SKILL.md` format, not
+where skills live — there is no official installer.) **Claude Code is the
+exception**: it reads `~/.claude/skills` and does *not* scan `.agents`, so
+install there explicitly with `--dir`.
+
 It activates when a `.yaks/` directory is present, and shells out to the `yaks`
 binary (or `npx @rocketsurgery/yaks`), so make sure one of those is on the
 agent's `PATH`.
 
-Prefer a universal, multi-agent skills manager? The skills are standard
-Anthropic-format `SKILL.md` files, so [openskills](https://github.com/numman-ali/openskills)
-installs them too:
+Prefer a universal, multi-agent skills manager? The skills are plain
+spec-compliant `SKILL.md` files, so [openskills](https://github.com/numman-ali/openskills)
+installs them too (note it uses `.agent/` — singular — for its `--universal`
+mode, which is its own convention rather than the `.agents/` one above):
 
 ```sh
 npx openskills install rocketsurgery-games/yaks

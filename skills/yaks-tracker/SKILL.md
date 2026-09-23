@@ -1,11 +1,6 @@
 ---
 name: yaks-tracker
-description: Relate yaks to external issue trackers (Jira, Linear, GitHub Issues) as a one-way projection. Use when seeding a yak from an external issue, finding which external issues a set of yaks rolls up to, or drafting/posting a status update to an external ticket from a bucket of yaks.
-activation:
-  - User wants to seed or import a yak (or group) from an external issue or URL
-  - User wants to know which external issues a set of yaks maps to (rollup), or which keys to put in a PR
-  - User wants to draft or post a status update to an external ticket from a set of yaks
-  - User asks to "sync" yaks with an external tracker (route to projection — there is no bidirectional sync)
+description: Relate yaks to external issue trackers (Jira, Linear, GitHub Issues) as a one-way projection. Use when seeding a yak from an external issue or URL, finding which external issues a set of yaks rolls up to (or which keys to put in a PR), drafting/posting a status update to an external ticket from a bucket of yaks, or when asked to "sync" yaks with an external tracker (there is no bidirectional sync — route to the projection).
 ---
 
 # Yak ↔ external tracker — one-way projection

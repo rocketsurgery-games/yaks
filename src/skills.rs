@@ -17,8 +17,34 @@ const BUNDLED: &[(&str, &str)] = &[
     ),
 ];
 
+/// The complete set of frontmatter keys the Agent Skills specification allows
+/// (<https://agentskills.io/specification>). `name` and `description` are
+/// required; the rest are optional.
+///
+/// This matters because the leniency is asymmetric: Claude Code silently
+/// *ignores* an unrecognized key, but claude.ai upload, the Skills API, and
+/// packaging with `package_skill.py` reject one with a hard error — so a
+/// non-spec key is invisible locally and fatal downstream. That is exactly how
+/// a bogus `activation:` key rode along in both bundled skills (yaks-e233).
+/// Custom data belongs under `metadata:`, which the spec reserves for it.
+#[allow(dead_code)] // consumed by the spec-compliance test (and `skills status`)
+pub const SPEC_FRONTMATTER_KEYS: &[&str] = &[
+    "name",
+    "description",
+    "license",
+    "compatibility",
+    "metadata",
+    "allowed-tools",
+];
+
 /// Default install target: `~/.agents/skills`. Overridable so other agents'
 /// skills directories (e.g. `~/.claude/skills`) can be targeted.
+///
+/// `~/.agents/skills` is the cross-client interoperability convention the
+/// Agent Skills client-implementation guide tells agents to scan, alongside
+/// their own native directory — so it is the widest-reach default. (The spec
+/// itself mandates no install location.) Claude Code reads `~/.claude/skills`
+/// and does *not* scan `.agents`, which is why `--dir` stays necessary.
 pub fn default_dir() -> PathBuf {
     for var in ["HOME", "USERPROFILE"] {
         if let Ok(home) = std::env::var(var) {
@@ -79,6 +105,67 @@ pub fn install(base: &Path, force: bool) -> Result<Vec<Installed>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Top-level frontmatter keys of a SKILL.md (the `key:` lines between the
+    /// opening and closing `---`, ignoring nested/indented lines and comments).
+    fn frontmatter_keys(src: &str) -> Vec<String> {
+        let mut lines = src.lines();
+        assert_eq!(
+            lines.next().map(str::trim),
+            Some("---"),
+            "SKILL.md must open with frontmatter"
+        );
+        let mut keys = Vec::new();
+        for line in lines {
+            if line.trim() == "---" {
+                break;
+            }
+            // Only top-level keys: skip indented (nested) lines and comments.
+            if line.starts_with(' ') || line.starts_with('\t') || line.trim_start().starts_with('#')
+            {
+                continue;
+            }
+            if let Some((k, _)) = line.split_once(':') {
+                keys.push(k.trim().to_string());
+            }
+        }
+        keys
+    }
+
+    #[test]
+    fn bundled_skills_use_only_spec_frontmatter_keys() {
+        // Guards yaks-e233: a non-spec key (we shipped `activation:`) is
+        // silently ignored by Claude Code but HARD-ERRORS on claude.ai upload /
+        // the Skills API / package_skill.py, so it can't be caught by using the
+        // skill locally. Put custom data under `metadata:` instead.
+        for (name, content) in BUNDLED {
+            let keys = frontmatter_keys(content);
+            for k in &keys {
+                assert!(
+                    SPEC_FRONTMATTER_KEYS.contains(&k.as_str()),
+                    "skill {name:?} has non-spec frontmatter key {k:?}; \
+                     allowed: {SPEC_FRONTMATTER_KEYS:?} (put custom data under `metadata:`)"
+                );
+            }
+            // The two required fields must be present.
+            for required in ["name", "description"] {
+                assert!(
+                    keys.iter().any(|k| k == required),
+                    "skill {name:?} is missing required frontmatter key {required:?}"
+                );
+            }
+            // The spec requires `name` to match the skill's directory name.
+            let declared = content
+                .lines()
+                .find_map(|l| l.strip_prefix("name:"))
+                .map(str::trim)
+                .unwrap_or_default();
+            assert_eq!(
+                declared, *name,
+                "skill {name:?} declares a `name` that doesn't match its directory"
+            );
+        }
+    }
 
     #[test]
     fn install_writes_both_then_skips_then_forces() {
