@@ -213,7 +213,7 @@ pub(crate) fn help_content() -> Vec<Line<'static>> {
         entry("j / k", "Scroll"),
         entry("Tab / [ / ]", "Cycle links"),
         entry("Enter", "Follow link"),
-        entry("i / o", "Nav forward / back"),
+        entry("i / o", "Nav forward / back (restores position)"),
         entry("J / K", "Next / prev task (stay in detail)"),
         entry("Ctrl-N / Ctrl-P", "Next / prev content block"),
         entry("v , Shift-↑↓", "Visual select lines"),

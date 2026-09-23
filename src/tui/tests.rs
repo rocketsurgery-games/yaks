@@ -9,15 +9,15 @@ fn mark_toggles_selection_and_renders_gutter_dot() {
         task("t1", "second", Status::Hairy, 3, None),
     ]);
     // Nothing marked yet: no selection dot on screen.
-    assert!(!draw(&app, 80, 12).contains('\u{25cf}'));
+    assert!(!navpos_frame(&app).contains('\u{25cf}'));
     // `m` marks the cursor's yak; the gutter shows a filled dot.
     handle_key(&mut app, key('m'));
     assert!(app.selected.contains("t0"));
-    assert!(draw(&app, 80, 12).contains('\u{25cf}'));
+    assert!(navpos_frame(&app).contains('\u{25cf}'));
     // `m` again unmarks it, and the dot disappears.
     handle_key(&mut app, key('m'));
     assert!(!app.selected.contains("t0"));
-    assert!(!draw(&app, 80, 12).contains('\u{25cf}'));
+    assert!(!navpos_frame(&app).contains('\u{25cf}'));
 }
 
 #[test]
@@ -871,6 +871,62 @@ fn nav_history_back_and_forward() {
     assert_eq!(app.selected_id().as_deref(), Some("a1"));
     handle_key(&mut app, key('i')); // nothing further
     assert_eq!(app.notification.as_deref(), Some("no later yak"));
+}
+
+/// a0 and a1 are unrelated roots (so a0's only link is in its body) with long
+/// bodies, so the detail pane scrolls; a0's link to a1 sits near its bottom.
+fn linked_long() -> App {
+    let filler: String = (1..=30).map(|i| format!("filler line {i}\n\n")).collect();
+    let mut a0 = task("a0", "Root A", Status::Hairy, 2, None);
+    a0.body = format!("{filler}now follow a1 please");
+    let mut a1 = task("a1", "Other A1", Status::Hairy, 3, None);
+    a1.body = filler;
+    let mut app = App::new(vec![a0, a1]);
+    app.detail_page = 16 - 3; // as runtime sets it for an 80x16 terminal
+    app
+}
+
+/// Render at 80x16, blanking the transient notification row (it differs by
+/// design: "→ a1" vs "← a0") so frames compare on the detail content alone.
+fn navpos_frame(app: &App) -> String {
+    let f = draw(app, 80, 16);
+    let mut rows: Vec<&str> = f.lines().collect();
+    rows[1] = "";
+    rows.join("\n")
+}
+
+#[test]
+fn nav_history_restores_cursor_and_scroll() {
+    // o/i return to the detail cursor + scroll each yak was left at, not the
+    // top (yaks-28b4).
+    let mut app = linked_long();
+    enter_key(&mut app); // detail on a0
+    tab_key(&mut app); // -> the a1 link line, deep in the body (scrolls)
+    let (a0_line, a0_scroll) = (app.detail_line, app.detail_scroll);
+    assert!(a0_scroll > 0, "a0 scrolled down to its link");
+    let frame_a0 = navpos_frame(&app);
+    enter_key(&mut app); // follow -> a1, at the top
+    assert_eq!(app.selected_id().as_deref(), Some("a1"));
+    assert_eq!((app.detail_line, app.detail_scroll), (0, 0));
+    press(&mut app, &"j".repeat(20)); // move a1's cursor down (scrolls)
+    let (a1_line, a1_scroll) = (app.detail_line, app.detail_scroll);
+    assert!(a1_scroll > 0, "a1 scrolled");
+    let frame_a1 = navpos_frame(&app);
+    handle_key(&mut app, key('o')); // back -> a0 where we left it
+    assert_eq!(app.selected_id().as_deref(), Some("a0"));
+    assert_eq!((app.detail_line, app.detail_scroll), (a0_line, a0_scroll));
+    let frame_back = navpos_frame(&app);
+    assert_eq!(frame_back, frame_a0, "back renders a0 exactly as left");
+    handle_key(&mut app, key('i')); // forward -> a1 where we left it
+    assert_eq!(app.selected_id().as_deref(), Some("a1"));
+    assert_eq!((app.detail_line, app.detail_scroll), (a1_line, a1_scroll));
+    assert_eq!(navpos_frame(&app), frame_a1, "forward renders a1 as left");
+    if let Ok(dir) = std::env::var("YAKS_NAVPOS_FRAMES") {
+        let out = format!(
+            "== a0, scrolled to its a1 link ==\n{frame_a0}\n\n== a1 after following + j x20 ==\n{frame_a1}\n\n== o (back): a0 restored ==\n{frame_back}\n"
+        );
+        std::fs::write(std::path::Path::new(&dir).join("navpos-frames.txt"), out).unwrap();
+    }
 }
 
 #[test]

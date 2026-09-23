@@ -1,0 +1,53 @@
+== a0, scrolled to its a1 link ==
+ 🦬  Hairy (2)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (2)   ⭐  Starred (0)
+
+ a0   p2 task     🦬  Root  │  🦬  a0  task     p2  Root A
+ a1   p3 task     🦬  Other │ filler line 25
+                           │
+                           │ filler line 26
+                           │
+                           │ filler line 27
+                           │
+                           │ filler line 28
+                           │
+                           │ filler line 29
+                           │
+                           │ filler line 30
+                           │
+h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S:state
+
+== a1 after following + j x20 ==
+ 🦬  Hairy (2)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (2)   ⭐  Starred (0)
+
+ a0   p2 task     🦬  Root  │  🦬  a1  task     p3  Other A1
+ a1   p3 task     🦬  Other │ Labels:      -
+                           │
+                           │ filler line 1
+                           │
+                           │ filler line 2
+                           │
+                           │ filler line 3
+                           │
+                           │ filler line 4
+                           │
+                           │ filler line 5
+                           │
+h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S:state
+
+== o (back): a0 restored ==
+ 🦬  Hairy (2)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (2)   ⭐  Starred (0)
+
+ a0   p2 task     🦬  Root  │  🦬  a0  task     p2  Root A
+ a1   p3 task     🦬  Other │ filler line 25
+                           │
+                           │ filler line 26
+                           │
+                           │ filler line 27
+                           │
+                           │ filler line 28
+                           │
+                           │ filler line 29
+                           │
+                           │ filler line 30
+                           │
+h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S:state

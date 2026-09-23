@@ -224,7 +224,9 @@ impl App {
     /// (browser-style: a new jump clears the forward stack). Shared by
     /// link-follow and the `#` go-to-yak picker (yaks-63f3).
     pub(crate) fn goto_task(&mut self, id: &str) {
-        let from = self.selected_id();
+        // Snapshot where we are (id + detail cursor/scroll) before moving, so
+        // o/i can restore it.
+        let from = self.current_nav_entry();
         self.open_task_in_detail(id);
         if self.selected_id().as_deref() != Some(id) {
             // No view shows the target (e.g. no tab for its status), so the
@@ -233,7 +235,7 @@ impl App {
             return;
         }
         if let Some(cur) = from {
-            if cur != id {
+            if cur.id != id {
                 self.nav_back.push(cur);
                 self.nav_fwd.clear();
             }
@@ -287,11 +289,11 @@ impl App {
             self.notification = Some("no earlier yak".into());
             return;
         };
-        if let Some(cur) = self.selected_id() {
+        if let Some(cur) = self.current_nav_entry() {
             self.nav_fwd.push(cur);
         }
-        self.open_task_in_detail(&prev);
-        self.notification = Some(format!("← {prev}"));
+        self.restore_nav_entry(&prev);
+        self.notification = Some(format!("← {}", prev.id));
     }
 
     /// i — jump forward again after going back (browser forward).
@@ -300,11 +302,32 @@ impl App {
             self.notification = Some("no later yak".into());
             return;
         };
-        if let Some(cur) = self.selected_id() {
+        if let Some(cur) = self.current_nav_entry() {
             self.nav_back.push(cur);
         }
-        self.open_task_in_detail(&next);
-        self.notification = Some(format!("→ {next}"));
+        self.restore_nav_entry(&next);
+        self.notification = Some(format!("→ {}", next.id));
+    }
+
+    /// Snapshot the selected task + its detail cursor/scroll as a nav stop.
+    fn current_nav_entry(&self) -> Option<NavEntry> {
+        Some(NavEntry {
+            id: self.selected_id()?,
+            line: self.detail_line,
+            scroll: self.detail_scroll,
+        })
+    }
+
+    /// Reopen a nav stop and put its detail cursor/scroll back where it was
+    /// left, clamped in case the task's content shrank meanwhile.
+    fn restore_nav_entry(&mut self, e: &NavEntry) {
+        self.open_task_in_detail(&e.id);
+        if self.selected_id().as_deref() != Some(e.id.as_str()) {
+            return; // target vanished/filtered out: stay at the top
+        }
+        let last = self.detail_dlines().len().saturating_sub(1);
+        self.detail_line = e.line.min(last);
+        self.detail_scroll = e.scroll.min(last as u16);
     }
 
     /// Jump to the Hairy view (where new tasks land) and select `id`.

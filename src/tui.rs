@@ -72,6 +72,16 @@ use handlers::handle_key;
 use render::*;
 pub use runtime::run;
 
+/// One o/i nav-history stop: a task plus the detail cursor/scroll it was left
+/// at, so back/forward return you to where you were (yaks-28b4). Deliberately
+/// local to detail-link nav; a global cross-view history is yaks-158d.
+#[derive(Clone, PartialEq, Debug)]
+struct NavEntry {
+    id: String,
+    line: usize,
+    scroll: u16,
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Focus {
     List,
@@ -242,10 +252,11 @@ pub struct App {
     /// Active detail-pane find query + which match is current (n/N cycle).
     detail_find: Option<String>,
     detail_match: usize,
-    /// Browser-style navigation history of visited task ids (o = back, i =
-    /// forward), driven by following detail links.
-    nav_back: Vec<String>,
-    nav_fwd: Vec<String>,
+    /// Browser-style navigation history of visited tasks (o = back, i =
+    /// forward), driven by following detail links. Each entry remembers the
+    /// detail cursor + scroll it was left at, restored on return (yaks-28b4).
+    nav_back: Vec<NavEntry>,
+    nav_fwd: Vec<NavEntry>,
     collapsed: HashSet<String>,
     /// Per-view family-scope overrides, keyed by `View::key` (persisted in the
     /// UI-state cache). A missing entry means the view inherits the global
