@@ -4,7 +4,7 @@ title: Parse label edits with/without commas
 type: bug
 priority: 3
 created: '2026-08-26T13:23:02Z'
-updated: '2026-09-23T21:46:48Z'
+updated: '2026-09-24T02:14:30Z'
 parent: yaks-f04d
 labels:
 - ui
@@ -48,3 +48,7 @@ Done. One normalizer: model::normalize_labels (split on commas+whitespace, trim,
 ---
 ▸ 2026-09-23T21:46:48Z [coordinator]
 Merged. One decision: 13 yaks in this farm carry comma/space labels (e.g. yaks-1a96 'ui,docs', yaks-f433 'bug ui'), and the new 'malformed-label' doctor check runs without --strict, so plain 'yaks doctor' now exits non-zero here. Options: (a) I clean up the 13 in one commit (each is 'yaks update <id> --add-label <existing>'; re-splits in place) and keep the check always-on [my lean]; (b) move the check under --strict; (c) both.
+
+---
+▸ 2026-09-24T01:04:48Z [Joel Webber]
+Yes, please fix these manually. I'm not getting anything from `yaks doctor`, and can't search for them directly in the UI.

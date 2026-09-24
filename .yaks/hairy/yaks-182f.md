@@ -4,7 +4,7 @@ title: 'Integrate merged edtui features: git-dep, then swap to release + delete 
 type: task
 priority: 3
 created: '2026-08-24T22:12:19Z'
-updated: '2026-08-25T23:25:00Z'
+updated: '2026-09-23T19:43:27Z'
 depends_on:
 - yaks-37be
 - yaks-b3a0
@@ -14,7 +14,6 @@ depends_on:
 - yaks-d168
 - yaks-114a
 labels:
-- ui
 - edtui
 - upstream
 ---

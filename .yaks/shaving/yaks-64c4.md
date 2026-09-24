@@ -4,7 +4,7 @@ title: 'Yak archaeology: fast retrieval of past reasoning & provenance stitching
 type: idea
 priority: 4
 created: '2026-09-09T00:38:19Z'
-updated: '2026-09-09T00:38:19Z'
+updated: '2026-09-24T01:27:07Z'
 labels:
 - cli,search
 ---

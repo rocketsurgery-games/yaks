@@ -1,10 +1,10 @@
 ---
 id: yaks-9e59
-title: Max detail with affordance
+title: Max detail width affordance
 type: feature
 priority: 3
 created: '2026-08-28T04:00:19Z'
-updated: '2026-09-23T21:40:37Z'
+updated: '2026-09-24T01:17:08Z'
 labels:
 - ui
 ---

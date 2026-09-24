@@ -93,11 +93,11 @@ pub(crate) const DETAIL_MIN_WIDTH: u16 = 48;
 /// Widest the right pane may get: past ~100 cols (divider + padding + ~95
 /// cols of text) body prose is uncomfortably long to read, so extra terminal
 /// width goes to the list instead.
-pub(crate) const DETAIL_MAX_WIDTH: u16 = 100;
+pub(crate) const DETAIL_MAX_WIDTH: u16 = 120;
 /// Narrowest useful list beside the pane (an id plus a few title words). If
 /// the clamped pane would leave less than this, the pane covers the whole
 /// main area instead (effectively modal).
-pub(crate) const LIST_MIN_WIDTH: u16 = 24;
+pub(crate) const LIST_MIN_WIDTH: u16 = 48;
 
 /// Split the main area into (list, right pane) when a right pane is shown.
 /// The pane takes `DETAIL_PCT` of the width clamped to

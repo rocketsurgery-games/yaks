@@ -4,7 +4,7 @@ title: Mouse support
 type: feature
 priority: 3
 created: '2026-08-23T21:47:18Z'
-updated: '2026-09-23T21:44:29Z'
+updated: '2026-09-24T02:14:32Z'
 labels:
 - ui
 needs: human
@@ -33,3 +33,7 @@ Done. src/tui/mouse.rs: HitMap (list rect+offset, detail content rect, tab rects
 ---
 ▸ 2026-09-23T21:44:29Z [coordinator]
 Shipped (merged to main). Two follow-up calls for you, plus please try it in a real terminal: (1) Clicking a list row while the detail is open currently focuses the list and closes the detail. Alternative: keep the detail open and show the clicked yak (my lean, since it matches J/K in detail). (2) Mouse capture blocks native text selection (Shift/Option-drag still works). Add a toggle key/config? My lean: not yet, unless it bites you. Also: back/forward mouse buttons aren't possible, because crossterm 0.29 drops buttons 8/9.
+
+---
+▸ 2026-09-24T01:06:07Z [Joel Webber]
+1. Agreed, keeping the detail open would be better. 2. Also agreed, not necessary.
