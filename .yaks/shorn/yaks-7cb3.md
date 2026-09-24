@@ -4,12 +4,11 @@ title: Parse label edits with/without commas
 type: bug
 priority: 3
 created: '2026-08-26T13:23:02Z'
-updated: '2026-09-24T02:14:30Z'
+updated: '2026-09-24T02:29:59Z'
 parent: yaks-f04d
 labels:
 - ui
 - labels
-needs: human
 ---
 
 At present, it's possible to create labels with spaces in them. We should disallow this.
@@ -52,3 +51,7 @@ Merged. One decision: 13 yaks in this farm carry comma/space labels (e.g. yaks-1
 ---
 ▸ 2026-09-24T01:04:48Z [Joel Webber]
 Yes, please fix these manually. I'm not getting anything from `yaks doctor`, and can't search for them directly in the UI.
+
+---
+▸ 2026-09-24T02:29:59Z [coordinator]
+Cleared on the human's behalf: they answered in the note above (2026-09-24T01:04Z) and confirmed in chat. Done: re-split all 13 malformed labels (yaks-139b 1a96 52eb 64c4 79a9 7d49 b716 c3b1 d4d2 d954 dce6 f433 f814) via update --add-label; the new 'yaks doctor' is all clear. Their 'nothing from doctor' was the installed v0.0.10 predating the check; the release fixes that.

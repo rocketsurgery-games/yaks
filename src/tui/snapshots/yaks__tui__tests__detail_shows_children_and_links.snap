@@ -1,20 +1,20 @@
 ---
-source: src/tui.rs
+source: src/tui/tests.rs
 expression: "draw(&app, 72, 16)"
 ---
  🦬  Hairy (3)   🪒  Shaving (0)   🐑  Shorn (0)   🕒  Recent (3)   ⭐  Starr
 
- a0   p2 task     🦬  Ro │ Task: a0
-   a1 p3 task     🦬  Ch │
-   a2 p3 task     🦬  Ch │ Title:       Root A
-                        │ Status:      hairy
-                        │ Type:        task
-                        │ Priority:    p2
-                        │ Created:     -
-                        │ Updated:     -
-                        │ Labels:      -
-                        │
-                        │ Children:
-                        │   🦬  a1  Child A1
-                        │   🦬  a2  Child A2
+◂ Task: a0
+│
+│ Title:       Root A
+│ Status:      hairy
+│ Type:        task
+│ Priority:    p2
+│ Created:     -
+│ Updated:     -
+│ Labels:      -
+│
+│ Children:
+│   🦬  a1  Child A1
+│   🦬  a2  Child A2
 h:list  j/k:move  Tab:link  Enter:follow  i/o:fwd/back  E:edit  D:dep  S

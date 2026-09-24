@@ -1,0 +1,10 @@
+--- detail open, clicked another row ---
+ 🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starred (0)                                
+
+ a0   p2 task     🦬  Root A                           │ Task: a0
+   a1 p3 task     🦬  Child A1                         │
+                                                      │ Title:       Root A
+                                                      │ Status:      hairy
+                                                      │ Type:        task
+                                                      │ Priority:    p2
+                                                      │ Created:     -

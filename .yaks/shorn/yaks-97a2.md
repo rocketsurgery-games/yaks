@@ -4,10 +4,9 @@ title: Mouse support
 type: feature
 priority: 3
 created: '2026-08-23T21:47:18Z'
-updated: '2026-09-24T02:14:32Z'
+updated: '2026-09-24T02:29:59Z'
 labels:
 - ui
-needs: human
 ---
 
 At least basic clicks; preferably scroll wheel. Bonus points for forward/back buttons.
@@ -37,3 +36,13 @@ Shipped (merged to main). Two follow-up calls for you, plus please try it in a r
 ---
 ▸ 2026-09-24T01:06:07Z [Joel Webber]
 1. Agreed, keeping the detail open would be better. 2. Also agreed, not necessary.
+
+---
+▸ 2026-09-24T02:29:59Z [coordinator]
+Cleared on the human's behalf: answered above (2026-09-24T01:06Z): (1) keep the detail open, (2) no capture toggle.
+
+![97a2-click-keeps-detail](artifacts/yaks-97a2/97a2-click-keeps-detail.txt)
+
+---
+▸ 2026-09-24T02:29:59Z [coordinator]
+Follow-up per the answer: clicking a list row while the detail is open now shows that yak in the detail and keeps it open (detail_next_task, same as J/K). Headless frame at 160 cols. Help ('Click row') and docs/tui.md updated. Also realigned the layout tests/snapshots/docshots to 47c8ef4's width constants (max 120, list min 48 → split only at ≥140 cols).

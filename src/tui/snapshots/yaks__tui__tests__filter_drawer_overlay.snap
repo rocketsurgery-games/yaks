@@ -1,20 +1,20 @@
 ---
-source: src/tui.rs
+source: src/tui/tests.rs
 expression: "draw(&app, 72, 16)"
 ---
  🦬  Hairy* (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Star
 
- b0   p1 task     🪒  Ro │ Filter
- a0   p2 task     🦬  Ro │ ▸ status    hairy shaving shorn dead
-   a1 p3 task     🦬  Ch │   type      task bug feature idea
-   a2 p3 task     🐑  Ch │   priority  p1 p2 p3 p4 p5
-                        │   labels   (any)
-                        │   search   (any)
-                        │   parent   (any)
-                        │   deps      ready tangled inbox
-                        │
-                        │
-                        │
-                        │
-                        │
+◂ Filter
+│ ▸ status    hairy shaving shorn dead
+│   type      task bug feature idea
+│   priority  p1 p2 p3 p4 p5
+│   labels   (any)
+│   search   (any)
+│   parent   (any)
+│   deps      ready tangled inbox
+│
+│
+│
+│
+│
 ↑↓/Tab rows · ←→ chips · Space toggle · C clear · Enter apply · EscEsc/C

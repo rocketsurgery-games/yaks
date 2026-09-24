@@ -5,40 +5,34 @@ text{white-space:pre}
 .b1{fill:#3a3a3a}
 .s0{fill:#1d1f21;font-weight:bold}
 .s1{opacity:.6}
-.s2{font-weight:bold;opacity:.6}
-.s3{fill:#8abeb7}
-.s4{fill:#8abeb7;font-weight:bold}
-.s5{fill:#b294bb;font-weight:bold}
-.s6{fill:#81a2be}
-.s7{fill:#f0c674}
-.s8{fill:#b294bb;opacity:.6}
-.s9{fill:#969896}
-.s10{fill:#b5bd68;font-weight:bold}
+.s2{fill:#8abeb7}
+.s3{fill:#8abeb7;font-weight:bold}
+.s4{fill:#969896}
+.s5{fill:#b5bd68;font-weight:bold}
 </style>
 <rect x="0" y="0" width="826" height="380" rx="8" fill="#1d1f21"/>
 <rect class="b0" x="10.0" y="10.0" width="17.3" height="18.0"/>
 <rect class="b0" x="35.2" y="10.0" width="92.9" height="18.0"/>
-<rect class="b1" x="10.0" y="46.0" width="277.7" height="18.0"/>
-<rect class="b1" x="404.8" y="64.0" width="42.5" height="18.0"/>
+<rect class="b1" x="127.6" y="64.0" width="42.5" height="18.0"/>
 <g fill="#c5c8c6">
 <text y="23.5"><tspan x="10.0" class="s0"> 🦬</tspan><tspan x="35.2" class="s0"> Hairy (2)</tspan><tspan x="136.0" class="s1"> 🪒</tspan><tspan x="161.2" class="s1"> Shaving (3)</tspan><tspan x="278.8" class="s1"> 🐑</tspan><tspan x="304.0" class="s1"> Shorn (1)</tspan><tspan x="404.8" class="s1"> 🕒</tspan><tspan x="430.0" class="s1"> Recent (6)</tspan><tspan x="539.2" class="s1"> ⭐</tspan><tspan x="564.4" class="s1"> Starred (0)</tspan></text>
-<text y="59.5"><tspan x="18.4" class="s1">yaks-3901</tspan><tspan x="119.2" class="s2">p1</tspan><tspan x="144.4" class="s1">task     [coord,</tspan><tspan x="287.2" class="s3">│</tspan><tspan x="304.0" class="s4">Filter</tspan></text>
-<text y="77.5"><tspan x="10.0" class="s5">*</tspan><tspan x="35.2" class="s6">yaks-70e5</tspan><tspan x="119.2" class="s7">p3</tspan><tspan x="144.4" class="s3">feature</tspan><tspan x="220.0">🦬</tspan><tspan x="245.2" class="s8">[cli]</tspan><tspan x="287.2" class="s3">│</tspan><tspan x="304.0" class="s3">▸</tspan><tspan x="320.8" class="s9">status</tspan><tspan x="404.8" class="s10">hairy</tspan><tspan x="455.2" class="s9">shaving</tspan><tspan x="522.4" class="s9">shorn</tspan><tspan x="572.8" class="s9">dead</tspan></text>
-<text y="95.5"><tspan x="18.4" class="s6">yaks-10fb</tspan><tspan x="119.2" class="s7">p3</tspan><tspan x="144.4" class="s3">idea</tspan><tspan x="228.4" class="s8">[agent]</tspan><tspan x="287.2" class="s3">│</tspan><tspan x="320.8" class="s9">type</tspan><tspan x="404.8" class="s9">task</tspan><tspan x="446.8" class="s9">bug</tspan><tspan x="480.4" class="s9">feature</tspan><tspan x="547.6" class="s9">idea</tspan></text>
-<text y="113.5"><tspan x="287.2" class="s3">│</tspan><tspan x="320.8" class="s9">priority</tspan><tspan x="404.8" class="s9">p1</tspan><tspan x="430.0" class="s9">p2</tspan><tspan x="455.2" class="s9">p3</tspan><tspan x="480.4" class="s9">p4</tspan><tspan x="505.6" class="s9">p5</tspan></text>
-<text y="131.5"><tspan x="287.2" class="s3">│</tspan><tspan x="320.8" class="s9">labels</tspan><tspan x="396.4" class="s9">(any)</tspan></text>
-<text y="149.5"><tspan x="287.2" class="s3">│</tspan><tspan x="320.8" class="s9">search</tspan><tspan x="396.4" class="s9">(any)</tspan></text>
-<text y="167.5"><tspan x="287.2" class="s3">│</tspan><tspan x="320.8" class="s9">parent</tspan><tspan x="396.4" class="s9">(any)</tspan></text>
-<text y="185.5"><tspan x="287.2" class="s3">│</tspan><tspan x="320.8" class="s9">deps</tspan><tspan x="404.8" class="s9">ready</tspan><tspan x="455.2" class="s9">tangled</tspan><tspan x="522.4" class="s9">inbox</tspan></text>
-<text y="203.5"><tspan x="287.2" class="s3">│</tspan></text>
-<text y="221.5"><tspan x="287.2" class="s3">│</tspan></text>
-<text y="239.5"><tspan x="287.2" class="s3">│</tspan></text>
-<text y="257.5"><tspan x="287.2" class="s3">│</tspan></text>
-<text y="275.5"><tspan x="287.2" class="s3">│</tspan></text>
-<text y="293.5"><tspan x="287.2" class="s3">│</tspan></text>
-<text y="311.5"><tspan x="287.2" class="s3">│</tspan></text>
-<text y="329.5"><tspan x="287.2" class="s3">│</tspan></text>
-<text y="347.5"><tspan x="287.2" class="s3">│</tspan></text>
-<text y="365.5"><tspan x="10.0" class="s9">↑↓/Tab rows · ←→ chips · Space toggle · C clear · Enter apply · EscEsc/Ctrl-C cancel</tspan></text>
+<text y="59.5"><tspan x="10.0" class="s2">◂</tspan><tspan x="26.8" class="s3">Filter</tspan></text>
+<text y="77.5"><tspan x="10.0" class="s2">│</tspan><tspan x="26.8" class="s2">▸</tspan><tspan x="43.6" class="s4">status</tspan><tspan x="127.6" class="s5">hairy</tspan><tspan x="178.0" class="s4">shaving</tspan><tspan x="245.2" class="s4">shorn</tspan><tspan x="295.6" class="s4">dead</tspan></text>
+<text y="95.5"><tspan x="10.0" class="s2">│</tspan><tspan x="43.6" class="s4">type</tspan><tspan x="127.6" class="s4">task</tspan><tspan x="169.6" class="s4">bug</tspan><tspan x="203.2" class="s4">feature</tspan><tspan x="270.4" class="s4">idea</tspan></text>
+<text y="113.5"><tspan x="10.0" class="s2">│</tspan><tspan x="43.6" class="s4">priority</tspan><tspan x="127.6" class="s4">p1</tspan><tspan x="152.8" class="s4">p2</tspan><tspan x="178.0" class="s4">p3</tspan><tspan x="203.2" class="s4">p4</tspan><tspan x="228.4" class="s4">p5</tspan></text>
+<text y="131.5"><tspan x="10.0" class="s2">│</tspan><tspan x="43.6" class="s4">labels</tspan><tspan x="119.2" class="s4">(any)</tspan></text>
+<text y="149.5"><tspan x="10.0" class="s2">│</tspan><tspan x="43.6" class="s4">search</tspan><tspan x="119.2" class="s4">(any)</tspan></text>
+<text y="167.5"><tspan x="10.0" class="s2">│</tspan><tspan x="43.6" class="s4">parent</tspan><tspan x="119.2" class="s4">(any)</tspan></text>
+<text y="185.5"><tspan x="10.0" class="s2">│</tspan><tspan x="43.6" class="s4">deps</tspan><tspan x="127.6" class="s4">ready</tspan><tspan x="178.0" class="s4">tangled</tspan><tspan x="245.2" class="s4">inbox</tspan></text>
+<text y="203.5"><tspan x="10.0" class="s2">│</tspan></text>
+<text y="221.5"><tspan x="10.0" class="s2">│</tspan></text>
+<text y="239.5"><tspan x="10.0" class="s2">│</tspan></text>
+<text y="257.5"><tspan x="10.0" class="s2">│</tspan></text>
+<text y="275.5"><tspan x="10.0" class="s2">│</tspan></text>
+<text y="293.5"><tspan x="10.0" class="s2">│</tspan></text>
+<text y="311.5"><tspan x="10.0" class="s2">│</tspan></text>
+<text y="329.5"><tspan x="10.0" class="s2">│</tspan></text>
+<text y="347.5"><tspan x="10.0" class="s2">│</tspan></text>
+<text y="365.5"><tspan x="10.0" class="s4">↑↓/Tab rows · ←→ chips · Space toggle · C clear · Enter apply · EscEsc/Ctrl-C cancel</tspan></text>
 </g>
 </svg>

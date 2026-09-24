@@ -4,9 +4,10 @@ title: 'Bug: yaks attach writes to gitignored .yaks/artifacts -> team-mode attac
 type: bug
 priority: 2
 created: '2026-09-08T22:46:23Z'
-updated: '2026-09-08T22:56:14Z'
+updated: '2026-09-24T02:28:06Z'
 labels:
-- cli,git
+- cli
+- git
 verify: '! git check-ignore .yaks/artifacts/yaks-52eb/tui-list.svg'
 ---
 

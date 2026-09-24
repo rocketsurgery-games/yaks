@@ -4,15 +4,15 @@ expression: "draw(&app, 72, 14)"
 ---
  🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starr
 
- a0   p2 task     🦬  Ro │ Go to yak  (1 matches)
-   a1 p3 task     🦬  Ch │ 🪒   b0 Root B shaving
-                        │
-                        │
-                        │
-                        │
-                        │
-                        │
-                        │
-                        │
-                        │
+◂ Go to yak  (1 matches)
+│ 🪒   b0 Root B shaving
+│
+│
+│
+│
+│
+│
+│
+│
+│
 search: b0

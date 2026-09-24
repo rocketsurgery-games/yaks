@@ -13,8 +13,9 @@ interchangeable.
 - **Detail pane** — the selected yak: fields, parent/deps/children, source, a
   `Needs:` line when blocked, and the body + timestamped notes. Task-id
   references and URLs in the body are followable links. It (and every
-  right-side overlay) takes ~⅔ of the width, clamped to 48–100 columns; the
-  list gets the rest. When that would leave the list under 24 columns, the
+  right-side overlay) takes ~⅔ of the width, clamped to 48–120 columns; the
+  list gets the rest. When that would leave the list under 48 columns (a
+  terminal narrower than ~140), the
   pane covers the whole main area and its divider is tipped with `◂` — the
   list is behind it; `h`/`Esc` returns to it.
 - **Filter drawer** (`f`) — toggle status / type / priority chips, a label and
@@ -95,7 +96,7 @@ active view.
 **Mouse** — the wheel scrolls the pane under the pointer (over the list it moves
 the selection; over the detail it scrolls, or with the detail open, the list
 wheel steps tasks like `J`/`K`). Left-click a row to select it (click it again to
-open the detail), click a detail line to put the cursor there (click it again to
+open the detail; with the detail open, a click shows that row's yak and keeps it open), click a detail line to put the cursor there (click it again to
 follow its link), and click a tab to switch view. The mouse is ignored while an
 overlay (editor, picker, drawer, help) is open. Mouse back/forward buttons aren't
 supported — the terminal library (crossterm) drops those buttons — so use `o`/`i`.

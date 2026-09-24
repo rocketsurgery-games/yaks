@@ -1,20 +1,20 @@
 ---
-source: src/tui.rs
+source: src/tui/tests.rs
 expression: "draw(&app, 72, 16)"
 ---
  🦬  Hairy (2)   🪒  Shaving (1)   🐑  Shorn (1)   🕒  Recent (4)   ⭐  Starr
 
- a0   p2 task     🦬  Ro │ Help — keys
-   a1 p3 task     🦬  Ch │ Movement
-                        │   j / k  ↓ / ↑  Move cursor
-                        │   d / u         Half-page down / up
-                        │   PgDn / PgUp   Full-page down / up
-                        │   g / G         Top / bottom
-                        │
-                        │ List pane
-                        │   Tab / S-Tab   Next / previous view
-                        │   [ / ]         Previous / next view
-                        │   l / → / Enter Show detail pane
-                        │   Space         Collapse / expand subtree
-                        │   m             Mark / unmark row (multi-sele
+◂ Help — keys
+│ Movement
+│   j / k  ↓ / ↑  Move cursor
+│   d / u         Half-page down / up
+│   PgDn / PgUp   Full-page down / up
+│   g / G         Top / bottom
+│
+│ List pane
+│   Tab / S-Tab   Next / previous view
+│   [ / ]         Previous / next view
+│   l / → / Enter Show detail pane
+│   Space         Collapse / expand subtree
+│   m             Mark / unmark row (multi-select)
 j/k scroll · d/u page · g/G top/bottom · ?/q/Esc close

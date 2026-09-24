@@ -4,10 +4,11 @@ title: 'Prototype: lean LLM-parseable SVG for TUI docshots (classes + inheritanc
 type: task
 priority: 4
 created: '2026-09-09T02:29:07Z'
-updated: '2026-09-09T04:54:54Z'
+updated: '2026-09-24T02:28:06Z'
 parent: yaks-89b9
 labels:
-- ui,docs
+- ui
+- docs
 ---
 
 Spike under yaks-1a96 side-quest. Refactor svg_of in src/tui/docshots.rs to cut bloat: (1) <style> class block for palette+modifiers, (2) hoist font-family/size/lengthAdjust/xml:space to root via inheritance, (3) coalesce contiguous same-bg cells into one <rect> per run, (4) one <text> per row with <tspan> only on style change + explicit per-run x (keep column pinning; avoid risky row-level textLength given mid-row emoji). Goal: feel out byte savings + whether the SVG source reads row-by-row for direct LLM parsing. Verify by driving docshots and eyeballing rendered frame + diffing bytes/element counts.

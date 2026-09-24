@@ -4,10 +4,11 @@ title: Evidence over assertion -> rerunnable artifact
 type: task
 priority: 3
 created: '2026-09-08T00:50:52Z'
-updated: '2026-09-08T03:33:56Z'
+updated: '2026-09-24T02:28:06Z'
 parent: yaks-a2ca
 labels:
-- skills,eval
+- skills
+- eval
 verify: cargo test -p yaks doctor
 ---
 

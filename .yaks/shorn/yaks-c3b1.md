@@ -4,10 +4,12 @@ title: Per-repo context names the project's verification lever(s)
 type: feature
 priority: 2
 created: '2026-09-08T01:32:42Z'
-updated: '2026-09-08T22:13:47Z'
+updated: '2026-09-24T02:28:06Z'
 parent: yaks-6624
 labels:
-- agent,config,eval
+- agent
+- config
+- eval
 verify: cargo test -p yaks config
 ---
 

@@ -83,12 +83,16 @@ impl App {
     }
 
     /// Click on list row `i`: select it and focus the list; clicking the row
-    /// that is already selected opens it in the detail pane (like Enter).
+    /// that is already selected opens it in the detail pane (like Enter). With
+    /// the detail already open, a click shows that row's yak in the detail and
+    /// keeps it open (like `J`/`K`).
     fn click_list_row(&mut self, i: usize) {
         if i >= self.rows().len() {
             return;
         }
-        if i == self.cursor && self.focus == Focus::List {
+        if self.focus == Focus::Detail {
+            self.detail_next_task(i as i32 - self.cursor as i32);
+        } else if i == self.cursor {
             self.focus = Focus::Detail;
             self.detail_scroll = 0;
             self.detail_line = 0;
@@ -97,7 +101,6 @@ impl App {
             self.detail_match = 0;
         } else {
             self.cursor = i;
-            self.focus = Focus::List;
         }
     }
 
@@ -191,6 +194,17 @@ mod tests {
         // A second click on the selected row opens it in the detail pane.
         click(&mut app, 3, y);
         assert_eq!(app.focus, Focus::Detail);
+        // With the detail open (wide enough that the list shows beside it),
+        // clicking another row shows that yak in the detail and keeps it open.
+        let frame = draw(&app, 160, 10);
+        let y0 = row_of(&frame, "Root A");
+        click(&mut app, 3, y0);
+        assert_eq!(app.focus, Focus::Detail);
+        assert_eq!(app.selected_id().as_deref(), Some("a0"));
+        println!(
+            "--- detail open, clicked another row ---\n{}",
+            draw(&app, 160, 10)
+        );
         // Clicking past the last row is a no-op.
         let mut app2 = sample();
         draw(&app2, 60, 10);

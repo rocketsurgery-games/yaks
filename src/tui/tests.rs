@@ -2769,15 +2769,14 @@ fn main_split_clamps_detail_width_and_goes_modal_when_narrow() {
         assert_eq!(r.x, l.width, "pane starts where the list ends at {w}");
         (l.width, r.width)
     };
-    // Unclamped: the historical 34/66 split, column-for-column.
-    assert_eq!(at(80), (27, 53));
-    assert_eq!(at(140), (48, 92));
+    // Narrowest split: the list just reaches LIST_MIN_WIDTH beside a 66% pane.
+    assert_eq!(at(140), (LIST_MIN_WIDTH, 92));
     // Clamped at the max: extra width goes to the list.
+    assert_eq!(at(200), (200 - DETAIL_MAX_WIDTH, DETAIL_MAX_WIDTH));
     assert_eq!(at(220), (220 - DETAIL_MAX_WIDTH, DETAIL_MAX_WIDTH));
-    // Clamped at the min, list still usable.
-    assert_eq!(at(72), (24, 48));
-    // Min pane would starve the list: the pane covers everything (modal).
-    assert_eq!(at(71), (0, 71));
+    // Below that the list would be starved: the pane covers everything (modal).
+    assert_eq!(at(139), (0, 139));
+    assert_eq!(at(80), (0, 80));
     assert_eq!(at(40), (0, 40));
 }
 
@@ -2786,7 +2785,7 @@ fn modal_detail_shows_back_affordance_only_when_covering_the_list() {
     let mut app = sample();
     handle_key(&mut app, key('l'));
     assert_eq!(app.focus, Focus::Detail);
-    let wide = draw(&app, 80, 12);
+    let wide = draw(&app, 160, 12);
     assert!(
         !wide.contains('\u{25c2}'),
         "split view has no chevron:\n{wide}"

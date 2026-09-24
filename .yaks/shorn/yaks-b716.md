@@ -4,9 +4,10 @@ title: Normal-mode j/k navigates between fields in single-line editors
 type: feature
 priority: 3
 created: '2026-08-28T04:51:36Z'
-updated: '2026-08-28T04:58:16Z'
+updated: '2026-09-24T02:28:06Z'
 labels:
-- ui,editing
+- ui
+- editing
 ---
 
 Follow-up polish to yaks-efa9. In a single-line field in vim Normal mode, j/k do nothing (one line, no vertical motion). Repurpose them to move to the prev/next field/row, exactly like Tab / Ctrl-N/P already do for non-editor (chip) rows -- so form and drawer navigation feels vi-native. Applies to: create/edit form single-line rows (title/labels), filter drawer text rows (labels/search/parent), and the fuzzy picker query (j/k move the result selection). Insert mode still types j/k. Multiline content blocks keep j/k as line motion.

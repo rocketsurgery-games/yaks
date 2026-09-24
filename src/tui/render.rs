@@ -90,7 +90,7 @@ pub(crate) const DETAIL_PCT: u16 = 66;
 /// a note header (`▸ <RFC3339> [author]` ≈ 36 cols) and a ~45-col prose line
 /// all still fit without awkward wrapping.
 pub(crate) const DETAIL_MIN_WIDTH: u16 = 48;
-/// Widest the right pane may get: past ~100 cols (divider + padding + ~95
+/// Widest the right pane may get: past ~120 cols (divider + padding + ~115
 /// cols of text) body prose is uncomfortably long to read, so extra terminal
 /// width goes to the list instead.
 pub(crate) const DETAIL_MAX_WIDTH: u16 = 120;
@@ -262,7 +262,10 @@ pub(crate) fn help_content() -> Vec<Line<'static>> {
         blank(),
         section("Mouse"),
         entry("Wheel", "Scroll the pane under the pointer"),
-        entry("Click row", "Select (again: open detail)"),
+        entry(
+            "Click row",
+            "Select (again: open detail; detail stays open)",
+        ),
         entry("Click detail", "Move line cursor (again: follow link)"),
         entry("Click tab", "Switch view"),
         entry("Shift-drag", "Native text selection (terminal)"),
